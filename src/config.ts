@@ -5,7 +5,8 @@ export const PORT = process.env.PORT || 3002;
 export const NODE_ENV = process.env.NODE_ENV || "development";
 
 export const ACCESS_TOKEN_SECRET = process.env.JWT_SECRET || "access-secret";
-export const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET || "refresh-secret";
+export const REFRESH_TOKEN_SECRET =
+  process.env.JWT_REFRESH_SECRET || "refresh-secret";
 export const ACCESS_TOKEN_EXPIRY = process.env.JWT_EXPIRY || "1d";
 export const REFRESH_TOKEN_EXPIRY = "7d";
 
@@ -14,6 +15,20 @@ export const DATABASE_URL = process.env.DATABASE_URL;
 export const REDIS_HOST = process.env.REDIS_HOST || "localhost";
 export const REDIS_PORT = parseInt(process.env.REDIS_PORT || "6379");
 export const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
-export const REDIS_TTL_SECONDS = parseInt(process.env.REDIS_TTL_SECONDS || "3600");
+export const REDIS_TTL_SECONDS = parseInt(
+  process.env.REDIS_TTL_SECONDS || "3600",
+);
+export const REDIS_TLS = process.env.REDIS_TLS === "true";
+export const WORKER_HEALTH_PORT = parseInt(
+  process.env.WORKER_HEALTH_PORT || "8080",
+);
+
+export const RABBITMQ_URL =
+  process.env.RABBITMQ_URL || "amqp://guest:guest@localhost:5672";
+
+export const SMTP_HOST = process.env.SMTP_HOST || "smtp.ethereal.email";
+export const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587");
+export const SMTP_USER = process.env.SMTP_USER || "";
+export const SMTP_PASS = process.env.SMTP_PASS || "";
 
 export const isDev = NODE_ENV === "development";

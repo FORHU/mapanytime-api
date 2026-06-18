@@ -4,6 +4,7 @@ import AuthRepo from "../repositories/auth.repository";
 import { ACCESS_TOKEN_SECRET } from "../config";
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       user?: any;

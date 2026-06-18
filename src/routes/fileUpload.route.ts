@@ -9,7 +9,9 @@ router.post("/upload", upload.single("file"), (req, res) => {
     return res.status(400).json({ message: "No file uploaded" });
   }
 
-  logger.info(`File uploaded: ${req.file.originalname} (${req.file.size} bytes)`);
+  logger.info(
+    `File uploaded: ${req.file.originalname} (${req.file.size} bytes)`,
+  );
 
   res.json({
     message: "File uploaded successfully",

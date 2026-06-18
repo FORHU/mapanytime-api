@@ -19,7 +19,9 @@ export default class AuthController {
 
     try {
       const data = await AuthSvc.register(value);
-      return res.status(201).json({ message: "User created successfully", data });
+      return res
+        .status(201)
+        .json({ message: "User created successfully", data });
     } catch (error) {
       next(error);
     }

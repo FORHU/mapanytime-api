@@ -1,5 +1,4 @@
-import { prisma } from '../utils/prisma';
-import { UserRole } from '@prisma/client';
+import { prisma } from "../utils/prisma";
 
 export default class UserRepository {
   /**
@@ -59,7 +58,7 @@ export default class UserRepository {
         where: { isDeleted: false },
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
       }),
       prisma.user.count({ where: { isDeleted: false } }),
     ]);

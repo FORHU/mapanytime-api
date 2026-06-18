@@ -21,9 +21,13 @@ export default class AuthSvc {
     name?: string;
   }) {
     // Check if user already exists
-    const existingUser = await AuthRepo.findUserByEmailOrUsername(data.email, data.username);
+    const existingUser = await AuthRepo.findUserByEmailOrUsername(
+      data.email,
+      data.username,
+    );
     if (existingUser) {
-      if (existingUser.email === data.email) throw { status: 400, message: "User with this email already exists" };
+      if (existingUser.email === data.email)
+        throw { status: 400, message: "User with this email already exists" };
       throw { status: 400, message: "Username is already taken" };
     }
 
@@ -43,7 +47,7 @@ export default class AuthSvc {
     });
 
     logger.info(`User registered: ${user.email}`);
-    
+
     return this.generateAuthResponse(user, "local");
   }
 
@@ -54,17 +58,20 @@ export default class AuthSvc {
     const user = await AuthRepo.findUserByEmail(data.email);
     if (!user) throw { status: 401, message: "Invalid credentials" };
 
-    if (!user.password) throw { status: 401, message: "Account uses social login" };
+    if (!user.password)
+      throw { status: 401, message: "Account uses social login" };
 
     // Verify password
     const [salt, storedHash] = user.password.split(":");
-    if (!salt || !storedHash) throw { status: 500, message: "Invalid password format" };
+    if (!salt || !storedHash)
+      throw { status: 500, message: "Invalid password format" };
 
     const hash = crypto
       .pbkdf2Sync(data.password, salt, 1000, 64, "sha512")
       .toString("hex");
 
-    if (storedHash !== hash) throw { status: 401, message: "Invalid credentials" };
+    if (storedHash !== hash)
+      throw { status: 401, message: "Invalid credentials" };
 
     // Update login status and return response
     const updatedUser = await AuthRepo.updateUserLoginStatus(user.id);
@@ -76,9 +83,11 @@ export default class AuthSvc {
    */
   static async refreshToken(refreshToken: string) {
     try {
-      const decoded = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET) as { userId: string };
+      const decoded = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET) as {
+        userId: string;
+      };
       const session = await AuthRepo.findValidSession(refreshToken);
-      
+
       if (!session) throw { status: 401, message: "Invalid refresh token" };
 
       const user = await AuthRepo.findUserById(decoded.userId);
@@ -127,7 +136,7 @@ export default class AuthSvc {
     const refreshToken = jwt.sign(
       { userId: user.id, jti: crypto.randomBytes(16).toString("hex") },
       REFRESH_TOKEN_SECRET,
-      { expiresIn: REFRESH_TOKEN_EXPIRY }
+      { expiresIn: REFRESH_TOKEN_EXPIRY },
     );
 
     await AuthRepo.createSession({

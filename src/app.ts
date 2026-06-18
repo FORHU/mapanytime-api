@@ -6,10 +6,16 @@ import { isDev } from "./config";
 import setup from "./setup";
 import cors from "cors";
 import { errorHandler } from "./middleware/error.middleware";
+import { correlationMiddleware } from "./middleware/correlation.middleware";
+import swaggerUi from "swagger-ui-express";
+import { swaggerSpec } from "./utils/swagger";
 
 const app = express();
 
 app.set("trust proxy", 1);
+
+// Assign correlationId + requestId to every request (must be first)
+app.use(correlationMiddleware);
 
 app.use(
   cors({
@@ -33,8 +39,20 @@ if (!isDev) app.use(limiter);
 app.use(helmet());
 app.disable("x-powered-by");
 
-// Use router for routing
+// API Routes
 app.use("/api", router);
+
+// Swagger UI — available at http://localhost:PORT/api/docs (dev only)
+if (isDev) {
+  app.use(
+    "/api/docs",
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerSpec, {
+      customSiteTitle: "Node.js API Docs",
+      customCss: ".swagger-ui .topbar { display: none }",
+    }),
+  );
+}
 
 // Error Handling
 app.use(errorHandler);

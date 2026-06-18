@@ -20,11 +20,13 @@ services:
     depends_on:
       - db
       - redis
+      - rabbitmq
     env_file:
       - .env
     environment:
       - DATABASE_URL=postgresql://user:password@db:5432/node_postg_db?schema=public
       - REDIS_HOST=redis
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
 
   redis:
     image: redis:7-alpine
@@ -34,6 +36,20 @@ services:
     volumes:
       - redis_data:/data
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
 volumes:
   postgres_data:
   redis_data:
+  rabbitmq_data:
