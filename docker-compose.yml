@@ -1,55 +1,66 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:15-alpine
     restart: always
     environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=node_postg_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - '5432:5432'
+      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
-  api:
-    build: .
-    ports:
-      - '3002:3002'
-    depends_on:
-      - db
-      - redis
-      - rabbitmq
-    env_file:
-      - .env
-    environment:
-      - DATABASE_URL=postgresql://user:password@db:5432/node_postg_db?schema=public
-      - REDIS_HOST=redis
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
 
   redis:
     image: redis:7-alpine
     restart: always
     ports:
-      - '6379:6379'
+      - '${REDIS_PORT:-6379}:6379'
     volumes:
       - redis_data:/data
 
-  rabbitmq:
-    image: rabbitmq:3-management
-    container_name: rabbitmq
-    restart: unless-stopped
+  redis-insight:
+    image: redis/redisinsight:latest
+    restart: always
     ports:
-      - '5672:5672'
-      - '15672:15672'
+      - '${REDIS_INSIGHT_PORT:-5540}:5540'
+    volumes:
+      - redis-insight_data:/data
+    depends_on:
+      - redis
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: always
+    ports:
+      - '${RABBITMQ_PORT:-5672}:5672'
+      - '${RABBITMQ_MANAGEMENT_PORT:-15672}:15672'
     environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+
+  app:
+    build: .
+    restart: always
+    ports:
+      - '${PORT:-3002}:${PORT:-3002}'
+    env_file:
+      - .env
+    # Override the localhost-based URLs from .env so the container reaches
+    # the other services by their compose service names instead of itself.
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      REDIS_HOST: redis
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+    depends_on:
+      - db
+      - redis
+      - rabbitmq
 
 volumes:
   postgres_data:
   redis_data:
+  redis-insight_data:
   rabbitmq_data:
