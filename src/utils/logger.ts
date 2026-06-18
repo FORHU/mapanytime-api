@@ -1,5 +1,5 @@
-import winston from "winston";
-import { getContext } from "./async-context";
+import winston from 'winston';
+import { getContext } from './async-context';
 
 const levels = {
   error: 0,
@@ -10,16 +10,16 @@ const levels = {
 };
 
 const level = () => {
-  const env = process.env.NODE_ENV || "development";
-  return env === "development" ? "debug" : "info";
+  const env = process.env.NODE_ENV || 'development';
+  return env === 'development' ? 'debug' : 'info';
 };
 
 const colors = {
-  error: "red",
-  warn: "yellow",
-  info: "green",
-  http: "magenta",
-  debug: "white",
+  error: 'red',
+  warn: 'yellow',
+  info: 'green',
+  http: 'magenta',
+  debug: 'white',
 };
 
 winston.addColors(colors);
@@ -36,11 +36,11 @@ const addContext = winston.format((info) => {
 
 // Development: colorized, human-readable with IDs appended
 const devFormat = winston.format.combine(
-  winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss:ms" }),
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
   addContext(),
   winston.format.colorize({ all: true }),
   winston.format.printf((info) => {
-    const idStr = info.correlationId ? ` [corr:${info.correlationId}]` : "";
+    const idStr = info.correlationId ? ` [corr:${info.correlationId}]` : '';
     return `${info.timestamp} ${info.level}${idStr}: ${info.message}`;
   }),
 );
@@ -52,15 +52,15 @@ const prodFormat = winston.format.combine(
   winston.format.json(),
 );
 
-const format = process.env.NODE_ENV === "production" ? prodFormat : devFormat;
+const format = process.env.NODE_ENV === 'production' ? prodFormat : devFormat;
 
 const transports = [
   new winston.transports.Console(),
   new winston.transports.File({
-    filename: "logs/error.log",
-    level: "error",
+    filename: 'logs/error.log',
+    level: 'error',
   }),
-  new winston.transports.File({ filename: "logs/all.log" }),
+  new winston.transports.File({ filename: 'logs/all.log' }),
 ];
 
 const logger = winston.createLogger({

@@ -1,35 +1,35 @@
-import { PrismaClient, UserRole } from "@prisma/client";
-import crypto from "crypto";
+import { PrismaClient, UserRole } from '@prisma/client';
+import crypto from 'crypto';
 
 /**
  * Seeds initial users with PBKDF2 hashed passwords
  */
 export async function seedUsers(prisma: PrismaClient) {
-  console.log("🌱 Seeding Users...");
+  console.log('🌱 Seeding Users...');
 
   const users = [
     {
-      email: "admin@example.com",
-      username: "admin",
-      name: "System Admin",
+      email: 'admin@example.com',
+      username: 'admin',
+      name: 'System Admin',
       role: UserRole.SUPER_ADMIN,
-      password: "Password123!",
+      password: 'Password123!',
       isEmailVerified: true,
     },
     {
-      email: "dev@example.com",
-      username: "developer",
-      name: "Lead Developer",
+      email: 'dev@example.com',
+      username: 'developer',
+      name: 'Lead Developer',
       role: UserRole.DEVELOPER,
-      password: "Password123!",
+      password: 'Password123!',
       isEmailVerified: true,
     },
     {
-      email: "user@example.com",
-      username: "user1",
-      name: "Regular User",
+      email: 'user@example.com',
+      username: 'user1',
+      name: 'Regular User',
       role: UserRole.USER,
-      password: "Password123!",
+      password: 'Password123!',
       isEmailVerified: true,
     },
   ];
@@ -44,10 +44,8 @@ export async function seedUsers(prisma: PrismaClient) {
 
     if (!existingUser) {
       // Hash password using the same method as AuthSvc
-      const salt = crypto.randomBytes(16).toString("hex");
-      const hash = crypto
-        .pbkdf2Sync(password, salt, 1000, 64, "sha512")
-        .toString("hex");
+      const salt = crypto.randomBytes(16).toString('hex');
+      const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
       const hashedPassword = `${salt}:${hash}`;
 
       await prisma.user.create({

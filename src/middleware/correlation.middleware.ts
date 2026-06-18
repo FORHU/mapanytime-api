@@ -1,6 +1,6 @@
-import { Request, Response, NextFunction } from "express";
-import { v4 as uuidv4 } from "uuid";
-import { asyncLocalStorage } from "../utils/async-context";
+import { Request, Response, NextFunction } from 'express';
+import { v4 as uuidv4 } from 'uuid';
+import { asyncLocalStorage } from '../utils/async-context';
 
 /**
  * Correlation Middleware
@@ -17,18 +17,13 @@ import { asyncLocalStorage } from "../utils/async-context";
  * Both IDs are injected into AsyncLocalStorage so all logger calls downstream
  * automatically include them — without needing to pass req objects around.
  */
-export const correlationMiddleware = (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
+export const correlationMiddleware = (req: Request, res: Response, next: NextFunction) => {
   const requestId = uuidv4();
-  const correlationId =
-    (req.headers["x-correlation-id"] as string) || requestId;
+  const correlationId = (req.headers['x-correlation-id'] as string) || requestId;
 
   // Echo both IDs back in the response headers for client traceability
-  res.setHeader("x-request-id", requestId);
-  res.setHeader("x-correlation-id", correlationId);
+  res.setHeader('x-request-id', requestId);
+  res.setHeader('x-correlation-id', correlationId);
 
   asyncLocalStorage.run({ requestId, correlationId }, () => {
     next();

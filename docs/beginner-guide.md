@@ -30,12 +30,12 @@ Don't worry — you don't need to use all of this on day one. Start with the bas
 
 ### If you're adding a new feature (e.g., "Products"):
 
-| File to create | Purpose |
-|---|---|
-| `src/controllers/product.controller.ts` | Handle HTTP requests |
-| `src/services/product.service.ts` | Business logic |
-| `src/repositories/product.repository.ts` | Database queries |
-| `src/routes/product.route.ts` | URL routing |
+| File to create                           | Purpose              |
+| ---------------------------------------- | -------------------- |
+| `src/controllers/product.controller.ts`  | Handle HTTP requests |
+| `src/services/product.service.ts`        | Business logic       |
+| `src/repositories/product.repository.ts` | Database queries     |
+| `src/routes/product.route.ts`            | URL routing          |
 
 Then register the route in `src/routes/index.ts`:
 
@@ -60,6 +60,7 @@ Follow the `user` pattern exactly — it's already set up as the reference imple
 ### Controllers — keep them thin
 
 ❌ Don't do this:
+
 ```typescript
 // BAD: business logic in controller
 static async create(req, res) {
@@ -71,6 +72,7 @@ static async create(req, res) {
 ```
 
 ✅ Do this instead:
+
 ```typescript
 // GOOD: controller just calls service and returns response
 static async create(req: Request, res: Response, next: NextFunction) {
@@ -124,17 +126,17 @@ static async create(data: CreateUserDto) {
 Always use the response helpers — never call `res.json()` directly.
 
 ```typescript
-import { responseSuccess, responseError } from "../helpers/response.helper";
+import { responseSuccess, responseError } from '../helpers/response.helper';
 
 // Success
-return responseSuccess(res, 200, user);             // 200 with data
-return responseSuccess(res, 201, newUser, "Done");   // 201 with message
+return responseSuccess(res, 200, user); // 200 with data
+return responseSuccess(res, 201, newUser, 'Done'); // 201 with message
 return responseSuccess(res, 200, buildPage(items, total, { page, limit })); // paginated
 
 // Error
-return responseError(res, 400, "Validation failed");
-return responseError(res, 404, "User not found");
-return responseError(res, 409, "Email taken", { code: "EMAIL_CONFLICT" });
+return responseError(res, 400, 'Validation failed');
+return responseError(res, 404, 'User not found');
+return responseError(res, 409, 'Email taken', { code: 'EMAIL_CONFLICT' });
 ```
 
 ---
@@ -142,10 +144,10 @@ return responseError(res, 409, "Email taken", { code: "EMAIL_CONFLICT" });
 ## Throwing Errors from Services
 
 ```typescript
-import { throwResponse } from "../utils/throw-response";
+import { throwResponse } from '../utils/throw-response';
 
 // The global error middleware catches this and formats it as JSON automatically
-throwResponse(404, "User not found");
+throwResponse(404, 'User not found');
 throwResponse(403, "You don't have permission");
 ```
 
@@ -156,7 +158,7 @@ throwResponse(403, "You don't have permission");
 Add pagination to any list endpoint in 3 lines:
 
 ```typescript
-import { parsePagination, buildPage } from "../helpers/pagination.helper";
+import { parsePagination, buildPage } from '../helpers/pagination.helper';
 
 const { page, limit, skip } = parsePagination(req.query);
 const [items, total] = await Promise.all([
@@ -175,14 +177,10 @@ Clients can pass `?page=2&limit=10&sortBy=createdAt&sortOrder=desc&search=shoe` 
 Wrap any slow database call with `CacheUtil.remember()`:
 
 ```typescript
-import CacheUtil from "../utils/cache.util";
+import CacheUtil from '../utils/cache.util';
 
 // Checks Redis first. If miss, runs the function and caches result for 5 minutes.
-const user = await CacheUtil.remember(
-  `user:${id}`,
-  300,
-  () => UserRepository.findById(id)
-);
+const user = await CacheUtil.remember(`user:${id}`, 300, () => UserRepository.findById(id));
 ```
 
 If Redis is down, the function still runs normally — the cache never blocks you.
@@ -194,9 +192,9 @@ If Redis is down, the function still runs normally — the cache never blocks yo
 The `authMiddleware` is already set up. Protect a route like this:
 
 ```typescript
-import { authMiddleware } from "../middleware/auth.middleware";
+import { authMiddleware } from '../middleware/auth.middleware';
 
-router.get("/me", authMiddleware, UserController.getMe);
+router.get('/me', authMiddleware, UserController.getMe);
 ```
 
 Inside the controller, the authenticated user is available on `req.user`:
@@ -239,6 +237,7 @@ No. You can build a complete CRUD API without touching RabbitMQ. Add events when
 Create `src/types/` and define your DTOs and interfaces there.
 
 **Q: How do I add a new environment variable?**
+
 1. Add it to `.env.example` with a comment
 2. Export it from `src/config.ts`
 3. Import it where needed — never use `process.env` directly outside `config.ts`

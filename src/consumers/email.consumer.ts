@@ -1,8 +1,8 @@
-import nodemailer from "nodemailer";
-import { rabbitmq } from "../infrastructure/rabbitmq";
-import { ROUTING_KEYS } from "../events/routing-keys";
-import logger from "../utils/logger";
-import { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } from "../config";
+import nodemailer from 'nodemailer';
+import { rabbitmq } from '../infrastructure/rabbitmq';
+import { ROUTING_KEYS } from '../events/routing-keys';
+import logger from '../utils/logger';
+import { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } from '../config';
 
 interface EmailPayload {
   userId: string;
@@ -23,7 +23,7 @@ const transporter = nodemailer.createTransport({
 });
 
 export const startEmailConsumer = async () => {
-  const QUEUE_NAME = "email.queue";
+  const QUEUE_NAME = 'email.queue';
 
   await rabbitmq.consume<EmailPayload>(
     QUEUE_NAME,
@@ -44,16 +44,13 @@ export const startEmailConsumer = async () => {
         );
 
         // Ethereal specific - output URL to view the message
-        if (SMTP_HOST.includes("ethereal")) {
+        if (SMTP_HOST.includes('ethereal')) {
           logger.info(
             `[EmailConsumer] Ethereal Preview URL: ${nodemailer.getTestMessageUrl(info)}`,
           );
         }
       } catch (error) {
-        logger.error(
-          `[EmailConsumer] Failed to send email to ${payload.email}`,
-          error,
-        );
+        logger.error(`[EmailConsumer] Failed to send email to ${payload.email}`, error);
         throw error; // Throwing triggers the RabbitMQ retry and DLQ logic
       }
     },

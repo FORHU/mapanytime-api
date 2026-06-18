@@ -44,7 +44,7 @@ export interface PaginationParams {
   limit: number;
   skip: number;
   sortBy?: string;
-  sortOrder?: "asc" | "desc";
+  sortOrder?: 'asc' | 'desc';
   search?: string;
   filters?: Record<string, unknown>;
 }
@@ -56,7 +56,7 @@ export interface PageResult<T> {
   limit: number;
   totalPages: number;
   sortBy?: string;
-  sortOrder?: "asc" | "desc";
+  sortOrder?: 'asc' | 'desc';
   search?: string;
   filters?: Record<string, unknown>;
 }
@@ -77,27 +77,23 @@ export function parsePagination(
   const rawLimit = parseInt(String(query?.limit), 10);
 
   const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : defPage;
-  const limit =
-    Number.isFinite(rawLimit) && rawLimit > 0
-      ? Math.min(rawLimit, maxLimit)
-      : defLimit;
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, maxLimit) : defLimit;
 
   let sortBy: string | undefined;
-  let sortOrder: "asc" | "desc" | undefined;
+  let sortOrder: 'asc' | 'desc' | undefined;
   let search: string | undefined;
   const filters: Record<string, unknown> = {};
 
   if (query) {
     for (const [key, value] of Object.entries(query)) {
-      if (key === "sortBy") {
+      if (key === 'sortBy') {
         sortBy = String(value);
-      } else if (key === "sortOrder") {
+      } else if (key === 'sortOrder') {
         const lower = String(value).toLowerCase();
-        sortOrder =
-          lower === "desc" ? "desc" : lower === "asc" ? "asc" : undefined;
-      } else if (key === "search") {
+        sortOrder = lower === 'desc' ? 'desc' : lower === 'asc' ? 'asc' : undefined;
+      } else if (key === 'search') {
         search = String(value);
-      } else if (key !== "page" && key !== "limit") {
+      } else if (key !== 'page' && key !== 'limit') {
         filters[key] = value;
       }
     }
@@ -124,7 +120,7 @@ export function buildPage<T>(
     page: number;
     limit: number;
     sortBy?: string;
-    sortOrder?: "asc" | "desc";
+    sortOrder?: 'asc' | 'desc';
     search?: string;
     filters?: Record<string, unknown>;
   },
@@ -155,7 +151,7 @@ export function pageFromRepo<T>(result: {
   limit: number;
   totalPages?: number;
   sortBy?: string;
-  sortOrder?: "asc" | "desc";
+  sortOrder?: 'asc' | 'desc';
   search?: string;
   filters?: Record<string, unknown>;
 }): PageResult<T> {

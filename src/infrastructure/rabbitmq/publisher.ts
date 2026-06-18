@@ -1,8 +1,8 @@
-import { v4 as uuidv4 } from "uuid";
-import { rabbitConnection } from "./connection";
-import { APP_EXCHANGE } from "./exchanges";
-import { getContext } from "../../utils/async-context";
-import logger from "../../utils/logger";
+import { v4 as uuidv4 } from 'uuid';
+import { rabbitConnection } from './connection';
+import { APP_EXCHANGE } from './exchanges';
+import { getContext } from '../../utils/async-context';
+import logger from '../../utils/logger';
 
 export interface EventMetadata {
   eventId: string;
@@ -28,7 +28,7 @@ export interface DomainEvent<T> {
 export const publish = async <T>(
   routingKey: string,
   payload: T,
-  version = "1",
+  version = '1',
 ): Promise<boolean> => {
   try {
     const channel = rabbitConnection.getChannel();
@@ -49,7 +49,7 @@ export const publish = async <T>(
     const result = channel.publish(APP_EXCHANGE, routingKey, messageBuffer, {
       persistent: true,
       timestamp: Date.now(),
-      contentType: "application/json",
+      contentType: 'application/json',
       headers: {
         correlationId: metadata.correlationId,
         requestId: metadata.requestId,
@@ -60,9 +60,7 @@ export const publish = async <T>(
       },
     });
 
-    logger.info(
-      `[RabbitMQ] Published event: ${routingKey} [eventId:${metadata.eventId}]`,
-    );
+    logger.info(`[RabbitMQ] Published event: ${routingKey} [eventId:${metadata.eventId}]`);
     return result;
   } catch (error) {
     logger.error(`[RabbitMQ] Failed to publish event: ${routingKey}`, error);

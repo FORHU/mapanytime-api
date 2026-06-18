@@ -1,5 +1,5 @@
-import os from "os";
-import logger from "./logger";
+import os from 'os';
+import logger from './logger';
 
 const METRICS_INTERVAL_MS = Number(process.env.METRICS_INTERVAL_MS || 60_000);
 
@@ -7,7 +7,7 @@ interface JobMetric {
   jobId: string;
   jobType: string;
   durationMs: number;
-  status: "success" | "failed" | "timeout";
+  status: 'success' | 'failed' | 'timeout';
   timestamp: number;
 }
 
@@ -36,14 +36,14 @@ export class WorkerMetrics {
   private startedAt = Date.now();
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
 
-  recordJob(metric: Omit<JobMetric, "timestamp">) {
+  recordJob(metric: Omit<JobMetric, 'timestamp'>) {
     const entry: JobMetric = { ...metric, timestamp: Date.now() };
     this.recentJobs.push(entry);
 
-    if (metric.status === "success") {
+    if (metric.status === 'success') {
       this.jobsProcessed++;
       this.totalDurationMs += metric.durationMs;
-    } else if (metric.status === "timeout") {
+    } else if (metric.status === 'timeout') {
       this.jobsTimedOut++;
       this.jobsFailed++;
     } else {
@@ -59,16 +59,14 @@ export class WorkerMetrics {
   getSnapshot() {
     const mem = process.memoryUsage();
     return {
-      status: "running",
+      status: 'running',
       uptime: Math.round((Date.now() - this.startedAt) / 1000),
       jobs: {
         processed: this.jobsProcessed,
         failed: this.jobsFailed,
         timedOut: this.jobsTimedOut,
         avgDurationMs:
-          this.jobsProcessed > 0
-            ? Math.round(this.totalDurationMs / this.jobsProcessed)
-            : 0,
+          this.jobsProcessed > 0 ? Math.round(this.totalDurationMs / this.jobsProcessed) : 0,
       },
       system: {
         cpus: os.cpus().length,
@@ -87,19 +85,16 @@ export class WorkerMetrics {
   startPeriodicLogging() {
     this.intervalHandle = setInterval(async () => {
       const snapshot = this.getSnapshot();
-      logger.info("[WorkerMetrics] Periodic snapshot", snapshot);
+      logger.info('[WorkerMetrics] Periodic snapshot', snapshot);
 
       try {
-        const { redis } = await import("../infrastructure/redis");
+        const { redis } = await import('../infrastructure/redis');
         const client = redis.getClient();
-        await client.set("worker:metrics:snapshot", JSON.stringify(snapshot), {
+        await client.set('worker:metrics:snapshot', JSON.stringify(snapshot), {
           EX: 300, // 5 min TTL — stale if worker dies
         });
       } catch (err) {
-        logger.error(
-          "[WorkerMetrics] Failed to persist snapshot to Redis:",
-          err,
-        );
+        logger.error('[WorkerMetrics] Failed to persist snapshot to Redis:', err);
       }
     }, METRICS_INTERVAL_MS);
 

@@ -1,12 +1,12 @@
-import dotenv from "dotenv";
+import dotenv from 'dotenv';
 dotenv.config();
 
-import http from "http";
-import app from "./app";
-import logger from "./utils/logger";
-import { PORT, NODE_ENV } from "./config";
-import { prisma } from "./utils/prisma";
-import { redis } from "./infrastructure/redis";
+import http from 'http';
+import app from './app';
+import logger from './utils/logger';
+import { PORT, NODE_ENV } from './config';
+import { prisma } from './utils/prisma';
+import { redis } from './infrastructure/redis';
 
 const server = http.createServer(app);
 
@@ -20,7 +20,7 @@ const gracefulShutdown = async (signal: string) => {
   // 1. Stop accepting new connections
   server.close(async (err) => {
     if (err) {
-      logger.error("[Shutdown] Error closing HTTP server:", err);
+      logger.error('[Shutdown] Error closing HTTP server:', err);
       process.exit(1);
     }
 
@@ -29,29 +29,29 @@ const gracefulShutdown = async (signal: string) => {
       await redis.close();
       await prisma.$disconnect();
 
-      logger.info("[Shutdown] All connections closed. Goodbye.");
+      logger.info('[Shutdown] All connections closed. Goodbye.');
       process.exit(0);
     } catch (shutdownError) {
-      logger.error("[Shutdown] Error during cleanup:", shutdownError);
+      logger.error('[Shutdown] Error during cleanup:', shutdownError);
       process.exit(1);
     }
   });
 
   // Force exit if graceful shutdown takes too long
   setTimeout(() => {
-    logger.error("[Shutdown] Graceful shutdown timed out. Forcing exit.");
+    logger.error('[Shutdown] Graceful shutdown timed out. Forcing exit.');
     process.exit(1);
   }, 10000);
 };
 
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-process.on("unhandledRejection", (reason) => {
-  logger.error("[Process] Unhandled Rejection:", reason);
+process.on('unhandledRejection', (reason) => {
+  logger.error('[Process] Unhandled Rejection:', reason);
 });
 
-process.on("uncaughtException", (error) => {
-  logger.error("[Process] Uncaught Exception:", error);
+process.on('uncaughtException', (error) => {
+  logger.error('[Process] Uncaught Exception:', error);
   process.exit(1);
 });

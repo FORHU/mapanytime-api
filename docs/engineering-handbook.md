@@ -52,12 +52,12 @@ This template is built on three principles:
 
 ## Strict Layer Contracts
 
-| Layer | Can call | Cannot call |
-|---|---|---|
-| Controller | Service | Repository, Prisma, Redis, RabbitMQ directly |
-| Service | Repository, CacheUtil, rabbitmq.publish | Prisma directly |
-| Repository | Prisma | Service, RabbitMQ, Redis |
-| Consumer | Service, Repository | Controller |
+| Layer      | Can call                                | Cannot call                                  |
+| ---------- | --------------------------------------- | -------------------------------------------- |
+| Controller | Service                                 | Repository, Prisma, Redis, RabbitMQ directly |
+| Service    | Repository, CacheUtil, rabbitmq.publish | Prisma directly                              |
+| Repository | Prisma                                  | Service, RabbitMQ, Redis                     |
+| Consumer   | Service, Repository                     | Controller                                   |
 
 Violating this contract creates hidden coupling that becomes unmaintainable at scale.
 
@@ -169,18 +169,18 @@ Retry count < 3?
 1. Create `src/consumers/myfeature.consumer.ts`:
 
 ```typescript
-import { rabbitmq } from "../infrastructure/rabbitmq";
-import { ROUTING_KEYS } from "../events/routing-keys";
-import logger from "../utils/logger";
+import { rabbitmq } from '../infrastructure/rabbitmq';
+import { ROUTING_KEYS } from '../events/routing-keys';
+import logger from '../utils/logger';
 
 export const startMyFeatureConsumer = async () => {
   await rabbitmq.consume<{ userId: string }>(
-    "myfeature.queue",
+    'myfeature.queue',
     ROUTING_KEYS.SOME_EVENT,
     async (payload, metadata) => {
       logger.info(`[MyFeature] Processing event: ${metadata.eventId}`);
       // your logic here
-    }
+    },
   );
 };
 ```
@@ -188,7 +188,7 @@ export const startMyFeatureConsumer = async () => {
 2. Register in `src/worker.ts`:
 
 ```typescript
-import { startMyFeatureConsumer } from "./consumers/myfeature.consumer";
+import { startMyFeatureConsumer } from './consumers/myfeature.consumer';
 await startMyFeatureConsumer();
 ```
 
@@ -216,7 +216,7 @@ const session = await CacheUtil.get<SessionData>(`session:${token}`);
 await CacheUtil.del(`user:${id}`);
 
 // Delete by pattern (e.g., invalidate all user caches)
-await CacheUtil.delByPattern("user:*");
+await CacheUtil.delByPattern('user:*');
 ```
 
 ### 4. Rate Limiting (built-in)
@@ -249,7 +249,7 @@ Formats as { status: "error", statusCode, message } JSON response
 try {
   await UserService.doSomething();
 } catch (err) {
-  res.status(500).json({ error: "Something went wrong" });
+  res.status(500).json({ error: 'Something went wrong' });
 }
 ```
 
@@ -289,6 +289,7 @@ process.exit(0)
 ```
 
 **Worker adds:**
+
 - Set `isReady = false` (health probe returns 503 immediately)
 - Stop WorkerMetrics interval
 - Close RabbitMQ connection (in-flight messages are nacked automatically)
@@ -303,8 +304,8 @@ Test pure functions and utilities in isolation. No infrastructure, no mocking of
 
 ```typescript
 // Good unit test subject: helpers, utils, pure functions
-it("should clamp limit to maxLimit", () => {
-  const { limit } = parsePagination({ limit: "999" });
+it('should clamp limit to maxLimit', () => {
+  const { limit } = parsePagination({ limit: '999' });
   expect(limit).toBe(100);
 });
 ```
@@ -314,8 +315,8 @@ it("should clamp limit to maxLimit", () => {
 Test HTTP endpoints using Supertest. Mock infrastructure (Prisma, Redis, RabbitMQ) at the module level.
 
 ```typescript
-jest.mock("../../src/infrastructure/redis", () => ({
-  redis: { ping: jest.fn().mockResolvedValue(true) }
+jest.mock('../../src/infrastructure/redis', () => ({
+  redis: { ping: jest.fn().mockResolvedValue(true) },
 }));
 ```
 
@@ -330,18 +331,20 @@ jest.mock("../../src/infrastructure/redis", () => ({
 ## Adding a New Environment Variable
 
 1. Add to `.env.example` with a descriptive comment:
+
    ```env
    STRIPE_SECRET_KEY=""  # Stripe API key for payment processing
    ```
 
 2. Export from `src/config.ts`:
+
    ```typescript
-   export const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
+   export const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
    ```
 
 3. Import in the module that needs it:
    ```typescript
-   import { STRIPE_SECRET_KEY } from "../config";
+   import { STRIPE_SECRET_KEY } from '../config';
    ```
 
 **Never** use `process.env.ANYTHING` outside of `config.ts`. This gives you a single source of truth and makes it easy to find all config dependencies.
@@ -354,7 +357,7 @@ All cron jobs are defined in `src/infrastructure/scheduler/index.ts`. The schedu
 
 ```typescript
 // Runs daily at 2:00 AM
-cron.schedule("0 2 * * *", async () => {
+cron.schedule('0 2 * * *', async () => {
   await prisma.session.deleteMany({ where: { expiresAt: { lt: new Date() } } });
 });
 ```
@@ -367,14 +370,14 @@ Use the [cron expression generator](https://crontab.guru) to build expressions.
 
 ```yaml
 Push to main/develop
-   │
-   ▼
+│
+▼
 .github/workflows/ci.yml
-   │
-   ├─ TypeScript type check (npx tsc --noEmit)
-   ├─ ESLint (npm run lint)
-   ├─ Unit tests (npm run test:unit)
-   └─ Integration tests (npm run test:integration)
+│
+├─ TypeScript type check (npx tsc --noEmit)
+├─ ESLint (npm run lint)
+├─ Unit tests (npm run test:unit)
+└─ Integration tests (npm run test:integration)
 ```
 
 All checks must pass before merging to `main`.

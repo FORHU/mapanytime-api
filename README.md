@@ -27,22 +27,22 @@
 
 ## ⚡ Infrastructure Stack
 
-| Layer | Technology |
-|---|---|
-| **API Framework** | Express.js + TypeScript |
-| **Database** | PostgreSQL via Prisma ORM |
-| **Message Broker** | RabbitMQ (Topic Exchange, DLQ, Retries) |
-| **Cache / State** | Redis (TLS-ready, cache-aside pattern) |
-| **Authentication** | JWT (Access + Refresh tokens) |
-| **Validation** | Joi |
-| **Email** | Nodemailer + Handlebars templates (Ethereal for dev) |
-| **Scheduling** | node-cron |
-| **Logging** | Winston (JSON in prod / colorized in dev) |
-| **Security** | Helmet, CORS, express-rate-limit |
-| **API Docs** | Swagger / OpenAPI (dev only) |
-| **Testing** | Jest + ts-jest + Supertest |
-| **CI/CD** | GitHub Actions |
-| **Containers** | Docker + Docker Compose |
+| Layer              | Technology                                           |
+| ------------------ | ---------------------------------------------------- |
+| **API Framework**  | Express.js + TypeScript                              |
+| **Database**       | PostgreSQL via Prisma ORM                            |
+| **Message Broker** | RabbitMQ (Topic Exchange, DLQ, Retries)              |
+| **Cache / State**  | Redis (TLS-ready, cache-aside pattern)               |
+| **Authentication** | JWT (Access + Refresh tokens)                        |
+| **Validation**     | Joi                                                  |
+| **Email**          | Nodemailer + Handlebars templates (Ethereal for dev) |
+| **Scheduling**     | node-cron                                            |
+| **Logging**        | Winston (JSON in prod / colorized in dev)            |
+| **Security**       | Helmet, CORS, express-rate-limit                     |
+| **API Docs**       | Swagger / OpenAPI (dev only)                         |
+| **Testing**        | Jest + ts-jest + Supertest                           |
+| **CI/CD**          | GitHub Actions                                       |
+| **Containers**     | Docker + Docker Compose                              |
 
 ---
 
@@ -117,6 +117,7 @@ These can be added as extensions, but are intentionally excluded from the core t
 ## 📦 Getting Started
 
 ### Prerequisites
+
 - [Node.js](https://nodejs.org/) v20+
 - [Docker](https://www.docker.com/) & Docker Compose
 
@@ -149,12 +150,12 @@ In a **separate terminal**, start the background worker:
 npm run worker
 ```
 
-| Service | URL |
-|---|---|
-| API | `http://localhost:3002` |
-| Swagger Docs | `http://localhost:3002/api/docs` |
+| Service            | URL                                      |
+| ------------------ | ---------------------------------------- |
+| API                | `http://localhost:3002`                  |
+| Swagger Docs       | `http://localhost:3002/api/docs`         |
 | RabbitMQ Dashboard | `http://localhost:15672` (guest / guest) |
-| Worker Health | `http://localhost:8080/health` |
+| Worker Health      | `http://localhost:8080/health`           |
 
 ---
 
@@ -210,12 +211,12 @@ tests/
 
 ### Layer Responsibilities
 
-| Layer | Responsibility |
-|---|---|
-| **Controller** | Parse HTTP input → call Service → return JSON. No logic. |
-| **Service** | Business rules, orchestrate Repositories, publish Domain Events |
-| **Repository** | Prisma queries only. No business logic. |
-| **Consumer** | Run in the Worker process. Handle one type of event. |
+| Layer          | Responsibility                                                  |
+| -------------- | --------------------------------------------------------------- |
+| **Controller** | Parse HTTP input → call Service → return JSON. No logic.        |
+| **Service**    | Business rules, orchestrate Repositories, publish Domain Events |
+| **Repository** | Prisma queries only. No business logic.                         |
+| **Consumer**   | Run in the Worker process. Handle one type of event.            |
 
 ### The Golden Rule
 
@@ -225,22 +226,22 @@ Emails, AI inference, report generation, audit logging — none of these belong 
 
 ### Why RabbitMQ Instead of BullMQ?
 
-Many developers ask: *Why not just use BullMQ?*
+Many developers ask: _Why not just use BullMQ?_
 
 - **BullMQ** is a **Job Queue**. It is designed for task execution (e.g., "process video 123"). It tightly couples the producer and the worker.
-- **RabbitMQ** is an **Event Broker**. It is designed for **Event-Driven Architecture**. 
+- **RabbitMQ** is an **Event Broker**. It is designed for **Event-Driven Architecture**.
 
 When a user signs up, the API publishes a `user.created` domain event. Multiple independent consumers (EmailConsumer, AuditConsumer, AnalyticsConsumer) can subscribe to this exact same event without the API needing to know about them. This decoupling is essential for enterprise platforms.
 
 ### 📚 Architectural Decisions
 
-| Decision | Reason |
-|-----------|---------|
-| **RabbitMQ over BullMQ** | Event broker for decoupled domain events vs task job queue |
-| **Prisma over TypeORM** | Strict type safety and superior Developer Experience (DX) |
-| **Joi over Zod** | Single robust validation standard historically proven in Express |
-| **PostgreSQL over MongoDB** | Strong consistency and relational data modeling |
-| **AsyncLocalStorage** | Zero-friction correlation ID propagation across async boundaries |
+| Decision                    | Reason                                                           |
+| --------------------------- | ---------------------------------------------------------------- |
+| **RabbitMQ over BullMQ**    | Event broker for decoupled domain events vs task job queue       |
+| **Prisma over TypeORM**     | Strict type safety and superior Developer Experience (DX)        |
+| **Joi over Zod**            | Single robust validation standard historically proven in Express |
+| **PostgreSQL over MongoDB** | Strong consistency and relational data modeling                  |
+| **AsyncLocalStorage**       | Zero-friction correlation ID propagation across async boundaries |
 
 ---
 
@@ -273,6 +274,7 @@ sequenceDiagram
 ```
 
 **Files tracing this exact flow:**
+
 1. `src/controllers/user.controller.ts` — Parses request, returns standard response
 2. `src/services/user.service.ts` — Executes business rules, orchestrates repository, publishes events
 3. `src/repositories/user.repository.ts` — Handles Prisma queries
@@ -334,18 +336,18 @@ graph TD
 
 ### Supported Events
 
-| Routing Key | Payload |
-|---|---|
-| `user.created` | `{ userId, email, timestamp }` |
-| `email.send.requested` | `{ userId, email, subject, body }` |
-| `ai.analysis.requested` | `{ userId, imageUrl, analysisType }` |
-| `skin.analysis.requested` | `{ userId, imageUrl }` |
+| Routing Key               | Payload                              |
+| ------------------------- | ------------------------------------ |
+| `user.created`            | `{ userId, email, timestamp }`       |
+| `email.send.requested`    | `{ userId, email, subject, body }`   |
+| `ai.analysis.requested`   | `{ userId, imageUrl, analysisType }` |
+| `skin.analysis.requested` | `{ userId, imageUrl }`               |
 
 **Publishing an event:**
 
 ```typescript
-import { rabbitmq } from "../infrastructure/rabbitmq";
-import { ROUTING_KEYS } from "../events/routing-keys";
+import { rabbitmq } from '../infrastructure/rabbitmq';
+import { ROUTING_KEYS } from '../events/routing-keys';
 
 await rabbitmq.publish(ROUTING_KEYS.USER_CREATED, {
   userId: user.id,
@@ -377,19 +379,21 @@ Every event is automatically wrapped with a metadata envelope:
 
 Every HTTP response includes two headers:
 
-| Header | Description |
-|---|---|
-| `x-request-id` | Unique per HTTP call. Always generated fresh. |
+| Header             | Description                                                               |
+| ------------------ | ------------------------------------------------------------------------- |
+| `x-request-id`     | Unique per HTTP call. Always generated fresh.                             |
 | `x-correlation-id` | Tracks a business operation across processes. Can be passed by a gateway. |
 
 ### Log Format
 
 **Development** — human-readable:
+
 ```
 2026-06-19 10:00:00 info [corr:abc-123]: User created successfully
 ```
 
 **Production** — structured JSON for DataDog / CloudWatch:
+
 ```json
 { "level": "info", "correlationId": "abc-123", "requestId": "req-uuid", "message": "User created" }
 ```
@@ -398,11 +402,11 @@ Every HTTP response includes two headers:
 
 ## 🔁 Retry & Dead Letter Strategy
 
-| Attempt | Behaviour |
-|---|---|
-| 1 | Fails → sent to retry queue with **5s delay** |
-| 2 | Fails → sent to retry queue with **5s delay** |
-| 3 | Fails → moved to **Dead Letter Queue (DLQ)** permanently |
+| Attempt | Behaviour                                                |
+| ------- | -------------------------------------------------------- |
+| 1       | Fails → sent to retry queue with **5s delay**            |
+| 2       | Fails → sent to retry queue with **5s delay**            |
+| 3       | Fails → moved to **Dead Letter Queue (DLQ)** permanently |
 
 No data is silently lost. Inspect failed messages in the RabbitMQ dashboard at `http://localhost:15672`.
 
@@ -412,12 +416,12 @@ No data is silently lost. Inspect failed messages in the RabbitMQ dashboard at `
 
 ## ❤️ Health Checks
 
-| Endpoint | Process | Description |
-|---|---|---|
-| `GET /api/health/live` | API | Liveness — process is running |
-| `GET /api/health/ready` | API | Readiness — PostgreSQL + Redis + RabbitMQ all up |
-| `GET :8080/live` | Worker | Worker liveness |
-| `GET :8080/health` | Worker | Worker readiness + job metrics snapshot |
+| Endpoint                | Process | Description                                      |
+| ----------------------- | ------- | ------------------------------------------------ |
+| `GET /api/health/live`  | API     | Liveness — process is running                    |
+| `GET /api/health/ready` | API     | Readiness — PostgreSQL + Redis + RabbitMQ all up |
+| `GET :8080/live`        | Worker  | Worker liveness                                  |
+| `GET :8080/health`      | Worker  | Worker readiness + job metrics snapshot          |
 
 **Readiness Response:**
 
@@ -441,16 +445,16 @@ No data is silently lost. Inspect failed messages in the RabbitMQ dashboard at `
 ### `responseSuccess` / `responseError`
 
 ```typescript
-import { responseSuccess, responseError } from "../helpers/response.helper";
+import { responseSuccess, responseError } from '../helpers/response.helper';
 
-return responseSuccess(res, 201, newUser, "User created");
-return responseError(res, 404, "User not found");
+return responseSuccess(res, 201, newUser, 'User created');
+return responseError(res, 404, 'User not found');
 ```
 
 ### `parsePagination` / `buildPage` / `pageFromRepo`
 
 ```typescript
-import { parsePagination, buildPage, pageFromRepo } from "../helpers/pagination.helper";
+import { parsePagination, buildPage, pageFromRepo } from '../helpers/pagination.helper';
 
 const { page, limit, skip } = parsePagination(req.query);
 const [items, total] = await Promise.all([
@@ -463,7 +467,7 @@ return responseSuccess(res, 200, buildPage(items, total, { page, limit }));
 ### `CacheUtil.remember()`
 
 ```typescript
-import CacheUtil from "../utils/cache.util";
+import CacheUtil from '../utils/cache.util';
 
 const user = await CacheUtil.remember(`user:${id}`, 300, () => UserRepository.findById(id));
 ```
@@ -471,17 +475,17 @@ const user = await CacheUtil.remember(`user:${id}`, 300, () => UserRepository.fi
 ### `throwResponse()`
 
 ```typescript
-import { throwResponse } from "../utils/throw-response";
+import { throwResponse } from '../utils/throw-response';
 
 // In Services — caught by global error middleware
-throwResponse(404, "User not found");
-throwResponse(409, "Email already taken", { conflictField: "email" });
+throwResponse(404, 'User not found');
+throwResponse(409, 'Email already taken', { conflictField: 'email' });
 ```
 
 ### `hashPassword` / `verifyPassword`
 
 ```typescript
-import { hashPassword, verifyPassword } from "../utils/password.util";
+import { hashPassword, verifyPassword } from '../utils/password.util';
 
 const hash = await hashPassword(plainText);
 const isValid = await verifyPassword(plainText, hash);
@@ -492,11 +496,13 @@ const isValid = await verifyPassword(plainText, hash);
 ## 📤 API Response Format
 
 ### Success
+
 ```json
 { "status": "success", "statusCode": 201, "data": {}, "message": "User created" }
 ```
 
 ### Paginated List
+
 ```json
 {
   "status": "success",
@@ -512,6 +518,7 @@ const isValid = await verifyPassword(plainText, hash);
 ```
 
 ### Error
+
 ```json
 { "status": "error", "statusCode": 404, "message": "User not found" }
 ```
@@ -550,50 +557,50 @@ API Containers (×2)         Worker Containers (×5)
 PostgreSQL     Redis     CloudWatch
 ```
 
-| Process | Scales based on |
-|---|---|
-| API | HTTP request throughput |
-| Worker | Queue depth / job processing time |
+| Process | Scales based on                   |
+| ------- | --------------------------------- |
+| API     | HTTP request throughput           |
+| Worker  | Queue depth / job processing time |
 
 ---
 
 ## 🛠️ Scripts
 
-| Command | Description |
-|---|---|
-| `npm run dev` | Start API server (Nodemon) |
-| `npm run worker` | Start Worker process (Nodemon) |
-| `npm run build` | Compile TypeScript → `dist/` |
-| `npm start` | Start compiled API |
-| `npm test` | Run all tests |
-| `npm run test:unit` | Unit tests only |
-| `npm run test:integration` | Integration tests only |
-| `npm run test:coverage` | Tests with coverage report |
-| `npm run lint` | Lint and auto-fix |
-| `npm run db:setup` | Prisma generate + migrate |
-| `npm run db:seed` | Run database seed |
+| Command                    | Description                    |
+| -------------------------- | ------------------------------ |
+| `npm run dev`              | Start API server (Nodemon)     |
+| `npm run worker`           | Start Worker process (Nodemon) |
+| `npm run build`            | Compile TypeScript → `dist/`   |
+| `npm start`                | Start compiled API             |
+| `npm test`                 | Run all tests                  |
+| `npm run test:unit`        | Unit tests only                |
+| `npm run test:integration` | Integration tests only         |
+| `npm run test:coverage`    | Tests with coverage report     |
+| `npm run lint`             | Lint and auto-fix              |
+| `npm run db:setup`         | Prisma generate + migrate      |
+| `npm run db:seed`          | Run database seed              |
 
 ---
 
 ## 🔑 Environment Variables
 
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | `3002` | API server port |
-| `NODE_ENV` | `development` | Environment |
-| `DATABASE_URL` | — | Prisma connection string |
-| `ACCESS_TOKEN_SECRET` | — | JWT signing secret |
-| `REFRESH_TOKEN_SECRET` | — | JWT refresh secret |
-| `REDIS_HOST` | `localhost` | Redis host |
-| `REDIS_PORT` | `6379` | Redis port |
-| `REDIS_TLS` | `false` | Enable TLS (ElastiCache, Upstash) |
-| `REDIS_TTL_SECONDS` | `3600` | Default cache TTL |
-| `RABBITMQ_URL` | `amqp://guest:guest@localhost:5672` | AMQP connection URL |
-| `WORKER_HEALTH_PORT` | `8080` | Worker health probe port |
-| `METRICS_INTERVAL_MS` | `60000` | Worker metrics log interval |
-| `MAILER_TRANSPORT_HOST` | `smtp.ethereal.email` | SMTP host |
-| `MAILER_EMAIL` | — | SMTP user |
-| `MAILER_PASSWORD` | — | SMTP password |
+| Variable                | Default                             | Description                       |
+| ----------------------- | ----------------------------------- | --------------------------------- |
+| `PORT`                  | `3002`                              | API server port                   |
+| `NODE_ENV`              | `development`                       | Environment                       |
+| `DATABASE_URL`          | —                                   | Prisma connection string          |
+| `ACCESS_TOKEN_SECRET`   | —                                   | JWT signing secret                |
+| `REFRESH_TOKEN_SECRET`  | —                                   | JWT refresh secret                |
+| `REDIS_HOST`            | `localhost`                         | Redis host                        |
+| `REDIS_PORT`            | `6379`                              | Redis port                        |
+| `REDIS_TLS`             | `false`                             | Enable TLS (ElastiCache, Upstash) |
+| `REDIS_TTL_SECONDS`     | `3600`                              | Default cache TTL                 |
+| `RABBITMQ_URL`          | `amqp://guest:guest@localhost:5672` | AMQP connection URL               |
+| `WORKER_HEALTH_PORT`    | `8080`                              | Worker health probe port          |
+| `METRICS_INTERVAL_MS`   | `60000`                             | Worker metrics log interval       |
+| `MAILER_TRANSPORT_HOST` | `smtp.ethereal.email`               | SMTP host                         |
+| `MAILER_EMAIL`          | —                                   | SMTP user                         |
+| `MAILER_PASSWORD`       | —                                   | SMTP password                     |
 
 See `.env.example` for the full list including AWS, Google OAuth, and WebSub.
 

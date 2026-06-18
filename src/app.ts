@@ -1,25 +1,25 @@
-import express from "express";
-import rateLimit from "express-rate-limit";
-import helmet from "helmet";
-import router from "./routes";
-import { isDev } from "./config";
-import setup from "./setup";
-import cors from "cors";
-import { errorHandler } from "./middleware/error.middleware";
-import { correlationMiddleware } from "./middleware/correlation.middleware";
-import swaggerUi from "swagger-ui-express";
-import { swaggerSpec } from "./utils/swagger";
+import express from 'express';
+import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
+import router from './routes';
+import { isDev } from './config';
+import setup from './setup';
+import cors from 'cors';
+import { errorHandler } from './middleware/error.middleware';
+import { correlationMiddleware } from './middleware/correlation.middleware';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './utils/swagger';
 
 const app = express();
 
-app.set("trust proxy", 1);
+app.set('trust proxy', 1);
 
 // Assign correlationId + requestId to every request (must be first)
 app.use(correlationMiddleware);
 
 app.use(
   cors({
-    origin: "*",
+    origin: '*',
     credentials: true,
   }),
 );
@@ -37,19 +37,19 @@ if (!isDev) app.use(limiter);
 
 // Set up security headers
 app.use(helmet());
-app.disable("x-powered-by");
+app.disable('x-powered-by');
 
 // API Routes
-app.use("/api", router);
+app.use('/api', router);
 
 // Swagger UI — available at http://localhost:PORT/api/docs (dev only)
 if (isDev) {
   app.use(
-    "/api/docs",
+    '/api/docs',
     swaggerUi.serve,
     swaggerUi.setup(swaggerSpec, {
-      customSiteTitle: "Node.js API Docs",
-      customCss: ".swagger-ui .topbar { display: none }",
+      customSiteTitle: 'Node.js API Docs',
+      customCss: '.swagger-ui .topbar { display: none }',
     }),
   );
 }
@@ -59,7 +59,7 @@ app.use(errorHandler);
 
 // Run setup
 setup().catch((err) => {
-  console.log("Setup failed:", err);
+  console.log('Setup failed:', err);
 });
 
 export default app;

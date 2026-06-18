@@ -1,6 +1,6 @@
-import { REDIS_TTL_SECONDS } from "../config";
-import logger from "./logger";
-import { redis } from "../infrastructure/redis";
+import { REDIS_TTL_SECONDS } from '../config';
+import logger from './logger';
+import { redis } from '../infrastructure/redis';
 
 export default class CacheUtil {
   private static client() {
@@ -18,11 +18,7 @@ export default class CacheUtil {
     }
   }
 
-  static async set(
-    key: string,
-    value: unknown,
-    ttlSeconds?: number,
-  ): Promise<void> {
+  static async set(key: string, value: unknown, ttlSeconds?: number): Promise<void> {
     try {
       const serialized = JSON.stringify(value);
       const ttl = ttlSeconds || REDIS_TTL_SECONDS;
@@ -49,19 +45,16 @@ export default class CacheUtil {
       const keys = await this.client().keys(pattern);
       if (keys.length) await this.client().del(keys);
     } catch (error) {
-      logger.error(
-        `[CacheUtil:delByPattern] Failed to delete pattern ${pattern}:`,
-        error,
-      );
+      logger.error(`[CacheUtil:delByPattern] Failed to delete pattern ${pattern}:`, error);
     }
   }
 
   static async flushAll(): Promise<void> {
     try {
       await this.client().flushAll();
-      logger.info("[CacheUtil] Redis cache flushed successfully");
+      logger.info('[CacheUtil] Redis cache flushed successfully');
     } catch (error) {
-      logger.error("[CacheUtil:flushAll] Failed to flush cache:", error);
+      logger.error('[CacheUtil:flushAll] Failed to flush cache:', error);
       throw error;
     }
   }
@@ -80,11 +73,7 @@ export default class CacheUtil {
    *     () => UserRepository.findById(id),
    *   );
    */
-  static async remember<T>(
-    key: string,
-    ttlSeconds: number,
-    fn: () => Promise<T>,
-  ): Promise<T> {
+  static async remember<T>(key: string, ttlSeconds: number, fn: () => Promise<T>): Promise<T> {
     const hit = await this.get<T>(key);
     if (hit !== null && hit !== undefined) return hit;
 

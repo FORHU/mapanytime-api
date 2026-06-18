@@ -1,7 +1,7 @@
-import { rabbitConnection } from "./connection";
-import { setupExchanges } from "./exchanges";
-import { publish } from "./publisher";
-import { consume } from "./consumer";
+import { rabbitConnection } from './connection';
+import { setupExchanges } from './exchanges';
+import { publish } from './publisher';
+import { consume } from './consumer';
 
 export const rabbitmq = {
   connect: async () => {

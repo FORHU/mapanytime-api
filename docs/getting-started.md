@@ -6,11 +6,11 @@ Everything you need to run this template locally in under 5 minutes.
 
 ## Prerequisites
 
-| Tool | Version | Install |
-|---|---|---|
-| **Node.js** | v20+ | [nodejs.org](https://nodejs.org) |
-| **Docker Desktop** | Latest | [docker.com](https://www.docker.com/products/docker-desktop/) |
-| **Git** | Latest | [git-scm.com](https://git-scm.com) |
+| Tool               | Version | Install                                                       |
+| ------------------ | ------- | ------------------------------------------------------------- |
+| **Node.js**        | v20+    | [nodejs.org](https://nodejs.org)                              |
+| **Docker Desktop** | Latest  | [docker.com](https://www.docker.com/products/docker-desktop/) |
+| **Git**            | Latest  | [git-scm.com](https://git-scm.com)                            |
 
 ---
 
@@ -49,6 +49,7 @@ docker-compose up -d
 ```
 
 This starts:
+
 - **PostgreSQL** on port `5432`
 - **Redis** on port `6379`
 - **RabbitMQ** on port `5672` (Management UI: `15672`)
@@ -98,6 +99,7 @@ curl http://localhost:3002/api/health/ready
 ```
 
 Expected response:
+
 ```json
 {
   "status": "ready",
@@ -117,12 +119,12 @@ Open [http://localhost:3002/api/docs](http://localhost:3002/api/docs) in your br
 
 ## What's Running
 
-| Service | URL | Credentials |
-|---|---|---|
-| API Server | `http://localhost:3002` | — |
-| Swagger Docs | `http://localhost:3002/api/docs` | — |
-| RabbitMQ UI | `http://localhost:15672` | guest / guest |
-| Worker Health | `http://localhost:8080/health` | — |
+| Service       | URL                              | Credentials   |
+| ------------- | -------------------------------- | ------------- |
+| API Server    | `http://localhost:3002`          | —             |
+| Swagger Docs  | `http://localhost:3002/api/docs` | —             |
+| RabbitMQ UI   | `http://localhost:15672`         | guest / guest |
+| Worker Health | `http://localhost:8080/health`   | —             |
 
 ---
 

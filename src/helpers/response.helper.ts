@@ -1,4 +1,4 @@
-import { Response } from "express";
+import { Response } from 'express';
 
 /**
  * Typed response helpers. Every controller should use one of these two
@@ -23,14 +23,14 @@ export type SuccessStatus = 200 | 201 | 202 | 204;
 export type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500;
 
 export type ApiResponse<T> = {
-  status: "success";
+  status: 'success';
   statusCode: SuccessStatus;
   data: T;
   message?: string;
 };
 
 export type ApiError = {
-  status: "error";
+  status: 'error';
   statusCode: ErrorStatus;
   message: string;
   code?: string;
@@ -44,7 +44,7 @@ export function responseSuccess<T>(
   message?: string,
 ) {
   const body: ApiResponse<T> = {
-    status: "success",
+    status: 'success',
     statusCode,
     data,
     ...(message && { message }),
@@ -59,7 +59,7 @@ export function responseError(
   extra?: { code?: string; details?: unknown },
 ) {
   const body: ApiError = {
-    status: "error",
+    status: 'error',
     statusCode,
     message,
     ...(extra || {}),

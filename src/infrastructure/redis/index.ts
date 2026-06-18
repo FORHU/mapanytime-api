@@ -1,4 +1,4 @@
-import { redisConnection } from "./connection";
+import { redisConnection } from './connection';
 
 export const redis = {
   connect: () => redisConnection.connect(),
