@@ -1,6 +1,7 @@
-import amqp, { ChannelModel, Channel } from "amqplib";
-import { RABBITMQ_URL } from "../../config";
-import logger from "../../utils/logger";
+import amqp, { ChannelModel, Channel } from 'amqplib';
+import { EventEmitter } from 'node:events';
+import { RABBITMQ_URL } from '../../config';
+import logger from '../../utils/logger';
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const BASE_RECONNECT_DELAY_MS = 1000;
@@ -18,18 +19,16 @@ class RabbitMQConnection {
       this.connection = await amqp.connect(RABBITMQ_URL);
       this.reconnectAttempts = 0;
 
-      (this.connection as any).on("error", (err: Error) => {
-        logger.error("[RabbitMQ] Connection error:", err);
+      (this.connection as unknown as EventEmitter).on('error', (err: Error) => {
+        logger.error('[RabbitMQ] Connection error:', err);
       });
 
-      (this.connection as any).on("close", () => {
+      (this.connection as unknown as EventEmitter).on('close', () => {
         this.connection = null;
         this.channel = null;
 
         if (!this.isShuttingDown) {
-          logger.warn(
-            "[RabbitMQ] Connection closed unexpectedly. Reconnecting...",
-          );
+          logger.warn('[RabbitMQ] Connection closed unexpectedly. Reconnecting...');
           this.scheduleReconnect();
         }
       });
@@ -40,9 +39,9 @@ class RabbitMQConnection {
       // until it acknowledges the previous one.
       this.channel.prefetch(1);
 
-      logger.info("[RabbitMQ] Connected and channel established.");
+      logger.info('[RabbitMQ] Connected and channel established.');
     } catch (error) {
-      logger.error("[RabbitMQ] Failed to connect:", error);
+      logger.error('[RabbitMQ] Failed to connect:', error);
       this.scheduleReconnect();
     }
   }
@@ -50,16 +49,13 @@ class RabbitMQConnection {
   private scheduleReconnect(): void {
     if (this.isShuttingDown) return;
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      logger.error("[RabbitMQ] Max reconnect attempts reached. Giving up.");
+      logger.error('[RabbitMQ] Max reconnect attempts reached. Giving up.');
       return;
     }
 
     this.reconnectAttempts++;
     // Exponential backoff: 1s, 2s, 4s, 8s... capped at 30s
-    const delay = Math.min(
-      BASE_RECONNECT_DELAY_MS * 2 ** (this.reconnectAttempts - 1),
-      30000,
-    );
+    const delay = Math.min(BASE_RECONNECT_DELAY_MS * 2 ** (this.reconnectAttempts - 1), 30000);
     logger.warn(
       `[RabbitMQ] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`,
     );
@@ -69,9 +65,7 @@ class RabbitMQConnection {
 
   public getChannel(): Channel {
     if (!this.channel) {
-      throw new Error(
-        "[RabbitMQ] Channel not initialized. Call connect() first.",
-      );
+      throw new Error('[RabbitMQ] Channel not initialized. Call connect() first.');
     }
     return this.channel;
   }
@@ -88,12 +82,12 @@ class RabbitMQConnection {
         this.channel = null;
       }
       if (this.connection) {
-        await (this.connection as any).close();
+        await this.connection.close();
         this.connection = null;
       }
-      logger.info("[RabbitMQ] Connection closed gracefully.");
+      logger.info('[RabbitMQ] Connection closed gracefully.');
     } catch (err) {
-      logger.error("[RabbitMQ] Error during graceful close:", err);
+      logger.error('[RabbitMQ] Error during graceful close:', err);
     }
   }
 }

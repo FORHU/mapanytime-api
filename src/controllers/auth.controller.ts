@@ -1,6 +1,6 @@
-import { Request, Response, NextFunction } from "express";
-import Joi from "joi";
-import AuthSvc from "../services/auth.service";
+import { Request, Response, NextFunction } from 'express';
+import Joi from 'joi';
+import AuthSvc from '../services/auth.service';
 
 export default class AuthController {
   /**
@@ -19,9 +19,7 @@ export default class AuthController {
 
     try {
       const data = await AuthSvc.register(value);
-      return res
-        .status(201)
-        .json({ message: "User created successfully", data });
+      return res.status(201).json({ message: 'User created successfully', data });
     } catch (error) {
       next(error);
     }
@@ -41,7 +39,7 @@ export default class AuthController {
 
     try {
       const data = await AuthSvc.login(value);
-      return res.json({ message: "Login successful", data });
+      return res.json({ message: 'Login successful', data });
     } catch (error) {
       next(error);
     }
@@ -72,7 +70,8 @@ export default class AuthController {
   static async logout(req: Request, res: Response, next: NextFunction) {
     try {
       const { refreshToken } = req.body;
-      const userId = (req as any).user?.id;
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
       const result = await AuthSvc.logout(userId, refreshToken);
       return res.json(result);
     } catch (error) {

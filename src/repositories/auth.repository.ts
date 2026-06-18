@@ -1,4 +1,5 @@
-import { prisma } from "../utils/prisma";
+import { Prisma } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 
 export default class AuthRepo {
   static async findUserByEmailOrUsername(email: string, username: string) {
@@ -145,7 +146,7 @@ export default class AuthRepo {
     });
   }
 
-  static async updateUser(userId: string, data: any) {
+  static async updateUser(userId: string, data: Prisma.UserUpdateInput) {
     return prisma.user.update({
       where: {
         id: userId,
