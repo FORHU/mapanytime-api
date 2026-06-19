@@ -18,7 +18,7 @@ Everything you need to run this template locally in under 5 minutes.
 
 ```bash
 git clone <your-repo-url>
-cd node-postg-template
+cd mapanytime-api
 npm install
 ```
 

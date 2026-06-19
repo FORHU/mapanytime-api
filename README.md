@@ -126,7 +126,7 @@ These can be added as extensions, but are intentionally excluded from the core t
 ```bash
 # 1. Clone the repo
 git clone <your-repo-url>
-cd node-postg-template
+cd mapanytime-api
 
 # 2. Install dependencies
 npm install
