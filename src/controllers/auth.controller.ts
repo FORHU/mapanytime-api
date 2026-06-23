@@ -10,7 +10,6 @@ export default class AuthController {
     const schema = Joi.object({
       email: Joi.string().email().required(),
       password: Joi.string().min(6).required(),
-      username: Joi.string().required(),
       name: Joi.string().optional(),
     });
 
