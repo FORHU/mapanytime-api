@@ -14,7 +14,7 @@ model Users {
   firstName             String?
   lastName              String?
   phoneNumber           String?
-  role                  UserRole            @default(NotRegistered)
+  role                  UserRole            @default(USER)
   avatarId              String?             @unique
   accountStatus         UserAccountStatus   @default(ACTIVE)
   isEmailVerified       Boolean             @default(false)
@@ -30,7 +30,7 @@ model Users {
   sentAdminInvites      AdminInvites[]
 }
 enum UserRole {
-  NotRegistered
+  USER
   BUYER
   SELLER
   ADMIN
