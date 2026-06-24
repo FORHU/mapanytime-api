@@ -23,14 +23,14 @@ export default class AuthSvc {
 
   static async login(data: { email: string; password: string }) {
     const user = await AuthRepo.findUserByEmail(data.email);
-    if (!user || !user.PasswordHash) throw { status: 401, message: 'Invalid credentials' };
+    if (!user || !user.passwordHash) throw { status: 401, message: 'Invalid credentials' };
 
-    const [salt, storedHash] = user.PasswordHash.split(':');
+    const [salt, storedHash] = user.passwordHash.split(':');
     const hash = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512').toString('hex');
 
     if (storedHash !== hash) throw { status: 401, message: 'Invalid credentials' };
 
-    const updatedUser = await AuthRepo.updateUserLoginStatus(user.Id);
+    const updatedUser = await AuthRepo.updateUserLoginStatus(user.id);
     return this.generateAuthResponse(updatedUser as Users, 'local');
   }
 
@@ -53,25 +53,25 @@ export default class AuthSvc {
 
   private static async generateAuthResponse(user: Users, provider: string) {
     const accessToken = jwt.sign(
-      { userId: user.Id }, 
+      { userId: user.id }, 
       ACCESS_TOKEN_SECRET, 
       { expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] }
     );
 
     const refreshToken = jwt.sign(
-      { userId: user.Id, jti: crypto.randomBytes(16).toString('hex') },
+      { userId: user.id, jti: crypto.randomBytes(16).toString('hex') },
       REFRESH_TOKEN_SECRET,
       { expiresIn: REFRESH_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] }
     );
 
     await AuthRepo.createSession({ 
-      userId: user.Id, 
+      userId: user.id, 
       refreshToken, 
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), 
       provider 
     });
     
-    await CacheUtil.set(`user:${user.Id}`, user);
+    await CacheUtil.set(`user:${user.id}`, user);
 
     return { accessToken, refreshToken, user };
   }

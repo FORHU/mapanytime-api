@@ -6,52 +6,52 @@ export async function seedUsers(prisma: PrismaClient) {
 
   const usersToCreate = [
     {
-      Email: 'admin@example.com',
-      FirstName: 'System',
-      LastName: 'Admin',
-      Role: UserRole.ADMIN, 
-      PasswordRaw: 'Password123',
-      IsEmailVerified: true,
+      email: 'admin@example.com',
+      firstName: 'System',
+      lastName: 'Admin',
+      role: UserRole.ADMIN, 
+      passwordRaw: 'Password123',
+      isEmailVerified: true,
     },
     {
-      Email: 'seller@example.com',
-      FirstName: 'Grace',
-      LastName: 'Piatos',
-      Role: UserRole.SELLER,
-      PasswordRaw: 'Seller123',
-      IsEmailVerified: true,
+      email: 'seller@example.com',
+      firstName: 'Grace',
+      lastName: 'Piatos',
+      role: UserRole.SELLER,
+      passwordRaw: 'Seller123',
+      isEmailVerified: true,
     },
     {
-      Email: 'buyer@example.com',
-      FirstName: 'Sara',
-      LastName: 'Smith',
-      Role: UserRole.BUYER,
-      PasswordRaw: 'Buyer123',
-      IsEmailVerified: true,
+      email: 'buyer@example.com',
+      firstName: 'Sara',
+      lastName: 'Smith',
+      role: UserRole.BUYER,
+      passwordRaw: 'Buyer123',
+      isEmailVerified: true,
     }
   ];
 
   for (const userData of usersToCreate) {
-    const { PasswordRaw, ...rest } = userData;
+    const { passwordRaw, ...rest } = userData;
 
     const existingUser = await prisma.users.findUnique({
-      where: { Email: rest.Email },
+      where: { email: rest.email },
     });
 
     if (!existingUser) {
       const salt = crypto.randomBytes(16).toString('hex');
-      const hash = crypto.pbkdf2Sync(PasswordRaw, salt, 1000, 64, 'sha512').toString('hex');
+      const hash = crypto.pbkdf2Sync(passwordRaw, salt, 1000, 64, 'sha512').toString('hex');
       const hashedPassword = `${salt}:${hash}`;
 
       await prisma.users.create({
         data: {
           ...rest,
-          PasswordHash: hashedPassword,
+          passwordHash: hashedPassword,
         },
       });
-      console.log(`✅ Created user: ${rest.Email}`);
+      console.log(`✅ Created user: ${rest.email}`);
     } else {
-      console.log(`ℹ️ User already exists: ${rest.Email}`);
+      console.log(`ℹ️ User already exists: ${rest.email}`);
     }
   }
 }

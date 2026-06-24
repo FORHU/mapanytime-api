@@ -4,8 +4,8 @@ import { prisma } from '../utils/prisma';
 export default class ProductRepository {
   static async getStoreByUserId(userId: string) {
     return prisma.sellers.findUnique({
-      where: { UserId: userId },
-      include: { Store: true },
+      where: { userId: userId },
+      include: { store: true },
     });
   }
 
@@ -17,7 +17,7 @@ export default class ProductRepository {
 
   static async getProductsByStoreId(storeId: string) {
     return prisma.products.findMany({
-      where: { StoreId: storeId },
+      where: { storeId: storeId },
     });
   }
 }

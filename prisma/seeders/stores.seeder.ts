@@ -5,7 +5,7 @@ export async function seedStores(prisma: PrismaClient) {
 
   // Fetch the dummy seller created in users.seeder.ts
   const sellerUser = await prisma.users.findUnique({
-    where: { Email: 'seller@example.com' }
+    where: { email: 'seller@example.com' }
   });
 
   if (!sellerUser) {
@@ -15,46 +15,46 @@ export async function seedStores(prisma: PrismaClient) {
 
   // Create the Sellers profile
   const sellerProfile = await prisma.sellers.upsert({
-    where: { UserId: sellerUser.Id },
+    where: { userId: sellerUser.id},
     update: {},
-    create: { UserId: sellerUser.Id }
+    create: { userId: sellerUser.id }
   });
-  console.log(`✅ Seller profile verified for: ${sellerUser.Email}`);
+  console.log(`✅ Seller profile verified for: ${sellerUser.email}`);
 
   // Create the Store
   const store = await prisma.stores.upsert({
-    where: { SellerId: sellerProfile.Id },
+    where: { sellerId: sellerProfile.id },
     update: {},
     create: {
-      SellerId: sellerProfile.Id,
-      StoreName: "Premium Tech",
-      Description: "High quality electronics and accessories.",
-      IsActive: true,
+      sellerId: sellerProfile.id,
+      storeName: "Premium Tech",
+      description: "High quality electronics and accessories.",
+      isActive: true,
     }
   });
-  console.log(`✅ Store created: ${store.StoreName}`);
+  console.log(`✅ Store created: ${store.storeName}`);
 
   // Create dummy Products
   const products = [
-    { Name: 'Wireless Ergonomic Mouse', Price: 1350.00, Brand: 'LogiTech', Category: 'Electronics', Description: 'Comfortable wireless mouse for long working hours.' },
-    { Name: 'Mechanical Keyboard (Red Switches)', Price: 1500.00, Brand: 'Keychron', Category: 'Electronics', Description: 'Hot-swappable mechanical keyboard.' },
-    { Name: '100W USB-C Charger', Price: 500.00, Brand: 'Anker', Category: 'Accessories', Description: 'Fast charging brick for laptops and phones.' }
+    { name: 'Wireless Ergonomic Mouse', price: 1350.00, brand: 'LogiTech', category: 'Electronics', description: 'Comfortable wireless mouse for long working hours.' },
+    { name: 'Mechanical Keyboard (Red Switches)', price: 1500.00, brand: 'Keychron', category: 'Electronics', description: 'Hot-swappable mechanical keyboard.' },
+    { name: '100W USB-C Charger', price: 500.00, brand: 'Anker', category: 'Accessories', description: 'Fast charging brick for laptops and phones.' }
   ];
 
   for (const prod of products) {
     const existingProduct = await prisma.products.findFirst({
-      where: { StoreId: store.Id, Name: prod.Name }
+      where: { storeId: store.id, name: prod.name }
     });
 
     if (!existingProduct) {
       await prisma.products.create({
         data: {
           ...prod,
-          StoreId: store.Id,
-          IsActive: true,
+          storeId: store.id,
+          isActive: true,
         }
       });
-      console.log(`✅ Created product: ${prod.Name}`);
+      console.log(`✅ Created product: ${prod.name}`);
     }
   }
 }

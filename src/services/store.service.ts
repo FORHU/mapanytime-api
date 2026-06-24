@@ -5,14 +5,14 @@ export default class StoreService {
     const stores = await StoreRepository.getActiveStoresWithLocations();
 
     return stores.filter((store) => {
-      const loc = store.StoreLocations;
+      const loc = store.storeLocations;
       if (!loc) return false;
 
-      const distance = this.calculateDistance(userLat, userLng, loc.Latitude, loc.Longitude);
+      const distance = this.calculateDistance(userLat, userLng, loc.latitude, loc.longitude);
       return distance <= radiusKm;
     }).map(store => ({
        ...store,
-       DistanceKm: this.calculateDistance(userLat, userLng, store.StoreLocations!.Latitude, store.StoreLocations!.Longitude)
+       DistanceKm: this.calculateDistance(userLat, userLng, store.storeLocations!.latitude, store.storeLocations!.longitude)
     })).sort((a, b) => a.DistanceKm - b.DistanceKm);
   }
 

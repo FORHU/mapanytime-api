@@ -5,36 +5,36 @@ export default class AuthRepo {
   static async createUser(data: { email: string; password?: string; name?: string }) {
     return prisma.users.create({
       data: {
-        Email: data.email,
-        PasswordHash: data.password || '',
-        FirstName: data.name?.split(' ')[0] || 'Unknown',
-        LastName: data.name?.split(' ').slice(1).join(' ') || '',
-        IsEmailVerified: true,
-        AccountStatus: 'ACTIVE',
+        email: data.email,
+        passwordHash: data.password || '',
+        firstName: data.name?.split(' ')[0] || 'Unknown',
+        lastName: data.name?.split(' ').slice(1).join(' ') || '',
+        isEmailVerified: true,
+        accountStatus: 'ACTIVE',
       },
-      include: { Avatar: true }
+      include: { avatar: true }
     });
   }
 
   static async findUserByEmail(email: string) {
     return prisma.users.findFirst({
-      where: { Email: email, AccountStatus: 'ACTIVE' },
-      include: { Avatar: true },
+      where: { email: email, accountStatus: 'ACTIVE' },
+      include: { avatar: true },
     });
   }
 
   static async updateUserLoginStatus(userId: string) {
     return prisma.users.update({
-      where: { Id: userId },
-      data: { LastLoginAt: new Date(), UpdatedAt: new Date() },
-      include: { Avatar: true },
+      where: { id: userId },
+      data: { lastLoginAt: new Date(), updatedAt: new Date() },
+      include: { avatar: true },
     });
   }
 
   static async findUserById(userId: string) {
     return prisma.users.findFirst({
-      where: { Id: userId, AccountStatus: 'ACTIVE' },
-      include: { Avatar: true },
+      where: { id: userId, accountStatus: 'ACTIVE' },
+      include: { avatar: true },
     });
   }
 
@@ -46,34 +46,34 @@ export default class AuthRepo {
     providerUserId?: string;
     providerAvatarUrl?: string;
   }) {
-    return prisma.sessionSocialAccount.create({
+    return prisma.session.create({
       data: {
-        UserId: data.userId,
-        RefreshToken: data.refreshToken,
-        ExpiresAt: data.expiresAt,
-        Provider: data.provider || 'local',
-        ProviderUserId: data.providerUserId,
-        AvatarUrl: data.providerAvatarUrl,
+        userId: data.userId,
+        refreshToken: data.refreshToken,
+        expiresAt: data.expiresAt,
+        provider: data.provider || 'local',
+        providerUserId: data.providerUserId,
+        avatarUrl: data.providerAvatarUrl,
       },
     });
   }
 
   static async findValidSession(refreshToken: string) {
-    return prisma.sessionSocialAccount.findFirst({
-      where: { RefreshToken: refreshToken, ExpiresAt: { gt: new Date() } },
+    return prisma.session.findFirst({
+      where: { refreshToken: refreshToken, expiresAt: { gt: new Date() } },
       include: { users: true },
     });
   }
 
   static async deleteSession(refreshToken: string) {
-    return prisma.sessionSocialAccount.deleteMany({
-      where: { RefreshToken: refreshToken },
+    return prisma.session.deleteMany({
+      where: { refreshToken: refreshToken },
     });
   }
 
   static async updateUser(userId: string, data: Prisma.UsersUncheckedUpdateInput) {
     return prisma.users.update({
-      where: { Id: userId },
+      where: { id: userId },
       data: data,
     });
   }

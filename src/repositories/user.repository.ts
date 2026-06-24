@@ -4,13 +4,13 @@ import { prisma } from '../utils/prisma';
 export default class UserRepository {
   static async findById(id: string) {
     return prisma.users.findFirst({
-      where: { Id: id, AccountStatus: { not: 'DEACTIVATED' } },
+      where: { id: id, accountStatus: { not: 'DEACTIVATED' } },
     });
   }
 
   static async findByEmail(email: string) {
     return prisma.users.findFirst({
-      where: { Email: email, AccountStatus: { not: 'DEACTIVATED' } },
+      where: { email: email, accountStatus: { not: 'DEACTIVATED' } },
     });
   }
 
@@ -20,8 +20,8 @@ export default class UserRepository {
 
   static async update(id: string, data: Prisma.UsersUncheckedUpdateInput) {
     return prisma.users.update({
-      where: { Id: id },
-      data: { ...data, UpdatedAt: new Date() },
+      where: { id: id },
+      data: { ...data, updatedAt: new Date() },
     });
   }
 
@@ -29,12 +29,12 @@ export default class UserRepository {
     const skip = (page - 1) * limit;
     const [users, total] = await Promise.all([
       prisma.users.findMany({
-        where: { AccountStatus: { not: 'DEACTIVATED' } },
+        where: { accountStatus: { not: 'DEACTIVATED' } },
         skip,
         take: limit,
-        orderBy: { CreatedAt: 'desc' },
+        orderBy: { createdAt: 'desc' },
       }),
-      prisma.users.count({ where: { AccountStatus: { not: 'DEACTIVATED' } } }),
+      prisma.users.count({ where: { accountStatus: { not: 'DEACTIVATED' } } }),
     ]);
     return { users, total, page, limit, totalPages: Math.ceil(total / limit) };
   }

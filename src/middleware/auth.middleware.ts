@@ -17,7 +17,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     const user = await AuthRepo.findUserById(decoded.userId);
     
     // Check the raw database field 'AccountStatus' instead of the removed 'IsActive'
-    if (!user || user.AccountStatus !== 'ACTIVE') {
+    if (!user || user.accountStatus !== 'ACTIVE') {
       return res.status(404).json({ message: 'User not found or deactivated' });
     }
     

@@ -8,7 +8,7 @@ export default class UserService {
     const user = await UserRepository.findById(id);
     if (!user) throw { status: 404, message: 'User not found' };
     
-    const { PasswordHash: _, ...userWithoutPassword } = user;
+    const { passwordHash: _, ...userWithoutPassword } = user;
     return userWithoutPassword;
   }
 
@@ -20,12 +20,12 @@ export default class UserService {
     const user = await UserRepository.create(data);
 
     await rabbitmq.publish(ROUTING_KEYS.USER_CREATED, {
-      userId: user.Id,
-      email: user.Email,
+      userId: user.id,
+      email: user.email,
       timestamp: new Date().toISOString(),
     });
 
-    const { PasswordHash: _, ...userWithoutPassword } = user;
+    const { passwordHash: _, ...userWithoutPassword } = user;
     return userWithoutPassword;
   }
 }
