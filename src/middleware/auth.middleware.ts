@@ -3,17 +3,6 @@ import jwt from 'jsonwebtoken';
 import AuthRepo from '../repositories/auth.repository';
 import { ACCESS_TOKEN_SECRET } from '../config';
 
-type AuthUser = NonNullable<Awaited<ReturnType<typeof AuthRepo.findUserById>>>;
-
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Express {
-    interface Request {
-      user?: AuthUser;
-    }
-  }
-}
-
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   const token = req.headers.authorization?.split(' ')[1];
 
@@ -26,9 +15,12 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       userId: string;
     };
     const user = await AuthRepo.findUserById(decoded.userId);
-    if (!user || user.isDeleted) {
-      return res.status(404).json({ message: 'User not found' });
+
+    // Check the raw database field 'AccountStatus' instead of the removed 'IsActive'
+    if (!user || user.accountStatus !== 'ACTIVE') {
+      return res.status(404).json({ message: 'User not found or deactivated' });
     }
+
     req.user = user;
     next();
   } catch {

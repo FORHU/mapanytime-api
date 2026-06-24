@@ -7,71 +7,226 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id                  String                 @id @default(uuid())
-  email               String                 @unique
-  password            String?                // Optional for social-only users
-  name                String?
-  username            String                 @unique
-  role                UserRole               @default(USER)
-  isActive            Boolean                @default(true)
-  lastLoginAt         DateTime?
-  createdAt           DateTime               @default(now())
-  updatedAt           DateTime               @updatedAt
-  avatarId            String?
-  isDeleted           Boolean                @default(false)
-  isEmailVerified     Boolean                @default(true)
-  onboardingCompleted Boolean                @default(false)
-  avatar              File?                  @relation("UserAvatar", fields: [avatarId], references: [id])
-  sessions            Session[]
-  socialAccounts      SessionSocialAccount[]
-}
+model Users {
+  id                    String              @id @default(cuid())
+  email                 String              @unique
+  passwordHash          String
+  firstName             String?
+  lastName              String?
+  phoneNumber           String?
+  role                  UserRole            @default(USER)
+  avatarId              String?             @unique
+  accountStatus         UserAccountStatus   @default(ACTIVE)
+  isEmailVerified       Boolean             @default(false)
+  lastLoginAt           DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
 
+  avatar                Files?              @relation(fields: [avatarId], references: [id])
+  session               Session[] 
+  seller                Sellers?         
+  buyer                 Buyers?
+  verifiedDocuments     DocumentVerifications[] 
+  sentAdminInvites      AdminInvites[]
+}
+enum UserRole {
+  USER
+  BUYER
+  SELLER
+  ADMIN
+}
+enum UserAccountStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
 model Session {
-  id                String   @id @default(uuid())
-  userId            String
-  createdAt         DateTime @default(now())
-  expiresAt         DateTime
-  refreshToken      String   @unique
-  provider          String?
-  providerAvatarUrl String?
-
-  user              User      @relation(fields: [userId], references: [id])
-
-  @@index([userId])
-}
-
-model SessionSocialAccount {
-  id             String    @id @default(uuid())
-  userId         String
-  platform       String
-  providerUserId String
-  accessToken    String
-  refreshToken   String?
+  id             String    @id @default(cuid())
+  userId         String    
+  provider       String    
+  providerUserId String?   
+  accessToken    String?
+  refreshToken   String?   @unique
   expiresAt      DateTime?
   scopes         String?
   avatarUrl      String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
-  user           User      @relation(fields: [userId], references: [id])
 
-  @@unique([userId, platform])
+  users           Users     @relation(fields: [userId], references: [id])
+
+  // Ensures no two different users can link the exact same external social account
+  @@unique([provider, providerUserId]) 
 }
 
-model File {
-  id        String    @id @default(uuid())
-  filename  String?
-  fileUrl   String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-  metaData  Json?
-  users     User[]    @relation("UserAvatar")
+model Files {
+  id          String      @id @default(cuid())
+  userId      String
+  fileName    String
+  fileUrl     String
+  metaData    Json?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  users       Users?   
+
+  documents      Documents[]   
+  products       Products[] 
 }
 
-enum UserRole {
-  USER
-  ADMIN
-  SUPER_ADMIN
-  DEVELOPER
+model Sellers {
+    id                  String      @id @default(cuid())
+    userId              String      @unique
+    createdAt           DateTime    @default(now())
+    updatedAt           DateTime    @updatedAt
+    applicationStatus   ApplicationStatus @default(PENDING)
+
+    users        Users      @relation(fields: [userId], references: [id])
+    documentVerifications DocumentVerifications[]
+    store         Stores?
+}
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Buyers {
+    id          String      @id @default(cuid())
+    userId      String      @unique
+    DisplayName String
+    CreatedAt   DateTime    @default(now())
+    UpdatedAt   DateTime    @updatedAt
+
+    users        Users       @relation(fields: [userId], references: [id])
+}
+
+model DocumentVerifications {
+    id                  String      @id @default(cuid())
+    sellerId            String
+    verificationStatus  VerificationStatus @default(PENDING) 
+    verifiedById        String?          
+    createdAt           DateTime    @default(now())
+    updatedAt           DateTime    @updatedAt
+
+    seller              Sellers      @relation(fields: [sellerId], references: [id])
+    documents           Documents[]
+    verifiedByAdmin        Users?       @relation(fields: [verifiedById], references: [id])
+}
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Documents {
+    id                         String      @id @default(cuid())
+    documentVerificationsId    String      
+    fileId                     String
+    documentType               DocumentTypes
+    createdAt                  DateTime    @default(now())
+    updatedAt                  DateTime    @updatedAt
+
+    documentVerification       DocumentVerifications     @relation(fields: [documentVerificationsId], references: [id])
+    files                      Files       @relation(fields: [fileId], references: [id])
+}
+enum DocumentTypes {
+  MAYORS_PERMIT
+  TIN_ID
+  DTI_CERTIFICATE
+}
+
+model AdminInvites {
+    id          String       @id @default(cuid())
+    email       String       @unique // Ensures only one active invite per email
+    token       String       @unique // The secure random string sent in the email link
+    status      InviteStatus @default(PENDING)
+    inviterId   String       // The ID of the Admin who created this invite
+    expiresAt   DateTime     
+    createdAt   DateTime     @default(now())
+    updatedAt   DateTime     @updatedAt
+
+    inviter     Users        @relation(fields: [inviterId], references: [id])
+}
+enum InviteStatus {
+    PENDING
+    ACCEPTED
+    REVOKED
+    EXPIRED
+}
+
+model Stores {
+  id          String      @id @default(cuid())
+  sellerId    String      @unique
+  storeName   String
+  description String?
+  isActive    Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  seller      Sellers     @relation(fields: [sellerId], references: [id])
+  storeHours   StoreHours[]
+  storeLocations StoreLocations?
+  storeReviews StoreReviews[]
+  products     Products[]
+}
+
+model StoreHours {
+  id          String      @id @default(cuid())
+  storeId     String
+  dayOfWeek   Int         // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  openTime    String      // Format: "HH:mm"
+  closeTime   String      // Format: "HH:mm"
+  isClosed    Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  store       Stores      @relation(fields: [storeId], references: [id])
+}
+
+model StoreLocations {
+  id                 String      @id @default(cuid())
+  storeId            String      @unique
+  currentAddress     String
+  homeAddress        String
+  city               String
+  province           String
+  zipCode            String
+  country            String
+  latitude           Float
+  longitude          Float
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  store              Stores      @relation(fields: [storeId], references: [id])
+}
+
+model StoreReviews {
+  id          String      @id @default(cuid())
+  storeId     String
+  buyerId     String
+  rating      Int         // e.g., 1 to 5
+  comment     String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  store       Stores      @relation(fields: [storeId], references: [id])
+  //buyer     Buyers      @relation(fields: [buyerId], references: [id])
+}
+
+model Products {
+  id          String      @id @default(cuid())
+  storeId     String
+  productFileId String?     
+  name        String
+  brand       String?
+  description String?
+  category    String?
+  price       Float
+  isActive    Boolean     @default(false)
+  listedAt    DateTime?   // When the product was made available for purchase
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  store       Stores      @relation(fields: [storeId], references: [id])
+  productFile  Files?      @relation(fields: [productFileId], references: [id])
 }

@@ -2,74 +2,40 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 
 export default class UserRepository {
-  /**
-   * Find a user by ID
-   */
   static async findById(id: string) {
-    return prisma.user.findFirst({
-      where: { id, isDeleted: false },
+    return prisma.users.findFirst({
+      where: { id: id, accountStatus: { not: 'DEACTIVATED' } },
     });
   }
 
-  /**
-   * Find a user by email
-   */
   static async findByEmail(email: string) {
-    return prisma.user.findFirst({
-      where: { email, isDeleted: false },
+    return prisma.users.findFirst({
+      where: { email: email, accountStatus: { not: 'DEACTIVATED' } },
     });
   }
 
-  /**
-   * Create a new user
-   */
-  static async create(data: Prisma.UserCreateInput) {
-    return prisma.user.create({
-      data,
-    });
+  static async create(data: Prisma.UsersUncheckedCreateInput) {
+    return prisma.users.create({ data });
   }
 
-  /**
-   * Update user details
-   */
-  static async update(id: string, data: Prisma.UserUpdateInput) {
-    return prisma.user.update({
-      where: { id },
+  static async update(id: string, data: Prisma.UsersUncheckedUpdateInput) {
+    return prisma.users.update({
+      where: { id: id },
       data: { ...data, updatedAt: new Date() },
     });
   }
 
-  /**
-   * Soft delete a user
-   */
-  static async softDelete(id: string) {
-    return prisma.user.update({
-      where: { id },
-      data: { isDeleted: true, isActive: false },
-    });
-  }
-
-  /**
-   * List all users (paginated)
-   */
   static async findAll(page: number = 1, limit: number = 10) {
     const skip = (page - 1) * limit;
     const [users, total] = await Promise.all([
-      prisma.user.findMany({
-        where: { isDeleted: false },
+      prisma.users.findMany({
+        where: { accountStatus: { not: 'DEACTIVATED' } },
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.user.count({ where: { isDeleted: false } }),
+      prisma.users.count({ where: { accountStatus: { not: 'DEACTIVATED' } } }),
     ]);
-
-    return {
-      users,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return { users, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 }

@@ -2,110 +2,39 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 
 export default class AuthRepo {
-  static async findUserByEmailOrUsername(email: string, username: string) {
-    return prisma.user.findFirst({
-      where: {
-        OR: [{ email }, { username }],
-        isDeleted: false,
-      },
-    });
-  }
-
-  static async createUser(data: {
-    email: string;
-    password?: string;
-    username: string;
-    name?: string;
-  }) {
-    return prisma.user.create({
+  static async createUser(data: { email: string; password?: string; name?: string }) {
+    return prisma.users.create({
       data: {
         email: data.email,
-        password: data.password,
-        username: data.username,
-        name: data.name,
+        passwordHash: data.password || '',
+        firstName: data.name?.split(' ')[0] || 'Unknown',
+        lastName: data.name?.split(' ').slice(1).join(' ') || '',
         isEmailVerified: true,
+        accountStatus: 'ACTIVE',
       },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        name: true,
-        role: true,
-        isEmailVerified: true,
-        onboardingCompleted: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      include: { avatar: true },
     });
   }
 
   static async findUserByEmail(email: string) {
-    return prisma.user.findFirst({
-      where: {
-        email,
-        isDeleted: false,
-      },
-      include: {
-        avatar: {
-          select: {
-            fileUrl: true,
-          },
-        },
-      },
+    return prisma.users.findFirst({
+      where: { email: email, accountStatus: 'ACTIVE' },
+      include: { avatar: true },
     });
   }
 
   static async updateUserLoginStatus(userId: string) {
-    return prisma.user.update({
-      where: {
-        id: userId,
-        isDeleted: false,
-      },
-      data: {
-        isActive: true,
-        lastLoginAt: new Date(),
-        updatedAt: new Date(),
-      },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        name: true,
-        role: true,
-        isActive: true,
-        avatar: {
-          select: {
-            fileUrl: true,
-          },
-        },
-        lastLoginAt: true,
-        onboardingCompleted: true,
-      },
+    return prisma.users.update({
+      where: { id: userId },
+      data: { lastLoginAt: new Date(), updatedAt: new Date() },
+      include: { avatar: true },
     });
   }
 
   static async findUserById(userId: string) {
-    return prisma.user.findFirst({
-      where: {
-        id: userId,
-        isDeleted: false,
-      },
-      include: {
-        avatar: {
-          select: {
-            fileUrl: true,
-          },
-        },
-      },
-    });
-  }
-
-  static async findUserByUsername(username: string) {
-    return prisma.user.findFirst({
-      where: {
-        username,
-        isDeleted: false,
-      },
+    return prisma.users.findFirst({
+      where: { id: userId, accountStatus: 'ACTIVE' },
+      include: { avatar: true },
     });
   }
 
@@ -119,55 +48,33 @@ export default class AuthRepo {
   }) {
     return prisma.session.create({
       data: {
-        ...data,
+        userId: data.userId,
+        refreshToken: data.refreshToken,
+        expiresAt: data.expiresAt,
+        provider: data.provider || 'local',
+        providerUserId: data.providerUserId,
+        avatarUrl: data.providerAvatarUrl,
       },
     });
   }
 
   static async findValidSession(refreshToken: string) {
     return prisma.session.findFirst({
-      where: {
-        refreshToken,
-        expiresAt: {
-          gt: new Date(),
-        },
-      },
-      include: {
-        user: true,
-      },
+      where: { refreshToken: refreshToken, expiresAt: { gt: new Date() } },
+      include: { users: true },
     });
   }
 
   static async deleteSession(refreshToken: string) {
     return prisma.session.deleteMany({
-      where: {
-        refreshToken,
-      },
+      where: { refreshToken: refreshToken },
     });
   }
 
-  static async updateUser(userId: string, data: Prisma.UserUpdateInput) {
-    return prisma.user.update({
-      where: {
-        id: userId,
-      },
+  static async updateUser(userId: string, data: Prisma.UsersUncheckedUpdateInput) {
+    return prisma.users.update({
+      where: { id: userId },
       data: data,
-    });
-  }
-
-  static async getAuthUser(userId: string) {
-    return prisma.user.findUnique({
-      where: {
-        id: userId,
-      },
-      select: {
-        id: true,
-        name: true,
-        avatar: true,
-        username: true,
-        role: true,
-        onboardingCompleted: true,
-      },
     });
   }
 }
