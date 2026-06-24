@@ -2,7 +2,12 @@ import AuthRepo from '../repositories/auth.repository';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { Users } from '@prisma/client';
-import { ACCESS_TOKEN_SECRET, REFRESH_TOKEN_SECRET, ACCESS_TOKEN_EXPIRY, REFRESH_TOKEN_EXPIRY } from '../config';
+import {
+  ACCESS_TOKEN_SECRET,
+  REFRESH_TOKEN_SECRET,
+  ACCESS_TOKEN_EXPIRY,
+  REFRESH_TOKEN_EXPIRY,
+} from '../config';
 import CacheUtil from '../utils/cache.util';
 
 export default class AuthSvc {
@@ -12,7 +17,7 @@ export default class AuthSvc {
 
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512').toString('hex');
-    
+
     const user = await AuthRepo.createUser({
       email: data.email,
       password: `${salt}:${hash}`,
@@ -52,25 +57,23 @@ export default class AuthSvc {
   }
 
   private static async generateAuthResponse(user: Users, provider: string) {
-    const accessToken = jwt.sign(
-      { userId: user.id }, 
-      ACCESS_TOKEN_SECRET, 
-      { expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] }
-    );
+    const accessToken = jwt.sign({ userId: user.id }, ACCESS_TOKEN_SECRET, {
+      expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'],
+    });
 
     const refreshToken = jwt.sign(
       { userId: user.id, jti: crypto.randomBytes(16).toString('hex') },
       REFRESH_TOKEN_SECRET,
-      { expiresIn: REFRESH_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] }
+      { expiresIn: REFRESH_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] },
     );
 
-    await AuthRepo.createSession({ 
-      userId: user.id, 
-      refreshToken, 
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), 
-      provider 
+    await AuthRepo.createSession({
+      userId: user.id,
+      refreshToken,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      provider,
     });
-    
+
     await CacheUtil.set(`user:${user.id}`, user);
 
     return { accessToken, refreshToken, user };

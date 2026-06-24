@@ -7,7 +7,7 @@ export default class UserService {
   static async getUser(id: string) {
     const user = await UserRepository.findById(id);
     if (!user) throw { status: 404, message: 'User not found' };
-    
+
     const { passwordHash: _, ...userWithoutPassword } = user;
     return userWithoutPassword;
   }

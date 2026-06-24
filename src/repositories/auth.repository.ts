@@ -12,7 +12,7 @@ export default class AuthRepo {
         isEmailVerified: true,
         accountStatus: 'ACTIVE',
       },
-      include: { avatar: true }
+      include: { avatar: true },
     });
   }
 

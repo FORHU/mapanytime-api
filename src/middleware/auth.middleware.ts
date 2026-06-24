@@ -15,12 +15,12 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       userId: string;
     };
     const user = await AuthRepo.findUserById(decoded.userId);
-    
+
     // Check the raw database field 'AccountStatus' instead of the removed 'IsActive'
     if (!user || user.accountStatus !== 'ACTIVE') {
       return res.status(404).json({ message: 'User not found or deactivated' });
     }
-    
+
     req.user = user;
     next();
   } catch {

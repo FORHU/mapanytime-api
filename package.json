@@ -4,7 +4,7 @@
   "description": "MapAnytime marketplace API — Node.js/TypeScript backend with Prisma and Express",
   "main": "dist/src/server.js",
   "license": "MIT",
-"scripts": {
+  "scripts": {
     "dev": "nodemon --watch src --ext ts --exec ts-node --files ./src/server.ts",
     "worker": "nodemon --watch src --ext ts --exec ts-node ./src/worker.ts",
     "build": "tsc",
@@ -21,7 +21,6 @@
     "test:integration": "jest tests/integration --passWithNoTests",
     "test:coverage": "jest --coverage"
   },
-  
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
   },

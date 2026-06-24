@@ -9,7 +9,7 @@ export async function seedUsers(prisma: PrismaClient) {
       email: 'admin@example.com',
       firstName: 'System',
       lastName: 'Admin',
-      role: UserRole.ADMIN, 
+      role: UserRole.ADMIN,
       passwordRaw: 'Password123',
       isEmailVerified: true,
     },
@@ -28,7 +28,7 @@ export async function seedUsers(prisma: PrismaClient) {
       role: UserRole.BUYER,
       passwordRaw: 'Buyer123',
       isEmailVerified: true,
-    }
+    },
   ];
 
   for (const userData of usersToCreate) {

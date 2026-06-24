@@ -19,7 +19,7 @@ export default class ProductController {
 
     try {
       // Using PascalCase property
-      const userId = req.user?.Id; 
+      const userId = req.user?.Id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       const data = await ProductService.createProduct(userId, value);

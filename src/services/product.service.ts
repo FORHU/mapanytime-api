@@ -2,7 +2,10 @@ import ProductRepository from '../repositories/product.repository';
 import { Prisma } from '@prisma/client';
 
 export default class ProductService {
-  static async createProduct(userId: string, productData: Omit<Prisma.ProductsUncheckedCreateInput, 'StoreId'>) {
+  static async createProduct(
+    userId: string,
+    productData: Omit<Prisma.ProductsUncheckedCreateInput, 'StoreId'>,
+  ) {
     const seller = await ProductRepository.getStoreByUserId(userId);
 
     if (!seller || seller.applicationStatus !== 'APPROVED') {

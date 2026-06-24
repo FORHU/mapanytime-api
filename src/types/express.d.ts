@@ -1,4 +1,4 @@
-import { AuthUser } from '../repositories/auth.repository'; 
+import { AuthUser } from '../repositories/auth.repository';
 
 declare global {
   namespace Express {

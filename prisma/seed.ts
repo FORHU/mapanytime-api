@@ -11,7 +11,7 @@ async function main() {
     // Execution order matters due to foreign key constraints
     await seedUsers(prisma);
     await seedStores(prisma);
-    
+
     console.log('🎉 All seeder modules executed successfully!');
   } catch (error) {
     console.error('❌ Seeding failed:', error);
