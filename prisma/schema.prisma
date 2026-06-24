@@ -34,6 +34,8 @@ enum UserRole {
   BUYER
   SELLER
   ADMIN
+  SUPER_ADMIN
+  DEVELOPER
 }
 enum UserAccountStatus {
   ACTIVE

@@ -1,6 +1,15 @@
--- CreateEnum
-CREATE TYPE "UserRole" AS ENUM ('NotRegistered', 'BUYER', 'SELLER', 'ADMIN');
+/*
+  Warnings:
 
+  - You are about to drop the column `providerAvatarUrl` on the `Session` table. All the data in the column will be lost.
+  - You are about to drop the `File` table. If the table is not empty, all the data it contains will be lost.
+  - You are about to drop the `SessionSocialAccount` table. If the table is not empty, all the data it contains will be lost.
+  - You are about to drop the `User` table. If the table is not empty, all the data it contains will be lost.
+  - A unique constraint covering the columns `[provider,providerUserId]` on the table `Session` will be added. If there are existing duplicate values, this will fail.
+  - Added the required column `updatedAt` to the `Session` table without a default value. This is not possible if the table is not empty.
+  - Made the column `provider` on table `Session` required. This step will fail if there are existing NULL values in that column.
+
+*/
 -- CreateEnum
 CREATE TYPE "UserAccountStatus" AS ENUM ('ACTIVE', 'SUSPENDED', 'DEACTIVATED');
 
@@ -16,6 +25,41 @@ CREATE TYPE "DocumentTypes" AS ENUM ('MAYORS_PERMIT', 'TIN_ID', 'DTI_CERTIFICATE
 -- CreateEnum
 CREATE TYPE "InviteStatus" AS ENUM ('PENDING', 'ACCEPTED', 'REVOKED', 'EXPIRED');
 
+-- AlterEnum
+ALTER TYPE "UserRole" ADD VALUE 'SELLER';
+
+-- DropForeignKey
+ALTER TABLE "Session" DROP CONSTRAINT "Session_userId_fkey";
+
+-- DropForeignKey
+ALTER TABLE "SessionSocialAccount" DROP CONSTRAINT "SessionSocialAccount_userId_fkey";
+
+-- DropForeignKey
+ALTER TABLE "User" DROP CONSTRAINT "User_avatarId_fkey";
+
+-- DropIndex
+DROP INDEX "Session_userId_idx";
+
+-- AlterTable
+ALTER TABLE "Session" DROP COLUMN "providerAvatarUrl",
+ADD COLUMN     "accessToken" TEXT,
+ADD COLUMN     "avatarUrl" TEXT,
+ADD COLUMN     "providerUserId" TEXT,
+ADD COLUMN     "scopes" TEXT,
+ADD COLUMN     "updatedAt" TIMESTAMP(3) NOT NULL,
+ALTER COLUMN "expiresAt" DROP NOT NULL,
+ALTER COLUMN "refreshToken" DROP NOT NULL,
+ALTER COLUMN "provider" SET NOT NULL;
+
+-- DropTable
+DROP TABLE "File";
+
+-- DropTable
+DROP TABLE "SessionSocialAccount";
+
+-- DropTable
+DROP TABLE "User";
+
 -- CreateTable
 CREATE TABLE "Users" (
     "id" TEXT NOT NULL,
@@ -24,7 +68,7 @@ CREATE TABLE "Users" (
     "firstName" TEXT,
     "lastName" TEXT,
     "phoneNumber" TEXT,
-    "role" "UserRole" NOT NULL DEFAULT 'NotRegistered',
+    "role" "UserRole" NOT NULL DEFAULT 'USER',
     "avatarId" TEXT,
     "accountStatus" "UserAccountStatus" NOT NULL DEFAULT 'ACTIVE',
     "isEmailVerified" BOOLEAN NOT NULL DEFAULT false,
@@ -33,23 +77,6 @@ CREATE TABLE "Users" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Users_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "Session" (
-    "id" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "provider" TEXT NOT NULL,
-    "providerUserId" TEXT,
-    "accessToken" TEXT,
-    "refreshToken" TEXT,
-    "expiresAt" TIMESTAMP(3),
-    "scopes" TEXT,
-    "avatarUrl" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Session_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -208,12 +235,6 @@ CREATE UNIQUE INDEX "Users_email_key" ON "Users"("email");
 CREATE UNIQUE INDEX "Users_avatarId_key" ON "Users"("avatarId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Session_refreshToken_key" ON "Session"("refreshToken");
-
--- CreateIndex
-CREATE UNIQUE INDEX "Session_provider_providerUserId_key" ON "Session"("provider", "providerUserId");
-
--- CreateIndex
 CREATE UNIQUE INDEX "Sellers_userId_key" ON "Sellers"("userId");
 
 -- CreateIndex
@@ -230,6 +251,9 @@ CREATE UNIQUE INDEX "Stores_sellerId_key" ON "Stores"("sellerId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "StoreLocations_storeId_key" ON "StoreLocations"("storeId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Session_provider_providerUserId_key" ON "Session"("provider", "providerUserId");
 
 -- AddForeignKey
 ALTER TABLE "Users" ADD CONSTRAINT "Users_avatarId_fkey" FOREIGN KEY ("avatarId") REFERENCES "Files"("id") ON DELETE SET NULL ON UPDATE CASCADE;
