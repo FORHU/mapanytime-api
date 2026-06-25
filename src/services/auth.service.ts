@@ -11,7 +11,12 @@ import {
 import CacheUtil from '../utils/cache.util';
 
 export default class AuthSvc {
-  static async register(data: { email: string; password: string; name?: string }) {
+  static async register(data: {
+    email: string;
+    password: string;
+    name?: string;
+    roleName: string;
+  }) {
     const existingUser = await AuthRepo.findUserByEmail(data.email);
     if (existingUser) throw { status: 400, message: 'User already exists' };
 
@@ -20,8 +25,13 @@ export default class AuthSvc {
 
     const user = await AuthRepo.createUser({
       email: data.email,
-      password: `${salt}:${hash}`,
-      name: data.name,
+      passwordHash: `${salt}:${hash}`,
+      firstName: data.name,
+      roles: {
+        connect: {
+          roleName: data.roleName,
+        },
+      },
     });
     return this.generateAuthResponse(user, 'local');
   }

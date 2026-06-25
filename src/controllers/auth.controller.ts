@@ -11,6 +11,7 @@ export default class AuthController {
       email: Joi.string().email().required(),
       password: Joi.string().min(6).required(),
       name: Joi.string().optional(),
+      roleName: Joi.string().required(),
     });
 
     const { error, value } = schema.validate(req.body);

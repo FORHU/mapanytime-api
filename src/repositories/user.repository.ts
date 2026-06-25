@@ -14,11 +14,11 @@ export default class UserRepository {
     });
   }
 
-  static async create(data: Prisma.UsersUncheckedCreateInput) {
+  static async create(data: Prisma.UsersCreateInput) {
     return prisma.users.create({ data });
   }
 
-  static async update(id: string, data: Prisma.UsersUncheckedUpdateInput) {
+  static async update(id: string, data: Prisma.UsersUpdateInput) {
     return prisma.users.update({
       where: { id: id },
       data: { ...data, updatedAt: new Date() },
