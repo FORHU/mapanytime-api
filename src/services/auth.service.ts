@@ -86,6 +86,8 @@ export default class AuthSvc {
 
     await CacheUtil.set(`user:${user.id}`, user);
 
-    return { accessToken, refreshToken, user };
+    // Secure the payload by stripping the passwordHash
+    const { passwordHash: _unusedPassword, ...safeUser } = user;
+    return { accessToken, refreshToken, user: safeUser };
   }
 }
