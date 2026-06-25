@@ -38,4 +38,15 @@ export default class UserRepository {
     ]);
     return { users, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
+
+  static async addRoleToUser(userId: string, roleName: string) {
+    return prisma.users.update({
+      where: { id: userId },
+      data: {
+        roles: {
+          connect: { roleName: roleName }, // links the role without removing existing ones
+        },
+      },
+    });
+  }
 }
