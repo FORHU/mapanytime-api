@@ -2,24 +2,22 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 
 export default class AuthRepo {
-  static async createUser(data: { email: string; password?: string; name?: string }) {
+  static async createUser(data: Prisma.UsersCreateInput) {
     return prisma.users.create({
       data: {
-        email: data.email,
-        passwordHash: data.password || '',
-        firstName: data.name?.split(' ')[0] || 'Unknown',
-        lastName: data.name?.split(' ').slice(1).join(' ') || '',
+        ...data,
+
         isEmailVerified: true,
         accountStatus: 'ACTIVE',
       },
-      include: { avatar: true },
+      include: { avatar: true, roles: true },
     });
   }
 
   static async findUserByEmail(email: string) {
     return prisma.users.findFirst({
       where: { email: email, accountStatus: 'ACTIVE' },
-      include: { avatar: true },
+      include: { avatar: true, roles: true },
     });
   }
 
@@ -27,7 +25,8 @@ export default class AuthRepo {
     return prisma.users.update({
       where: { id: userId },
       data: { lastLoginAt: new Date(), updatedAt: new Date() },
-      include: { avatar: true },
+
+      include: { avatar: true, roles: true },
     });
   }
 

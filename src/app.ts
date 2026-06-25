@@ -42,7 +42,7 @@ app.disable('x-powered-by');
 // API Routes
 app.use('/api', router);
 
-// Swagger UI — available at http://localhost:PORT/api/docs (dev only)
+// Swagger UI
 if (isDev) {
   app.use(
     '/api/docs',
@@ -53,6 +53,13 @@ if (isDev) {
     }),
   );
 }
+// Catch-All 404 Middleware
+app.use((req, res, next) => {
+  const error = new Error(`Route not found: ${req.originalUrl}`) as Error & { status?: number };
+  error.status = 404;
+  // Pass the error to your custom errorHandler below
+  next(error);
+});
 
 // Error Handling
 app.use(errorHandler);

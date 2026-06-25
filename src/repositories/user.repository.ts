@@ -14,11 +14,11 @@ export default class UserRepository {
     });
   }
 
-  static async create(data: Prisma.UsersUncheckedCreateInput) {
+  static async create(data: Prisma.UsersCreateInput) {
     return prisma.users.create({ data });
   }
 
-  static async update(id: string, data: Prisma.UsersUncheckedUpdateInput) {
+  static async update(id: string, data: Prisma.UsersUpdateInput) {
     return prisma.users.update({
       where: { id: id },
       data: { ...data, updatedAt: new Date() },
@@ -37,5 +37,16 @@ export default class UserRepository {
       prisma.users.count({ where: { accountStatus: { not: 'DEACTIVATED' } } }),
     ]);
     return { users, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  static async addRoleToUser(userId: string, roleName: string) {
+    return prisma.users.update({
+      where: { id: userId },
+      data: {
+        roles: {
+          connect: { roleName: roleName }, // links the role without removing existing ones
+        },
+      },
+    });
   }
 }

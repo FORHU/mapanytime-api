@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { seedUsers } from './seeders/users.seeder';
 import { seedStores } from './seeders/stores.seeder';
+import { seedRoles } from './seeders/roles.seeder';
 
 const prisma = new PrismaClient();
 
@@ -9,6 +10,7 @@ async function main() {
 
   try {
     // Execution order matters due to foreign key constraints
+    await seedRoles(prisma);
     await seedUsers(prisma);
     await seedStores(prisma);
 

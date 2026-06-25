@@ -1,4 +1,4 @@
-import { PrismaClient, UserRole } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 
 export async function seedUsers(prisma: PrismaClient) {
@@ -9,7 +9,7 @@ export async function seedUsers(prisma: PrismaClient) {
       email: 'admin@example.com',
       firstName: 'System',
       lastName: 'Admin',
-      role: UserRole.ADMIN,
+      roles: ['ADMIN'],
       passwordRaw: 'Password123',
       isEmailVerified: true,
     },
@@ -17,7 +17,7 @@ export async function seedUsers(prisma: PrismaClient) {
       email: 'seller@example.com',
       firstName: 'Grace',
       lastName: 'Piatos',
-      role: UserRole.SELLER,
+      roles: ['SELLER'],
       passwordRaw: 'Seller123',
       isEmailVerified: true,
     },
@@ -25,14 +25,22 @@ export async function seedUsers(prisma: PrismaClient) {
       email: 'buyer@example.com',
       firstName: 'Sara',
       lastName: 'Smith',
-      role: UserRole.BUYER,
+      roles: ['BUYER'],
       passwordRaw: 'Buyer123',
+      isEmailVerified: true,
+    },
+    {
+      email: 'dual@example.com',
+      firstName: 'Alex',
+      lastName: 'Mercer',
+      roles: ['BUYER', 'SELLER'],
+      passwordRaw: 'Dual123',
       isEmailVerified: true,
     },
   ];
 
   for (const userData of usersToCreate) {
-    const { passwordRaw, ...rest } = userData;
+    const { passwordRaw, roles, ...rest } = userData;
 
     const existingUser = await prisma.users.findUnique({
       where: { email: rest.email },
@@ -47,6 +55,9 @@ export async function seedUsers(prisma: PrismaClient) {
         data: {
           ...rest,
           passwordHash: hashedPassword,
+          roles: {
+            connect: roles.map((roleName: string) => ({ roleName })),
+          },
         },
       });
       console.log(`✅ Created user: ${rest.email}`);

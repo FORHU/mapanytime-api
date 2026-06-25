@@ -44,4 +44,21 @@ export default class UserController {
       next(error);
     }
   }
+
+  static async assignRole(req: Request, res: Response, next: NextFunction) {
+    try {
+      // Use Id (capital I) to match your getMe method
+      const userId = req.user?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized');
+
+      const { roleName } = req.body;
+      if (!roleName) return responseError(res, 400, 'roleName is required');
+
+      await UserService.assignRole(userId, roleName);
+
+      return responseSuccess(res, 200, null, `Role ${roleName} assigned successfully`);
+    } catch (error) {
+      next(error);
+    }
+  }
 }
