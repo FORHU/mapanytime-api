@@ -1,57 +1,39 @@
-import { PrismaClient, UserRole } from '@prisma/client';
+import { PrismaClient, UserRole, Prisma } from '@prisma/client';
 import crypto from 'crypto';
 
 export async function seedUsers(prisma: PrismaClient) {
-  console.log('🌱 Seeding Users...');
+  console.log('🌱 Seeding 50,000 Users...');
 
-  const usersToCreate = [
-    {
-      email: 'admin@example.com',
-      firstName: 'System',
-      lastName: 'Admin',
-      role: UserRole.ADMIN,
-      passwordRaw: 'Password123',
-      isEmailVerified: true,
-    },
-    {
-      email: 'seller@example.com',
-      firstName: 'Grace',
-      lastName: 'Piatos',
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync('Password123', salt, 1000, 64, 'sha512').toString('hex');
+  const sharedPassword = `${salt}:${hash}`;
+
+  const BATCH_SIZE = 5000;
+  const TOTAL = 50000;
+
+  for (let batch = 0; batch < TOTAL / BATCH_SIZE; batch++) {
+    const usersToCreate: Prisma.UsersCreateManyInput[] = Array.from({ length: BATCH_SIZE }).map((_, i) => ({
+      email: `luzon_seller_${batch}_${i}@example.com`,
+      firstName: `Luzon${batch}_${i}`,
+      lastName: 'Merchant',
       role: UserRole.SELLER,
-      passwordRaw: 'Seller123',
+      passwordHash: sharedPassword,
       isEmailVerified: true,
-    },
-    {
-      email: 'buyer@example.com',
-      firstName: 'Sara',
-      lastName: 'Smith',
-      role: UserRole.BUYER,
-      passwordRaw: 'Buyer123',
-      isEmailVerified: true,
-    },
-  ];
+    }));
 
-  for (const userData of usersToCreate) {
-    const { passwordRaw, ...rest } = userData;
-
-    const existingUser = await prisma.users.findUnique({
-      where: { email: rest.email },
-    });
-
-    if (!existingUser) {
-      const salt = crypto.randomBytes(16).toString('hex');
-      const hash = crypto.pbkdf2Sync(passwordRaw, salt, 1000, 64, 'sha512').toString('hex');
-      const hashedPassword = `${salt}:${hash}`;
-
-      await prisma.users.create({
-        data: {
-          ...rest,
-          passwordHash: hashedPassword,
-        },
-      });
-      console.log(`✅ Created user: ${rest.email}`);
-    } else {
-      console.log(`ℹ️ User already exists: ${rest.email}`);
+    if (batch === 0) {
+      // Base test accounts
+      usersToCreate.push({ email: 'seller@example.com', firstName: 'Test', lastName: 'Seller', role: UserRole.SELLER, passwordHash: sharedPassword, isEmailVerified: true });
+      usersToCreate.push({ email: 'admin@example.com', firstName: 'System', lastName: 'Admin', role: UserRole.ADMIN, passwordHash: sharedPassword, isEmailVerified: true });
+      usersToCreate.push({ email: 'buyer@example.com', firstName: 'Sara', lastName: 'Smith', role: UserRole.BUYER, passwordHash: sharedPassword, isEmailVerified: true });
     }
+
+    console.log(`Inserting user batch ${batch + 1}...`);
+    await prisma.users.createMany({
+      data: usersToCreate,
+      skipDuplicates: true,
+    });
   }
+  
+  console.log('✅ 50,000 Users safely seeded!');
 }

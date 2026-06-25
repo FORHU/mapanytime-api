@@ -71,7 +71,7 @@ export default class AuthController {
       const { refreshToken } = req.body;
 
       // Updated to PascalCase Id
-      const userId = req.user?.Id;
+      const userId = (req as any).user?.Id;
 
       if (!userId) return res.status(401).json({ message: 'Unauthorized' });
       const result = await AuthSvc.logout(userId, refreshToken);

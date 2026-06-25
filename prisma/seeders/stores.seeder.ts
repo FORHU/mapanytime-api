@@ -1,78 +1,75 @@
 import { PrismaClient } from '@prisma/client';
 
 export async function seedStores(prisma: PrismaClient) {
-  console.log('🌱 Seeding Stores & Products...');
+  console.log('🌱 Clearing old stores for massive 50k re-seed...');
+  await prisma.storeLocations.deleteMany();
+  await prisma.products.deleteMany();
+  await prisma.stores.deleteMany();
+  await prisma.sellers.deleteMany();
 
-  // Fetch the dummy seller created in users.seeder.ts
-  const sellerUser = await prisma.users.findUnique({
-    where: { email: 'seller@example.com' },
+  console.log('🌱 Seeding 50,000 Stores & Products across Luzon...');
+
+  const users = await prisma.users.findMany({
+    where: { role: 'SELLER' },
+    select: { id: true }
   });
+  console.log(`Found ${users.length} sellers...`);
 
-  if (!sellerUser) {
-    console.log('❌ Seller user not found. Skipping store creation.');
-    return;
+  const BATCH_SIZE = 5000;
+  
+  // Bulk create Sellers in batches
+  for (let i = 0; i < users.length; i += BATCH_SIZE) {
+    const userBatch = users.slice(i, i + BATCH_SIZE);
+    await prisma.sellers.createMany({
+      data: userBatch.map(u => ({ userId: u.id })),
+      skipDuplicates: true,
+    });
   }
+  const sellers = await prisma.sellers.findMany();
 
-  // Create the Sellers profile
-  const sellerProfile = await prisma.sellers.upsert({
-    where: { userId: sellerUser.id },
-    update: {},
-    create: { userId: sellerUser.id },
-  });
-  console.log(`✅ Seller profile verified for: ${sellerUser.email}`);
+  // Bulk create Stores in batches
+  for (let i = 0; i < sellers.length; i += BATCH_SIZE) {
+    const sellerBatch = sellers.slice(i, i + BATCH_SIZE);
+    await prisma.stores.createMany({
+      data: sellerBatch.map((s, index) => ({
+        sellerId: s.id,
+        storeName: `Luzon Route Merchant ${i + index}`,
+        description: `Dummy store ${i + index} for Mapbox rendering stress test.`,
+        isActive: true,
+      })),
+      skipDuplicates: true,
+    });
+  }
+  const stores = await prisma.stores.findMany();
 
-  // Create the Store
-  const store = await prisma.stores.upsert({
-    where: { sellerId: sellerProfile.id },
-    update: {},
-    create: {
-      sellerId: sellerProfile.id,
-      storeName: 'Premium Tech',
-      description: 'High quality electronics and accessories.',
-      isActive: true,
-    },
-  });
-  console.log(`✅ Store created: ${store.storeName}`);
-
-  // Create dummy Products
-  const products = [
-    {
-      name: 'Wireless Ergonomic Mouse',
-      price: 1350.0,
-      brand: 'LogiTech',
-      category: 'Electronics',
-      description: 'Comfortable wireless mouse for long working hours.',
-    },
-    {
-      name: 'Mechanical Keyboard (Red Switches)',
-      price: 1500.0,
-      brand: 'Keychron',
-      category: 'Electronics',
-      description: 'Hot-swappable mechanical keyboard.',
-    },
-    {
-      name: '100W USB-C Charger',
-      price: 500.0,
-      brand: 'Anker',
-      category: 'Accessories',
-      description: 'Fast charging brick for laptops and phones.',
-    },
-  ];
-
-  for (const prod of products) {
-    const existingProduct = await prisma.products.findFirst({
-      where: { storeId: store.id, name: prod.name },
+  // Bulk create Locations (Scattered across Luzon)
+  for (let i = 0; i < stores.length; i += BATCH_SIZE) {
+    const storeBatch = stores.slice(i, i + BATCH_SIZE);
+    const locationData = storeBatch.map((s) => {
+      // Luzon bounding box approx:
+      // Lat: 13.0 to 18.5
+      // Lng: 119.5 to 124.0
+      const lat = 13.0 + Math.random() * (18.5 - 13.0);
+      const lng = 119.5 + Math.random() * (124.0 - 119.5);
+      
+      return {
+        storeId: s.id,
+        currentAddress: `Luzon Highway`,
+        homeAddress: `Luzon Highway`,
+        city: 'Various',
+        province: 'Luzon Region',
+        zipCode: '1000',
+        country: 'Philippines',
+        latitude: lat,
+        longitude: lng,
+      };
     });
 
-    if (!existingProduct) {
-      await prisma.products.create({
-        data: {
-          ...prod,
-          storeId: store.id,
-          isActive: true,
-        },
-      });
-      console.log(`✅ Created product: ${prod.name}`);
-    }
+    await prisma.storeLocations.createMany({
+      data: locationData,
+      skipDuplicates: true,
+    });
   }
+
+  console.log(`✅ ${stores.length} Stores successfully safely rendered into database!`);
 }
