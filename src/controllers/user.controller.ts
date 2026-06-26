@@ -10,7 +10,7 @@ export default class UserController {
   static async getMe(req: Request, res: Response, next: NextFunction) {
     try {
       // Updated to strictly use PascalCase Id
-      const userId = req.user?.Id;
+      const userId = req.user?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       const user = await UserService.getUser(userId);
