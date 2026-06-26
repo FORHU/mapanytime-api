@@ -30,7 +30,7 @@ export async function seedUsers(prisma: PrismaClient) {
       roles: ['BUYER'],
       passwordRaw: 'Buyer123',
       isEmailVerified: true,
-      countryCode: 'US',
+      countryCode: 'PH',
     },
     {
       email: 'dual@example.com',
