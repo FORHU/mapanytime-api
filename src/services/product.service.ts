@@ -30,7 +30,7 @@ export default class ProductService {
     return ProductRepository.getProductsByStoreId(seller.store.id);
   }
 
-  static async updateProduct(userId: string, productId: string, updateData: any) {
+  static async updateProduct(userId: string, productId: string, updateData: Prisma.ProductsUncheckedUpdateInput) {
     const seller = await ProductRepository.getStoreByUserId(userId);
     if (!seller || !seller.store) throw { status: 404, message: 'Store not found.' };
 

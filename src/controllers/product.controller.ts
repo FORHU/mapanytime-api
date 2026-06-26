@@ -18,7 +18,7 @@ export default class ProductController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as any)?.id;
+      const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       const data = await ProductService.createProduct(userId, value);
@@ -30,7 +30,7 @@ export default class ProductController {
 
   static async index(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = (req.user as any)?.id;
+      const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       const data = await ProductService.getMyProducts(userId);
@@ -54,12 +54,12 @@ export default class ProductController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as any)?.id;
+      const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       const productId = req.params.id;
       const updatedProduct = await ProductService.updateProduct(userId, productId, value);
-      
+
       return responseSuccess(res, 200, updatedProduct, 'Product updated successfully');
     } catch (error) {
       next(error);
@@ -68,12 +68,12 @@ export default class ProductController {
 
   static async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = (req.user as any)?.id;
+      const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       const productId = req.params.id;
       await ProductService.deleteProduct(userId, productId);
-      
+
       return responseSuccess(res, 200, null, 'Product deleted successfully');
     } catch (error) {
       next(error);
