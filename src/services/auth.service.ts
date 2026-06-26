@@ -16,6 +16,7 @@ export default class AuthSvc {
     password: string;
     name?: string;
     roleName: string;
+    countryCode?: string;
   }) {
     const existingUser = await AuthRepo.findUserByEmail(data.email);
     if (existingUser) throw { status: 400, message: 'User already exists' };
@@ -27,13 +28,14 @@ export default class AuthSvc {
       email: data.email,
       passwordHash: `${salt}:${hash}`,
       firstName: data.name,
+      countryCode: data.countryCode,
       roles: {
         connect: {
           roleName: data.roleName,
         },
       },
     });
-    return this.generateAuthResponse(user, 'local');
+    return { message: 'Registration successful' };
   }
 
   static async login(data: { email: string; password: string }) {
@@ -57,7 +59,7 @@ export default class AuthSvc {
     const user = await AuthRepo.findUserById(decoded.userId);
     if (!user) throw { status: 404, message: 'User not found' };
 
-    return this.generateAuthResponse(user, 'local');
+    return this.generateAuthResponse(user, 'local', false);
   }
 
   static async logout(userId: string, refreshToken?: string) {
@@ -66,7 +68,7 @@ export default class AuthSvc {
     return { message: 'Logged out successfully' };
   }
 
-  private static async generateAuthResponse(user: Users, provider: string) {
+  private static async generateAuthResponse(user: Users, provider: string, includeUser = true) {
     const accessToken = jwt.sign({ userId: user.id }, ACCESS_TOKEN_SECRET, {
       expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'],
     });
@@ -86,6 +88,17 @@ export default class AuthSvc {
 
     await CacheUtil.set(`user:${user.id}`, user);
 
-    return { accessToken, refreshToken };
+    if (!includeUser) {
+      return { accessToken, refreshToken };
+    }
+
+    const { passwordHash: _, ...userWithoutPassword } = user;
+
+    return { 
+      accessToken, 
+      refreshToken,
+      user: userWithoutPassword,
+      location: { country: user.countryCode }
+    };
   }
 }
