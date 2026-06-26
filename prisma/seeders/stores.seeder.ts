@@ -1,78 +1,96 @@
 import { PrismaClient } from '@prisma/client';
 
 export async function seedStores(prisma: PrismaClient) {
-  console.log('🌱 Seeding Stores & Products...');
+  console.log('🌱 Clearing old stores for massive 50k re-seed...');
+  await prisma.storeLocations.deleteMany();
+  await prisma.products.deleteMany();
+  await prisma.stores.deleteMany();
+  await prisma.sellers.deleteMany();
 
-  // Fetch the dummy seller created in users.seeder.ts
-  const sellerUser = await prisma.users.findUnique({
-    where: { email: 'seller@example.com' },
+  console.log('🌱 Seeding 50,000 Stores & Products across Luzon...');
+
+  const users = await prisma.users.findMany({
+    where: {
+      roles: {
+        some: {
+          roleName: 'SELLER',
+        },
+      },
+    },
+    select: { id: true },
   });
+  console.log(`Found ${users.length} sellers...`);
 
-  if (!sellerUser) {
-    console.log('❌ Seller user not found. Skipping store creation.');
-    return;
+  const BATCH_SIZE = 5000;
+
+  // Bulk create Sellers in batches
+  for (let i = 0; i < users.length; i += BATCH_SIZE) {
+    const userBatch = users.slice(i, i + BATCH_SIZE);
+    await prisma.sellers.createMany({
+      data: userBatch.map((u) => ({ userId: u.id })),
+      skipDuplicates: true,
+    });
   }
+  const sellers = await prisma.sellers.findMany();
 
-  // Create the Sellers profile
-  const sellerProfile = await prisma.sellers.upsert({
-    where: { userId: sellerUser.id },
-    update: {},
-    create: { userId: sellerUser.id },
-  });
-  console.log(`✅ Seller profile verified for: ${sellerUser.email}`);
+  // Bulk create Stores in batches
+  for (let i = 0; i < sellers.length; i += BATCH_SIZE) {
+    const sellerBatch = sellers.slice(i, i + BATCH_SIZE);
+    await prisma.stores.createMany({
+      data: sellerBatch.map((s, index) => ({
+        sellerId: s.id,
+        storeName: `Luzon Route Merchant ${i + index}`,
+        description: `Dummy store ${i + index} for Mapbox rendering stress test.`,
+        isActive: true,
+      })),
+      skipDuplicates: true,
+    });
+  }
+  const stores = await prisma.stores.findMany();
 
-  // Create the Store
-  const store = await prisma.stores.upsert({
-    where: { sellerId: sellerProfile.id },
-    update: {},
-    create: {
-      sellerId: sellerProfile.id,
-      storeName: 'Premium Tech',
-      description: 'High quality electronics and accessories.',
-      isActive: true,
-    },
-  });
-  console.log(`✅ Store created: ${store.storeName}`);
-
-  // Create dummy Products
-  const products = [
-    {
-      name: 'Wireless Ergonomic Mouse',
-      price: 1350.0,
-      brand: 'LogiTech',
-      category: 'Electronics',
-      description: 'Comfortable wireless mouse for long working hours.',
-    },
-    {
-      name: 'Mechanical Keyboard (Red Switches)',
-      price: 1500.0,
-      brand: 'Keychron',
-      category: 'Electronics',
-      description: 'Hot-swappable mechanical keyboard.',
-    },
-    {
-      name: '100W USB-C Charger',
-      price: 500.0,
-      brand: 'Anker',
-      category: 'Accessories',
-      description: 'Fast charging brick for laptops and phones.',
-    },
+  // Bulk create Locations (Scattered around 3 major areas)
+  const targetCities = [
+    { name: 'Baguio City', lat: 16.4119, lng: 120.5933, radius: 0.04 },
+    { name: 'Candon City', lat: 17.1958, lng: 120.4489, radius: 0.03 },
+    { name: 'Metro Manila (NCR)', lat: 14.5995, lng: 120.9842, radius: 0.1 },
   ];
 
-  for (const prod of products) {
-    const existingProduct = await prisma.products.findFirst({
-      where: { storeId: store.id, name: prod.name },
+  for (let i = 0; i < stores.length; i += BATCH_SIZE) {
+    const storeBatch = stores.slice(i, i + BATCH_SIZE);
+    const locationData = storeBatch.map((s) => {
+      // Pick a random target city
+      const city = targetCities[Math.floor(Math.random() * targetCities.length)];
+
+      // Scatter randomly within the city's radius
+      const latOffset = (Math.random() * 2 - 1) * city.radius;
+      const lngOffset = (Math.random() * 2 - 1) * city.radius;
+
+      const lat = city.lat + latOffset;
+      const lng = city.lng + lngOffset;
+
+      return {
+        storeId: s.id,
+        currentAddress: `${city.name} Commercial Road`,
+        homeAddress: `${city.name} Commercial Road`,
+        city: city.name,
+        province:
+          city.name === 'Metro Manila (NCR)'
+            ? 'NCR'
+            : city.name === 'Baguio City'
+              ? 'Benguet'
+              : 'Ilocos Sur',
+        zipCode: '1000',
+        country: 'Philippines',
+        latitude: lat,
+        longitude: lng,
+      };
     });
 
-    if (!existingProduct) {
-      await prisma.products.create({
-        data: {
-          ...prod,
-          storeId: store.id,
-          isActive: true,
-        },
-      });
-      console.log(`✅ Created product: ${prod.name}`);
-    }
+    await prisma.storeLocations.createMany({
+      data: locationData,
+      skipDuplicates: true,
+    });
   }
+
+  console.log(`✅ ${stores.length} Stores successfully safely rendered into database!`);
 }

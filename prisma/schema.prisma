@@ -18,6 +18,7 @@ model Users {
   avatarId              String?             @unique
   accountStatus         UserAccountStatus   @default(ACTIVE)
   isEmailVerified       Boolean             @default(false)
+  countryCode           String?
   lastLoginAt           DateTime?
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
