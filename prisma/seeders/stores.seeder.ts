@@ -10,7 +10,13 @@ export async function seedStores(prisma: PrismaClient) {
   console.log('🌱 Seeding 50,000 Stores & Products across Luzon...');
 
   const users = await prisma.users.findMany({
-    where: { role: 'SELLER' },
+    where: {
+      roles: {
+        some: {
+          roleName: 'SELLER',
+        },
+      },
+    },
     select: { id: true },
   });
   console.log(`Found ${users.length} sellers...`);

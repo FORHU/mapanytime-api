@@ -12,6 +12,7 @@ export async function seedUsers(prisma: PrismaClient) {
       roles: ['ADMIN'],
       passwordRaw: 'Password123',
       isEmailVerified: true,
+      countryCode: 'PH',
     },
     {
       email: 'seller@example.com',
@@ -20,6 +21,7 @@ export async function seedUsers(prisma: PrismaClient) {
       roles: ['SELLER'],
       passwordRaw: 'Seller123',
       isEmailVerified: true,
+      countryCode: 'PH',
     },
     {
       email: 'buyer@example.com',
@@ -28,6 +30,7 @@ export async function seedUsers(prisma: PrismaClient) {
       roles: ['BUYER'],
       passwordRaw: 'Buyer123',
       isEmailVerified: true,
+      countryCode: 'US',
     },
     {
       email: 'dual@example.com',
@@ -36,6 +39,7 @@ export async function seedUsers(prisma: PrismaClient) {
       roles: ['BUYER', 'SELLER'],
       passwordRaw: 'Dual123',
       isEmailVerified: true,
+      countryCode: 'PH',
     },
   ];
 
