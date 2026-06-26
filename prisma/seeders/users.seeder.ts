@@ -48,9 +48,7 @@ export async function seedUsers(prisma: PrismaClient) {
 
     if (!existingUser) {
       const salt = crypto.randomBytes(16).toString('hex');
-      const hash = crypto
-        .pbkdf2Sync(passwordRaw, salt, 1000, 64, 'sha512')
-        .toString('hex');
+      const hash = crypto.pbkdf2Sync(passwordRaw, salt, 1000, 64, 'sha512').toString('hex');
       const hashedPassword = `${salt}:${hash}`;
 
       await prisma.users.create({

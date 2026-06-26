@@ -88,10 +88,10 @@ export default class AuthSvc {
 
     await CacheUtil.set(`user:${user.id}`, user);
 
-    return { 
-      accessToken, 
+    return {
+      accessToken,
       refreshToken,
-      location: { country: user.countryCode }
+      location: { country: user.countryCode },
     };
   }
 }

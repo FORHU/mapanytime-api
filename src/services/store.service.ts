@@ -21,13 +21,15 @@ export default class StoreService {
     try {
       const redis = redisConnection.getClient();
       const cached = await redis.get(cacheKey);
-      
+
       if (cached) {
         logger.info(`[Redis] Cache hit for ${cacheKey}`);
         return JSON.parse(cached);
       }
     } catch (err) {
-      logger.warn(`[Redis] Cache read failed for ${cacheKey}, falling back to DB. (Is Redis running?)`);
+      logger.warn(
+        `[Redis] Cache read failed for ${cacheKey}, falling back to DB. (Is Redis running?)`,
+      );
     }
 
     // The database now strictly filters by the viewport bounding box

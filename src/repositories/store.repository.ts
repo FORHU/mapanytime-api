@@ -8,7 +8,13 @@ export default class StoreRepository {
     });
   }
 
-  static async getNearbyStores(north: number, south: number, east: number, west: number, limit: number) {
+  static async getNearbyStores(
+    north: number,
+    south: number,
+    east: number,
+    west: number,
+    limit: number,
+  ) {
     // Pure viewport bounding box query - incredibly fast since it fully utilizes indexing
     // without requiring expensive Haversine trigonometric distance math on 50,000+ rows.
     const stores = await prisma.$queryRaw`
