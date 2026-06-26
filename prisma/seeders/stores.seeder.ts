@@ -16,8 +16,11 @@ export async function seedStores(prisma: PrismaClient) {
   // Create the Sellers profile
   const sellerProfile = await prisma.sellers.upsert({
     where: { userId: sellerUser.id },
-    update: {},
-    create: { userId: sellerUser.id },
+    update: { applicationStatus: 'APPROVED' }, 
+    create: { 
+      userId: sellerUser.id,
+      applicationStatus: 'APPROVED'
+    },
   });
   console.log(`✅ Seller profile verified for: ${sellerUser.email}`);
 

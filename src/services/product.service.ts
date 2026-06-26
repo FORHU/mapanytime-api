@@ -29,4 +29,32 @@ export default class ProductService {
 
     return ProductRepository.getProductsByStoreId(seller.store.id);
   }
+
+  static async updateProduct(userId: string, productId: string, updateData: any) {
+    const seller = await ProductRepository.getStoreByUserId(userId);
+    if (!seller || !seller.store) throw { status: 404, message: 'Store not found.' };
+
+    const product = await ProductRepository.getProductById(productId);
+    if (!product) throw { status: 404, message: 'Product not found.' };
+
+    if (product.storeId !== seller.store.id) {
+      throw { status: 403, message: 'You do not have permission to modify this product.' };
+    }
+
+    return ProductRepository.updateProduct(productId, updateData);
+  }
+
+  static async deleteProduct(userId: string, productId: string) {
+    const seller = await ProductRepository.getStoreByUserId(userId);
+    if (!seller || !seller.store) throw { status: 404, message: 'Store not found.' };
+
+    const product = await ProductRepository.getProductById(productId);
+    if (!product) throw { status: 404, message: 'Product not found.' };
+
+    if (product.storeId !== seller.store.id) {
+      throw { status: 403, message: 'You do not have permission to delete this product.' };
+    }
+
+    return ProductRepository.deleteProduct(productId);
+  }
 }

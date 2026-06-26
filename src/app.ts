@@ -16,11 +16,14 @@ app.set('trust proxy', 1);
 
 // Assign correlationId + requestId to every request (must be first)
 app.use(correlationMiddleware);
+app.use(helmet());
 
 app.use(
   cors({
-    origin: '*',
+    origin: ['http://localhost:3000'],
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
   }),
 );
 
@@ -36,7 +39,6 @@ const limiter = rateLimit({
 if (!isDev) app.use(limiter);
 
 // Set up security headers
-app.use(helmet());
 app.disable('x-powered-by');
 
 // API Routes
