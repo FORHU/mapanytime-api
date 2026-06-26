@@ -4,16 +4,19 @@ import logger from '../utils/logger';
 
 export default class StoreService {
   static async getNearbyStores(
-    userLat: number,
-    userLng: number,
-    radiusKm: number,
-    limit: number = 100,
+    north: number,
+    south: number,
+    east: number,
+    west: number,
+    limit: number,
   ) {
-    // Geospatial cache bucketing: Round coordinates to 2 decimal places (approx ~1.1km grid cells)
-    // This dramatically increases cache hit rate when panning across the map.
-    const latBucket = userLat.toFixed(2);
-    const lngBucket = userLng.toFixed(2);
-    const cacheKey = `stores:nearby:${latBucket}:${lngBucket}:${radiusKm.toFixed(1)}:${limit}`;
+    // Generate a Redis cache key based on the viewport, bucketing to 2 decimal places
+    // to improve cache hit rates for roughly similar panning areas
+    const n = north.toFixed(2);
+    const s = south.toFixed(2);
+    const e = east.toFixed(2);
+    const w = west.toFixed(2);
+    const cacheKey = `stores:viewport:${n}:${s}:${e}:${w}:limit:${limit}`;
 
     try {
       const redis = redisConnection.getClient();
@@ -27,8 +30,8 @@ export default class StoreService {
       logger.warn(`[Redis] Cache read failed for ${cacheKey}, falling back to DB. (Is Redis running?)`);
     }
 
-    // The database now handles the filtering, sorting, and math!
-    const stores = await StoreRepository.getNearbyStores(userLat, userLng, radiusKm, limit);
+    // The database now strictly filters by the viewport bounding box
+    const stores = await StoreRepository.getNearbyStores(north, south, east, west, limit);
 
     try {
       const redis = redisConnection.getClient();

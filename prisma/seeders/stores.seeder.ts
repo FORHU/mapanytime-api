@@ -42,22 +42,32 @@ export async function seedStores(prisma: PrismaClient) {
   }
   const stores = await prisma.stores.findMany();
 
-  // Bulk create Locations (Scattered across Luzon)
+  // Bulk create Locations (Scattered around 3 major areas)
+  const targetCities = [
+    { name: 'Baguio City', lat: 16.4119, lng: 120.5933, radius: 0.04 },
+    { name: 'Candon City', lat: 17.1958, lng: 120.4489, radius: 0.03 },
+    { name: 'Metro Manila (NCR)', lat: 14.5995, lng: 120.9842, radius: 0.1 }
+  ];
+
   for (let i = 0; i < stores.length; i += BATCH_SIZE) {
     const storeBatch = stores.slice(i, i + BATCH_SIZE);
     const locationData = storeBatch.map((s) => {
-      // Luzon bounding box approx:
-      // Lat: 13.0 to 18.5
-      // Lng: 119.5 to 124.0
-      const lat = 13.0 + Math.random() * (18.5 - 13.0);
-      const lng = 119.5 + Math.random() * (124.0 - 119.5);
+      // Pick a random target city
+      const city = targetCities[Math.floor(Math.random() * targetCities.length)];
+      
+      // Scatter randomly within the city's radius
+      const latOffset = (Math.random() * 2 - 1) * city.radius;
+      const lngOffset = (Math.random() * 2 - 1) * city.radius;
+      
+      const lat = city.lat + latOffset;
+      const lng = city.lng + lngOffset;
       
       return {
         storeId: s.id,
-        currentAddress: `Luzon Highway`,
-        homeAddress: `Luzon Highway`,
-        city: 'Various',
-        province: 'Luzon Region',
+        currentAddress: `${city.name} Commercial Road`,
+        homeAddress: `${city.name} Commercial Road`,
+        city: city.name,
+        province: city.name === 'Metro Manila (NCR)' ? 'NCR' : (city.name === 'Baguio City' ? 'Benguet' : 'Ilocos Sur'),
         zipCode: '1000',
         country: 'Philippines',
         latitude: lat,

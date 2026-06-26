@@ -6,9 +6,10 @@ import { responseSuccess, responseError } from '../helpers/response.helper';
 export default class StoreController {
   static async getNearby(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
-      lat: Joi.number().required(),
-      lng: Joi.number().required(),
-      radius: Joi.number().default(10), // Default 10km radius
+      north: Joi.number().required(),
+      south: Joi.number().required(),
+      east: Joi.number().required(),
+      west: Joi.number().required(),
       limit: Joi.number().integer().min(1).max(500).default(100), // Default 100 limit, max 500
     });
 
@@ -17,9 +18,10 @@ export default class StoreController {
 
     try {
       const data = await StoreService.getNearbyStores(
-        value.lat,
-        value.lng,
-        value.radius,
+        value.north,
+        value.south,
+        value.east,
+        value.west,
         value.limit,
       );
       return responseSuccess(res, 200, data);
