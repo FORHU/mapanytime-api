@@ -14,7 +14,7 @@ model Users {
   firstName             String?
   lastName              String?
   phoneNumber           String?
-  role                  UserRole            @default(USER)
+  roles                 Roles[]             @relation("UserRoles") 
   avatarId              String?             @unique
   accountStatus         UserAccountStatus   @default(ACTIVE)
   isEmailVerified       Boolean             @default(false)
@@ -29,13 +29,14 @@ model Users {
   verifiedDocuments     DocumentVerifications[] 
   sentAdminInvites      AdminInvites[]
 }
-enum UserRole {
-  USER
-  BUYER
-  SELLER
-  ADMIN
-  SUPER_ADMIN
-  DEVELOPER
+model Roles {
+  id          String      @id @default(cuid())
+  roleName    String      @unique 
+  description String?     
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  users       Users[]     @relation("UserRoles")
 }
 enum UserAccountStatus {
   ACTIVE
@@ -95,9 +96,9 @@ enum ApplicationStatus {
 model Buyers {
     id          String      @id @default(cuid())
     userId      String      @unique
-    DisplayName String
-    CreatedAt   DateTime    @default(now())
-    UpdatedAt   DateTime    @updatedAt
+    displayName String
+    createdAt   DateTime    @default(now())
+    updatedAt   DateTime    @updatedAt
 
     users        Users       @relation(fields: [userId], references: [id])
 }

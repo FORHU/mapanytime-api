@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { Users } from '@prisma/client';
 import Joi from 'joi';
 import AuthSvc from '../services/auth.service';
 
@@ -11,6 +12,7 @@ export default class AuthController {
       email: Joi.string().email().required(),
       password: Joi.string().min(6).required(),
       name: Joi.string().optional(),
+      roleName: Joi.string().required(),
     });
 
     const { error, value } = schema.validate(req.body);
@@ -18,7 +20,12 @@ export default class AuthController {
 
     try {
       const data = await AuthSvc.register(value);
-      return res.status(201).json({ message: 'User created successfully', data });
+      return res.status(201).json({
+        status: 'success',
+        statusCode: 201,
+        message: 'User created successfully',
+        data,
+      });
     } catch (error) {
       next(error);
     }
@@ -38,7 +45,12 @@ export default class AuthController {
 
     try {
       const data = await AuthSvc.login(value);
-      return res.json({ message: 'Login successful', data });
+      return res.status(200).json({
+        status: 'success',
+        statusCode: 200,
+        message: 'Login successful',
+        data,
+      });
     } catch (error) {
       next(error);
     }
@@ -57,7 +69,12 @@ export default class AuthController {
 
     try {
       const data = await AuthSvc.refreshToken(value.refreshToken);
-      return res.json(data);
+      return res.status(200).json({
+        status: 'success',
+        statusCode: 200,
+        message: 'Token refreshed successfully',
+        data,
+      });
     } catch (error) {
       next(error);
     }
@@ -69,13 +86,25 @@ export default class AuthController {
   static async logout(req: Request, res: Response, next: NextFunction) {
     try {
       const { refreshToken } = req.body;
+      const user = req.user as Users;
+      const userId = user?.id;
 
-      // Updated to PascalCase Id
-      const userId = (req as any).user?.Id;
+      if (!userId) {
+        return res.status(401).json({
+          status: 'error',
+          statusCode: 401,
+          message: 'Unauthorized',
+        });
+      }
 
-      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
       const result = await AuthSvc.logout(userId, refreshToken);
-      return res.json(result);
+
+      return res.status(200).json({
+        status: 'success',
+        statusCode: 200,
+        message: result.message,
+        data: {},
+      });
     } catch (error) {
       next(error);
     }

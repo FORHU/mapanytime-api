@@ -63,8 +63,8 @@ const options: swaggerJsdoc.Options = {
     },
     security: [{ BearerAuth: [] }],
   },
-  // Glob pattern for JSDoc-annotated route files
-  apis: ['./src/routes/*.ts', './src/controllers/*.ts'],
+  // Glob pattern for JSDoc-annotated route files and YAML files
+  apis: ['./src/routes/*.ts', './src/controllers/*.ts', './src/docs/*.yaml'],
 };
 
 export const swaggerSpec = swaggerJsdoc(options);
