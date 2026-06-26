@@ -13,6 +13,7 @@ export default class AuthController {
       password: Joi.string().min(6).required(),
       name: Joi.string().optional(),
       roleName: Joi.string().required(),
+      countryCode: Joi.string().max(3).optional(),
     });
 
     const { error, value } = schema.validate(req.body);

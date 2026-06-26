@@ -16,6 +16,7 @@ export default class AuthSvc {
     password: string;
     name?: string;
     roleName: string;
+    countryCode?: string;
   }) {
     const existingUser = await AuthRepo.findUserByEmail(data.email);
     if (existingUser) throw { status: 400, message: 'User already exists' };
@@ -27,6 +28,7 @@ export default class AuthSvc {
       email: data.email,
       passwordHash: `${salt}:${hash}`,
       firstName: data.name,
+      countryCode: data.countryCode,
       roles: {
         connect: {
           roleName: data.roleName,
@@ -86,6 +88,10 @@ export default class AuthSvc {
 
     await CacheUtil.set(`user:${user.id}`, user);
 
-    return { accessToken, refreshToken };
+    return { 
+      accessToken, 
+      refreshToken,
+      location: { country: user.countryCode }
+    };
   }
 }
