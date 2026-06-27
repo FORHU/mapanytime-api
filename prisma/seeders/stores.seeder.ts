@@ -23,26 +23,51 @@ export async function seedStores(prisma: PrismaClient) {
 
   const BATCH_SIZE = 5000;
 
-  // Bulk create Sellers in batches
-  for (let i = 0; i < users.length; i += BATCH_SIZE) {
-    const userBatch = users.slice(i, i + BATCH_SIZE);
-    await prisma.sellers.createMany({
-      data: userBatch.map((u) => ({ userId: u.id })),
-      skipDuplicates: true,
-    });
-  }
-  const sellers = await prisma.sellers.findMany();
+  // Create 500 dummy users for the dummy stores
+  const TOTAL_STORES = 500;
+  console.log(`🌱 Generating ${TOTAL_STORES} dummy Users, Sellers, and Stores...`);
 
-  // Bulk create Stores in batches
-  for (let i = 0; i < sellers.length; i += BATCH_SIZE) {
-    const sellerBatch = sellers.slice(i, i + BATCH_SIZE);
+  const dummyUsers = Array.from({ length: TOTAL_STORES }).map((_, i) => ({
+    email: `dummy_seller_${i}@example.com`,
+    passwordHash: 'dummy',
+    firstName: `Dummy ${i}`,
+    lastName: 'Seller',
+    isEmailVerified: true,
+  }));
+
+  for (let i = 0; i < dummyUsers.length; i += BATCH_SIZE) {
+    const batch = dummyUsers.slice(i, i + BATCH_SIZE);
+    await prisma.users.createMany({ data: batch, skipDuplicates: true });
+  }
+
+  const allDummyUsers = await prisma.users.findMany({
+    where: { email: { startsWith: 'dummy_seller_' } },
+  });
+
+  const dummySellers = allDummyUsers.map((u) => ({
+    userId: u.id,
+  }));
+
+  for (let i = 0; i < dummySellers.length; i += BATCH_SIZE) {
+    const batch = dummySellers.slice(i, i + BATCH_SIZE);
+    await prisma.sellers.createMany({ data: batch, skipDuplicates: true });
+  }
+
+  const allDummySellers = await prisma.sellers.findMany({
+    where: { userId: { in: allDummyUsers.map((u) => u.id) } },
+  });
+
+  const newStores = allDummySellers.map((seller, i) => ({
+    sellerId: seller.id,
+    storeName: `Luzon Route Merchant ${i}`,
+    description: `Dummy store ${i} for Mapbox rendering stress test.`,
+    isActive: true,
+  }));
+
+  for (let i = 0; i < newStores.length; i += BATCH_SIZE) {
+    const storeBatch = newStores.slice(i, i + BATCH_SIZE);
     await prisma.stores.createMany({
-      data: sellerBatch.map((s, index) => ({
-        sellerId: s.id,
-        storeName: `Luzon Route Merchant ${i + index}`,
-        description: `Dummy store ${i + index} for Mapbox rendering stress test.`,
-        isActive: true,
-      })),
+      data: storeBatch,
       skipDuplicates: true,
     });
   }
