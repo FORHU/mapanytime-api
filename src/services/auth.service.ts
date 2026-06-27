@@ -94,11 +94,11 @@ export default class AuthSvc {
 
     const { passwordHash: _, ...userWithoutPassword } = user;
 
-    return { 
-      accessToken, 
+    return {
+      accessToken,
       refreshToken,
       user: userWithoutPassword,
-      location: { country: user.countryCode }
+      location: { country: user.countryCode },
     };
   }
 }
