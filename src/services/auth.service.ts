@@ -24,7 +24,7 @@ export default class AuthSvc {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512').toString('hex');
 
-    const user = await AuthRepo.createUser({
+    await AuthRepo.createUser({
       email: data.email,
       passwordHash: `${salt}:${hash}`,
       firstName: data.name,
