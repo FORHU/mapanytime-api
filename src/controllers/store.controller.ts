@@ -172,7 +172,7 @@ export default class StoreController {
       }
 
       const stores = await StoreService.getMyStores(sellerId);
-      
+
       return responseSuccess(res, 200, stores);
     } catch (error) {
       next(error);

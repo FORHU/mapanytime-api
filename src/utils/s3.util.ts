@@ -7,14 +7,9 @@ import {
   AWS_SECRET_ACCESS_KEY,
   AWS_S3_BUCKET_NAME,
   S3_CDN_URL,
-} from '../config'; 
+} from '../config';
 
-console.log("DEBUG BUCKET INITIALIZATION:", { 
-  region: AWS_REGION, 
-  hasKey: !!AWS_ACCESS_KEY_ID 
-});
-
-const s3Client = new S3Client({      
+const s3Client = new S3Client({
   region: AWS_REGION as string,
   credentials: {
     accessKeyId: AWS_ACCESS_KEY_ID as string,

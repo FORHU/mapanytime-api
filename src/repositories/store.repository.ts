@@ -65,12 +65,12 @@ export default class StoreRepository {
       .sort((a, b) => a.distanceKm - b.distanceKm)
       .slice(0, limit);
   }
-  
+
   static async getStoresBySellerId(sellerId: string) {
     return prisma.stores.findMany({
       where: { sellerId: sellerId },
       include: { storeLocations: true },
-      orderBy: { createdAt: 'desc' } // Optional: puts newest stores at the top
+      orderBy: { createdAt: 'desc' }, // Optional: puts newest stores at the top
     });
   }
 }
