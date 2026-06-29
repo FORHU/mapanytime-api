@@ -10,7 +10,7 @@ import { redis } from './infrastructure/redis';
 
 const server = http.createServer(app);
 
-server.listen(PORT, () => {
+server.listen(Number(PORT), '0.0.0.0', () => {
   logger.info(`Server running on port ${PORT} in ${NODE_ENV} mode`);
 });
 

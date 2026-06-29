@@ -20,4 +20,23 @@ export default class ProductRepository {
       where: { storeId: storeId },
     });
   }
+
+  static async getProductById(productId: string) {
+    return prisma.products.findUnique({
+      where: { id: productId },
+    });
+  }
+
+  static async updateProduct(productId: string, data: Prisma.ProductsUncheckedUpdateInput) {
+    return prisma.products.update({
+      where: { id: productId },
+      data,
+    });
+  }
+
+  static async deleteProduct(productId: string) {
+    return prisma.products.delete({
+      where: { id: productId },
+    });
+  }
 }
