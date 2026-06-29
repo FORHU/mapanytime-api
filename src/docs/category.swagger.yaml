@@ -1,0 +1,45 @@
+tags:
+  - name: Categories
+    description: Operations related to product categories
+
+paths:
+  /v1/categories:
+    get:
+      summary: Get all approved categories
+      tags: [Categories]
+      security: []
+      responses:
+        '200':
+          description: List of categories retrieved successfully
+
+    post:
+      summary: Create a new category
+      tags: [Categories]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, storeId]
+              properties:
+                name:
+                  type: string
+                  example: Gardening Tools
+                description:
+                  type: string
+                  example: Handheld tools for gardening
+                storeId:
+                  type: string
+                  example: cmqwjvltm0008nheoeemlhp9v
+      responses:
+        '201':
+          description: Category created successfully
+        '400':
+          description: Bad request (Validation error)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (Store not verified or user not an approved seller)

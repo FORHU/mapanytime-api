@@ -5,11 +5,12 @@ export default class ProductRepository {
   static async getStoreByUserId(userId: string) {
     return prisma.sellers.findUnique({
       where: { userId: userId },
-      include: { store: true },
+      // CHANGED: Fetches the array of stores instead of a singular store
+      include: { stores: true },
     });
   }
 
-  static async createProduct(data: Prisma.ProductsUncheckedCreateInput) {
+  static async createProduct(data: Prisma.ProductsCreateInput) {
     return prisma.products.create({
       data,
     });
@@ -18,6 +19,7 @@ export default class ProductRepository {
   static async getProductsByStoreId(storeId: string) {
     return prisma.products.findMany({
       where: { storeId: storeId },
+      include: { category: true, tags: true },
     });
   }
 
@@ -27,7 +29,7 @@ export default class ProductRepository {
     });
   }
 
-  static async updateProduct(productId: string, data: Prisma.ProductsUncheckedUpdateInput) {
+  static async updateProduct(productId: string, data: Prisma.ProductsUpdateInput) {
     return prisma.products.update({
       where: { id: productId },
       data,
@@ -35,8 +37,9 @@ export default class ProductRepository {
   }
 
   static async deleteProduct(productId: string) {
-    return prisma.products.delete({
+    return prisma.products.update({
       where: { id: productId },
+      data: { isActive: false },
     });
   }
 }

@@ -2,28 +2,23 @@ import { PrismaClient } from '@prisma/client';
 
 export async function seedStores(prisma: PrismaClient) {
   console.log('🌱 Clearing old stores for massive 50k re-seed...');
-  await prisma.storeLocations.deleteMany();
+  await prisma.tags.deleteMany();
+  await prisma.documents.deleteMany();
+  await prisma.documentVerifications.deleteMany();
   await prisma.products.deleteMany();
+  await prisma.categories.deleteMany();
+  await prisma.storeLocations.deleteMany();
   await prisma.stores.deleteMany();
   await prisma.sellers.deleteMany();
 
   console.log('🌱 Seeding 50,000 Stores & Products across Luzon...');
 
   const users = await prisma.users.findMany({
-    where: {
-      roles: {
-        some: {
-          roleName: 'SELLER',
-        },
-      },
-    },
-    select: { id: true },
+    where: { roles: { some: { roleName: 'SELLER' } } },
+    select: { id: true, email: true },
   });
-  console.log(`Found ${users.length} sellers...`);
 
   const BATCH_SIZE = 5000;
-
-  // Bulk create Sellers in batches
   for (let i = 0; i < users.length; i += BATCH_SIZE) {
     const userBatch = users.slice(i, i + BATCH_SIZE);
     await prisma.sellers.createMany({
@@ -58,10 +53,7 @@ export async function seedStores(prisma: PrismaClient) {
   for (let i = 0; i < stores.length; i += BATCH_SIZE) {
     const storeBatch = stores.slice(i, i + BATCH_SIZE);
     const locationData = storeBatch.map((s) => {
-      // Pick a random target city
       const city = targetCities[Math.floor(Math.random() * targetCities.length)];
-
-      // Scatter randomly within the city's radius
       const latOffset = (Math.random() * 2 - 1) * city.radius;
       const lngOffset = (Math.random() * 2 - 1) * city.radius;
 
@@ -93,4 +85,33 @@ export async function seedStores(prisma: PrismaClient) {
   }
 
   console.log(`✅ ${stores.length} Stores successfully safely rendered into database!`);
+
+  // --- AUTOMATED VERIFICATION FOR TEST ACCOUNTS ---
+  console.log('🌱 Automating verification for test accounts...');
+  const testEmails = ['seller@example.com', 'dual@example.com'];
+
+  for (const email of testEmails) {
+    const user = await prisma.users.findUnique({ where: { email } });
+    if (user) {
+      await prisma.sellers.updateMany({
+        where: { userId: user.id },
+        data: { applicationStatus: 'APPROVED' },
+      });
+
+      const store = await prisma.stores.findFirst({
+        where: { seller: { userId: user.id } },
+      });
+
+      if (store) {
+        await prisma.documentVerifications.create({
+          data: {
+            storeId: store.id,
+            sellerId: store.sellerId,
+            verificationStatus: 'APPROVED',
+          },
+        });
+        console.log(`✅ Verified store for: ${email}`);
+      }
+    }
+  }
 }

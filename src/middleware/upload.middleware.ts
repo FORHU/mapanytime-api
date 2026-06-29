@@ -24,6 +24,7 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
     'audio/aac',
     'audio/x-wav',
     'audio/mpeg3',
+    'application/pdf',
     'application/json',
   ];
 

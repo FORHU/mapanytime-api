@@ -1,10 +1,20 @@
 import ProductRepository from '../repositories/product.repository';
 import { Prisma } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 
 export default class ProductService {
   static async createProduct(
     userId: string,
-    productData: Omit<Prisma.ProductsUncheckedCreateInput, 'StoreId'>,
+    storeId: string,
+    productData: {
+      name: string;
+      price: number;
+      brand?: string;
+      description?: string;
+      categoryId?: string;
+      tags?: string[];
+      isActive?: boolean;
+    },
   ) {
     const seller = await ProductRepository.getStoreByUserId(userId);
 
@@ -12,36 +22,70 @@ export default class ProductService {
       throw { status: 403, message: 'User is not an approved seller.' };
     }
 
-    if (!seller.store) {
-      throw { status: 404, message: 'Store not found for this seller.' };
+    // Verify the seller actually owns the store they are trying to add a product to
+    const ownsStore = seller.stores.some((s) => s.id === storeId);
+    if (!ownsStore) {
+      throw { status: 403, message: 'You do not own this store branch.' };
     }
 
-    // Automatically inject the StoreId linked to the authenticated user
+    const store = await prisma.stores.findUnique({
+      where: { id: storeId },
+      include: { documentVerifications: true },
+    });
+
+    if (!store) throw { status: 404, message: 'Store branch not found.' };
+
+    const isVerified = store.documentVerifications.some(
+      (doc) => doc.verificationStatus === 'APPROVED',
+    );
+
+    if (!isVerified) {
+      throw {
+        status: 403,
+        message: 'This store branch is not yet verified. Please wait for admin approval.',
+      };
+    }
+
+    const tagsData = productData.tags
+      ? { create: productData.tags.map((tag) => ({ name: tag })) }
+      : undefined;
+
     return ProductRepository.createProduct({
-      ...productData,
-      storeId: seller.store.id,
+      name: productData.name,
+      price: productData.price,
+      brand: productData.brand,
+      description: productData.description,
+      isActive: productData.isActive,
+      store: { connect: { id: storeId } },
+      ...(productData.categoryId && { category: { connect: { id: productData.categoryId } } }),
+      ...(tagsData && { tags: tagsData }),
     });
   }
 
-  static async getMyProducts(userId: string) {
+  static async getMyProducts(userId: string, storeId: string) {
     const seller = await ProductRepository.getStoreByUserId(userId);
-    if (!seller || !seller.store) throw { status: 404, message: 'Store not found.' };
+    if (!seller) throw { status: 404, message: 'Seller profile not found.' };
 
-    return ProductRepository.getProductsByStoreId(seller.store.id);
+    const ownsStore = seller.stores.some((s) => s.id === storeId);
+    if (!ownsStore) throw { status: 403, message: 'You do not own this store branch.' };
+
+    return ProductRepository.getProductsByStoreId(storeId);
   }
 
   static async updateProduct(
     userId: string,
     productId: string,
-    updateData: Prisma.ProductsUncheckedUpdateInput,
+    updateData: Prisma.ProductsUpdateInput,
   ) {
     const seller = await ProductRepository.getStoreByUserId(userId);
-    if (!seller || !seller.store) throw { status: 404, message: 'Store not found.' };
+    if (!seller) throw { status: 404, message: 'Seller not found.' };
 
     const product = await ProductRepository.getProductById(productId);
     if (!product) throw { status: 404, message: 'Product not found.' };
 
-    if (product.storeId !== seller.store.id) {
+    // Check if the product's storeId exists in the seller's array of stores
+    const ownsStore = seller.stores.some((s) => s.id === product.storeId);
+    if (!ownsStore) {
       throw { status: 403, message: 'You do not have permission to modify this product.' };
     }
 
@@ -50,12 +94,13 @@ export default class ProductService {
 
   static async deleteProduct(userId: string, productId: string) {
     const seller = await ProductRepository.getStoreByUserId(userId);
-    if (!seller || !seller.store) throw { status: 404, message: 'Store not found.' };
+    if (!seller) throw { status: 404, message: 'Seller not found.' };
 
     const product = await ProductRepository.getProductById(productId);
     if (!product) throw { status: 404, message: 'Product not found.' };
 
-    if (product.storeId !== seller.store.id) {
+    const ownsStore = seller.stores.some((s) => s.id === product.storeId);
+    if (!ownsStore) {
       throw { status: 403, message: 'You do not have permission to delete this product.' };
     }
 
