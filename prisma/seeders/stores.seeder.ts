@@ -75,6 +75,8 @@ export async function seedStores(prisma: PrismaClient) {
 
   // Bulk create Locations (Scattered around 3 major areas)
   const targetCities = [
+    // Tight cluster right at Burnham Park so stores appear without panning.
+    { name: 'Burnham Park, Baguio', lat: 16.4108, lng: 120.5934, radius: 0.015 },
     { name: 'Baguio City', lat: 16.4119, lng: 120.5933, radius: 0.04 },
     { name: 'Candon City', lat: 17.1958, lng: 120.4489, radius: 0.03 },
     { name: 'Metro Manila (NCR)', lat: 14.5995, lng: 120.9842, radius: 0.1 },
@@ -101,7 +103,7 @@ export async function seedStores(prisma: PrismaClient) {
         province:
           city.name === 'Metro Manila (NCR)'
             ? 'NCR'
-            : city.name === 'Baguio City'
+            : city.name.includes('Baguio')
               ? 'Benguet'
               : 'Ilocos Sur',
         zipCode: '1000',
