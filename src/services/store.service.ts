@@ -126,4 +126,8 @@ export default class StoreService {
 
     return stores;
   }
+
+  static async getMyStores(sellerId: string) {
+    return StoreRepository.getStoresBySellerId(sellerId);
+  }
 }

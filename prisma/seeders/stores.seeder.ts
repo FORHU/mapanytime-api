@@ -13,11 +13,6 @@ export async function seedStores(prisma: PrismaClient) {
 
   console.log('🌱 Seeding 50,000 Stores & Products across Luzon...');
 
-  const users = await prisma.users.findMany({
-    where: { roles: { some: { roleName: 'SELLER' } } },
-    select: { id: true, email: true },
-  });
-
   const BATCH_SIZE = 5000;
 
   // Create 500 dummy users for the dummy stores

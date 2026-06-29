@@ -161,4 +161,21 @@ export default class StoreController {
       next(error);
     }
   }
+
+  static async getMyStores(req: Request, res: Response, next: NextFunction) {
+    try {
+      const user = req.user as Users & { seller?: { id: string } };
+      const sellerId = user.seller?.id;
+
+      if (!sellerId) {
+        return responseError(res, 403, 'User is not registered as a seller.');
+      }
+
+      const stores = await StoreService.getMyStores(sellerId);
+      
+      return responseSuccess(res, 200, stores);
+    } catch (error) {
+      next(error);
+    }
+  }
 }

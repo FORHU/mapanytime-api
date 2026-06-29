@@ -102,6 +102,6 @@ export default class AuthSvc {
       refreshToken,
       stores,
       location: { country: user.countryCode },
-    }
+    };
   }
 }
