@@ -9,14 +9,21 @@ export default class StoreService {
     east: number,
     west: number,
     limit: number,
+    centerLat?: number,
+    centerLng?: number,
   ) {
-    // Generate a Redis cache key based on the viewport, bucketing to 2 decimal places
-    // to improve cache hit rates for roughly similar panning areas
+    // Default center to midpoint of the bounding box if not explicitly provided
+    const lat = centerLat ?? (north + south) / 2;
+    const lng = centerLng ?? (east + west) / 2;
+
+    // Cache key buckets to 2 decimal places for better hit rates on similar viewports
     const n = north.toFixed(2);
     const s = south.toFixed(2);
     const e = east.toFixed(2);
     const w = west.toFixed(2);
-    const cacheKey = `stores:viewport:${n}:${s}:${e}:${w}:limit:${limit}`;
+    const cLat = lat.toFixed(2);
+    const cLng = lng.toFixed(2);
+    const cacheKey = `stores:viewport:${n}:${s}:${e}:${w}:c:${cLat}:${cLng}:limit:${limit}`;
 
     try {
       const redis = redisConnection.getClient();
@@ -32,12 +39,11 @@ export default class StoreService {
       );
     }
 
-    // The database now strictly filters by the viewport bounding box
-    const stores = await StoreRepository.getNearbyStores(north, south, east, west, limit);
+    const stores = await StoreRepository.getNearbyStores(north, south, east, west, limit, lat, lng);
 
     try {
       const redis = redisConnection.getClient();
-      // Cache the heavy Prisma GIS query for 60 seconds
+      // Cache for 60 seconds
       await redis.setEx(cacheKey, 60, JSON.stringify(stores));
     } catch (err) {
       logger.warn(`[Redis] Cache write failed for ${cacheKey}.`);
