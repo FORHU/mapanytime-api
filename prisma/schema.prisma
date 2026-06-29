@@ -22,7 +22,27 @@ model Users {
   lastLoginAt     DateTime?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
+  id              String            @id @default(cuid())
+  email           String            @unique
+  passwordHash    String
+  firstName       String?
+  lastName        String?
+  phoneNumber     String?
+  roles           Roles[]           @relation("UserRoles")
+  avatarId        String?           @unique
+  accountStatus   UserAccountStatus @default(ACTIVE)
+  isEmailVerified Boolean           @default(false)
+  countryCode     String?
+  lastLoginAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
+  avatar            Files?                  @relation(fields: [avatarId], references: [id])
+  session           Session[]
+  seller            Sellers?
+  buyer             Buyers?
+  verifiedDocuments DocumentVerifications[]
+  sentAdminInvites  AdminInvites[]
   avatar            Files?                  @relation(fields: [avatarId], references: [id])
   session           Session[]
   seller            Sellers?
@@ -31,7 +51,13 @@ model Users {
   sentAdminInvites  AdminInvites[]
 }
 
+
 model Roles {
+  id          String   @id @default(cuid())
+  roleName    String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
   id          String   @id @default(cuid())
   roleName    String   @unique
   description String?
@@ -39,7 +65,9 @@ model Roles {
   updatedAt   DateTime @updatedAt
 
   users Users[] @relation("UserRoles")
+  users Users[] @relation("UserRoles")
 }
+
 
 enum UserAccountStatus {
   ACTIVE
@@ -47,8 +75,12 @@ enum UserAccountStatus {
   DEACTIVATED
 }
 
+
 model Session {
   id             String    @id @default(cuid())
+  userId         String
+  provider       String
+  providerUserId String?
   userId         String
   provider       String
   providerUserId String?
@@ -75,12 +107,27 @@ model Files {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   users     Users?
+  id        String   @id @default(cuid())
+  userId    String
+  fileName  String
+  fileUrl   String
+  metaData  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     Users?
 
+  documents Documents[]
+  products  Products[]
   documents Documents[]
   products  Products[]
 }
 
 model Sellers {
+  id                String            @id @default(cuid())
+  userId            String            @unique
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  applicationStatus ApplicationStatus @default(PENDING)
   id                String            @id @default(cuid())
   userId            String            @unique
   createdAt         DateTime          @default(now())
@@ -104,7 +151,13 @@ model Buyers {
   displayName String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  displayName String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
+  users Users @relation(fields: [userId], references: [id])
   users Users @relation(fields: [userId], references: [id])
 }
 
@@ -123,6 +176,7 @@ model DocumentVerifications {
   verifiedByAdmin Users?      @relation(fields: [verifiedById], references: [id])
 }
 
+
 enum VerificationStatus {
   PENDING
   APPROVED
@@ -136,10 +190,19 @@ model Documents {
   documentType            DocumentTypes
   createdAt               DateTime      @default(now())
   updatedAt               DateTime      @updatedAt
+  id                      String        @id @default(cuid())
+  documentVerificationsId String
+  fileId                  String
+  documentType            DocumentTypes
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
 
   documentVerification DocumentVerifications @relation(fields: [documentVerificationsId], references: [id])
   files                Files                 @relation(fields: [fileId], references: [id])
+  documentVerification DocumentVerifications @relation(fields: [documentVerificationsId], references: [id])
+  files                Files                 @relation(fields: [fileId], references: [id])
 }
+
 
 enum DocumentTypes {
   MAYORS_PERMIT
@@ -157,11 +220,25 @@ model AdminInvites {
   expiresAt DateTime
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
+  id        String       @id @default(cuid())
+  email     String       @unique // Ensures only one active invite per email
+  token     String       @unique // The secure random string sent in the email link
+  status    InviteStatus @default(PENDING)
+  inviterId String // The ID of the Admin who created this invite
+  expiresAt DateTime
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
+  inviter Users @relation(fields: [inviterId], references: [id])
   inviter Users @relation(fields: [inviterId], references: [id])
 }
 
+
 enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
   PENDING
   ACCEPTED
   REVOKED
@@ -176,14 +253,19 @@ model Stores {
   isActive    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  seller                Sellers                 @relation(fields: [sellerId], references: [id])
-  storeHours            StoreHours[]
+  seller                   Sellers                     @relation(fields: [sellerId], references: [id])
+  storeHours              StoreHours[]
   storeLocations        StoreLocations?
-  storeReviews          StoreReviews[]
-  products              Products[]
+  storeReviews            StoreReviews[]
+  products                Products[]
   documentVerifications DocumentVerifications[] // CHANGED: Added relation to bind documents to this specific store
   categories            Categories[]
+
+  @@index([isActive])
 }
 
 model StoreHours {
@@ -195,7 +277,16 @@ model StoreHours {
   isClosed  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  id        String   @id @default(cuid())
+  storeId   String
+  dayOfWeek Int // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  openTime  String // Format: "HH:mm"
+  closeTime String // Format: "HH:mm"
+  isClosed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
+  store Stores @relation(fields: [storeId], references: [id])
   store Stores @relation(fields: [storeId], references: [id])
 }
 
@@ -212,8 +303,21 @@ model StoreLocations {
   longitude      Float
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  id             String   @id @default(cuid())
+  storeId        String   @unique
+  currentAddress String
+  homeAddress    String
+  city           String
+  province       String
+  zipCode        String
+  country        String
+  latitude       Float
+  longitude      Float
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   store Stores @relation(fields: [storeId], references: [id])
+  @@index([latitude, longitude])
 }
 
 model StoreReviews {
@@ -224,7 +328,15 @@ model StoreReviews {
   comment   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  id        String   @id @default(cuid())
+  storeId   String
+  buyerId   String
+  rating    Int // e.g., 1 to 5
+  comment   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
+  store Stores @relation(fields: [storeId], references: [id])
   store Stores @relation(fields: [storeId], references: [id])
   //buyer     Buyers      @relation(fields: [buyerId], references: [id])
 }

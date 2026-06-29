@@ -136,7 +136,11 @@ export default class StoreController {
       south: Joi.number().required(),
       east: Joi.number().required(),
       west: Joi.number().required(),
-      limit: Joi.number().integer().min(1).max(500).default(100), // Default 100 limit, max 500
+      limit: Joi.number().integer().min(1).max(500).default(100),
+      // Optional: user's exact position for precise distance calculation.
+      // Falls back to bounding-box midpoint in the service if omitted.
+      lat: Joi.number().optional(),
+      lng: Joi.number().optional(),
     });
 
     const { error, value } = schema.validate(req.query);
@@ -149,6 +153,8 @@ export default class StoreController {
         value.east,
         value.west,
         value.limit,
+        value.lat,
+        value.lng,
       );
       return responseSuccess(res, 200, data);
     } catch (error) {
