@@ -179,6 +179,8 @@ model Stores {
   storeLocations StoreLocations?
   storeReviews   StoreReviews[]
   products       Products[]
+
+  @@index([isActive])
 }
 
 model StoreHours {
@@ -209,6 +211,7 @@ model StoreLocations {
   updatedAt      DateTime @updatedAt
 
   store Stores @relation(fields: [storeId], references: [id])
+  @@index([latitude, longitude])
 }
 
 model StoreReviews {
