@@ -99,11 +99,9 @@ export default class AuthSvc {
 
     return {
       accessToken,
-    return {
-      accessToken,
       refreshToken,
       stores,
       location: { country: user.countryCode },
-    };
+    }
   }
 }
