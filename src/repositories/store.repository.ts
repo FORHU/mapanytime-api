@@ -49,9 +49,7 @@ export default class StoreRepository {
           storeName: row.storeName,
           description: row.description,
           isActive: row.isActive,
-          distanceKm: roundKm(
-            haversineKm(centerLat, centerLng, loc.latitude, loc.longitude),
-          ),
+          distanceKm: roundKm(haversineKm(centerLat, centerLng, loc.latitude, loc.longitude)),
           coordinates: {
             lat: loc.latitude,
             lng: loc.longitude,
