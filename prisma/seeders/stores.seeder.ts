@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 
 export async function seedStores(prisma: PrismaClient) {
-  console.log('🌱 Clearing old stores for massive 50k re-seed...');
+  console.log('🌱 Clearing old stores for massive re-seed...');
   await prisma.tags.deleteMany();
   await prisma.documents.deleteMany();
   await prisma.documentVerifications.deleteMany();
@@ -11,11 +11,9 @@ export async function seedStores(prisma: PrismaClient) {
   await prisma.stores.deleteMany();
   await prisma.sellers.deleteMany();
 
-  console.log('🌱 Seeding 50,000 Stores & Products across Luzon...');
-
   const BATCH_SIZE = 5000;
 
-  // Create 500 dummy users for the dummy stores
+  // Left at 500 for now to prevent local crashing.
   const TOTAL_STORES = 500;
   console.log(`🌱 Generating ${TOTAL_STORES} dummy Users, Sellers, and Stores...`);
 
@@ -52,7 +50,7 @@ export async function seedStores(prisma: PrismaClient) {
   const newStores = allDummySellers.map((seller, i) => ({
     sellerId: seller.id,
     storeName: `Luzon Route Merchant ${i}`,
-    description: `Dummy store ${i} for Mapbox rendering stress test.`,
+    description: `Dummy store ${i} for rendering stress test.`,
     isActive: true,
   }));
 
@@ -65,9 +63,8 @@ export async function seedStores(prisma: PrismaClient) {
   }
   const stores = await prisma.stores.findMany();
 
-  // Bulk create Locations (Scattered around 3 major areas)
+  // Bulk create Locations
   const targetCities = [
-    // Tight cluster right at Burnham Park so stores appear without panning.
     { name: 'Burnham Park, Baguio', lat: 16.4108, lng: 120.5934, radius: 0.015 },
     { name: 'Baguio City', lat: 16.4119, lng: 120.5933, radius: 0.04 },
     { name: 'Candon City', lat: 17.1958, lng: 120.4489, radius: 0.03 },
@@ -109,6 +106,53 @@ export async function seedStores(prisma: PrismaClient) {
   }
 
   console.log(`✅ ${stores.length} Stores successfully safely rendered into database!`);
+
+  // --- ADDED: MEMORY-SAFE PRODUCT SEEDING ---
+  console.log('🌱 Seeding 50-100 Products and Categories for each store...');
+  const PRODUCT_CHUNK_LIMIT = 5000;
+  let productPayload = [];
+
+  for (const store of stores) {
+    // Creates a category strictly tied to this specific store
+    const dummyCategory = await prisma.categories.create({
+      data: {
+        storeId: store.id,
+        name: 'General Load Test Items',
+        description: 'Default category for 50k stress test',
+      },
+    });
+
+    // Generates a random number between 50 and 100 products
+    const productCount = Math.floor(Math.random() * 51) + 50;
+
+    for (let p = 0; p < productCount; p++) {
+      productPayload.push({
+        storeId: store.id,
+        categoryId: dummyCategory.id,
+        name: `Automated Item ${p + 1} - ${store.storeName}`,
+        description: 'Standard product generated for load testing.',
+        price: Math.floor(Math.random() * 5000) + 100, // Random price 100 - 5100
+      });
+    }
+
+    // Flushes to the database before the array consumes too much RAM
+    if (productPayload.length >= PRODUCT_CHUNK_LIMIT) {
+      await prisma.products.createMany({
+        data: productPayload,
+        skipDuplicates: true,
+      });
+      productPayload = [];
+    }
+  }
+
+  // Inserts any remaining products left in the payload array
+  if (productPayload.length > 0) {
+    await prisma.products.createMany({
+      data: productPayload,
+      skipDuplicates: true,
+    });
+  }
+  console.log('✅ Products and Categories successfully seeded!');
 
   // --- AUTOMATED VERIFICATION FOR TEST ACCOUNTS ---
   console.log('🌱 Automating verification for test accounts...');

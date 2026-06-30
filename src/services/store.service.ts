@@ -1,14 +1,14 @@
 import StoreRepository from '../repositories/store.repository';
 import { redisConnection } from '../infrastructure/redis/connection';
 import logger from '../utils/logger';
-import { Prisma } from '@prisma/client';
+import { Prisma, DocumentTypes } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 
 // Define the expected shapes of the incoming data
 interface FileUploadData {
   fileName: string;
   fileUrl: string;
-  documentType: 'MAYORS_PERMIT' | 'TIN_ID' | 'DTI_CERTIFICATE' | 'GOV_ID';
+  documentType: DocumentTypes;
 }
 export default class StoreService {
   static async createStoreWithDocuments(
