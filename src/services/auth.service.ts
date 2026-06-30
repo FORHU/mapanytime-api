@@ -24,18 +24,21 @@ export default class AuthSvc {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512').toString('hex');
 
-    await AuthRepo.createUser({
+    // CHANGED: Assigned the result to 'user'
+    const user = await AuthRepo.createUser({
       email: data.email,
       passwordHash: `${salt}:${hash}`,
       firstName: data.name,
       countryCode: data.countryCode,
-      roles: {
-        connect: {
-          roleName: data.roleName,
-        },
-      },
+      roles: { connect: { roleName: data.roleName } },
     });
-    return { message: 'Registration successful' };
+
+    if (data.roleName === 'SELLER') {
+      await AuthRepo.createSeller(user.id);
+    }
+
+    const userWithSeller = await AuthRepo.findUserById(user.id);
+    return this.generateAuthResponse(userWithSeller as Users, 'local');
   }
 
   static async login(data: { email: string; password: string }) {
@@ -92,12 +95,12 @@ export default class AuthSvc {
       return { accessToken, refreshToken };
     }
 
-    const { passwordHash: _, ...userWithoutPassword } = user;
+    const stores = (user as Users & { seller?: { stores: unknown[] } }).seller?.stores || [];
 
     return {
       accessToken,
       refreshToken,
-      user: userWithoutPassword,
+      stores,
       location: { country: user.countryCode },
     };
   }

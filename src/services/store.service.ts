@@ -1,8 +1,83 @@
 import StoreRepository from '../repositories/store.repository';
 import { redisConnection } from '../infrastructure/redis/connection';
 import logger from '../utils/logger';
+import { Prisma, DocumentTypes } from '@prisma/client';
+import { prisma } from '../utils/prisma';
 
+// Define the expected shapes of the incoming data
+interface FileUploadData {
+  fileName: string;
+  fileUrl: string;
+  documentType: DocumentTypes;
+}
 export default class StoreService {
+  static async createStoreWithDocuments(
+    sellerId: string,
+    storeData: { storeName: string; description?: string },
+    locationData: Prisma.StoreLocationsCreateWithoutStoreInput,
+    hoursData: Prisma.StoreHoursCreateWithoutStoreInput[],
+    uploadedFiles: FileUploadData[],
+  ) {
+    return prisma.$transaction(async (tx) => {
+      // 1. Create the Store along with its Location and Hours
+      const newStore = await tx.stores.create({
+        data: {
+          sellerId,
+          storeName: storeData.storeName,
+          description: storeData.description,
+          isActive: false, // Default state requiring admin approval
+          storeLocations: {
+            create: locationData,
+          },
+          storeHours: {
+            create: hoursData,
+          },
+        },
+      });
+
+      // 2. Create the Document Verification record for this specific branch
+      const docVerification = await tx.documentVerifications.create({
+        data: {
+          sellerId,
+          storeId: newStore.id,
+          verificationStatus: 'PENDING',
+        },
+      });
+
+      // 3. Process each uploaded file, create its File record, and link it as a Document
+      for (const file of uploadedFiles) {
+        // A. Save the file metadata
+        const savedFile = await tx.files.create({
+          data: {
+            userId: sellerId, // Mapping back to the user who uploaded it
+            fileName: file.fileName,
+            fileUrl: file.fileUrl,
+          },
+        });
+
+        // B. Link the File to the Verification record
+        await tx.documents.create({
+          data: {
+            documentVerificationsId: docVerification.id,
+            fileId: savedFile.id,
+            documentType: file.documentType,
+          },
+        });
+      }
+
+      // Return the newly created store with its relations for the frontend
+      return tx.stores.findUnique({
+        where: { id: newStore.id },
+        include: {
+          storeLocations: true,
+          documentVerifications: {
+            include: { documents: true },
+          },
+        },
+      });
+    });
+  }
+
   static async getNearbyStores(
     north: number,
     south: number,
@@ -50,5 +125,9 @@ export default class StoreService {
     }
 
     return stores;
+  }
+
+  static async getMyStores(sellerId: string) {
+    return StoreRepository.getStoresBySellerId(sellerId);
   }
 }

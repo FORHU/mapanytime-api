@@ -6,11 +6,13 @@ import { responseSuccess, responseError } from '../helpers/response.helper';
 export default class ProductController {
   static async create(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
+      storeId: Joi.string().required(),
       name: Joi.string().required(),
       price: Joi.number().min(0).required(),
       brand: Joi.string().optional(),
       description: Joi.string().optional(),
-      category: Joi.string().optional(),
+      categoryId: Joi.string().required(),
+      tags: Joi.array().items(Joi.string()).optional(),
       isActive: Joi.boolean().default(false),
     });
 
@@ -21,7 +23,9 @@ export default class ProductController {
       const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
-      const data = await ProductService.createProduct(userId, value);
+      const { storeId, ...productData } = value;
+      const data = await ProductService.createProduct(userId, storeId, productData);
+
       return responseSuccess(res, 201, data, 'Product created successfully');
     } catch (error) {
       next(error);
@@ -29,11 +33,18 @@ export default class ProductController {
   }
 
   static async index(req: Request, res: Response, next: NextFunction) {
+    // For listing products, the frontend should pass the specific storeId via query params
+    const storeId = req.query.storeId as string;
+
+    if (!storeId) {
+      return responseError(res, 400, 'storeId query parameter is required');
+    }
+
     try {
       const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
-      const data = await ProductService.getMyProducts(userId);
+      const data = await ProductService.getMyProducts(userId, storeId);
       return responseSuccess(res, 200, data);
     } catch (error) {
       next(error);
@@ -46,7 +57,7 @@ export default class ProductController {
       price: Joi.number().min(0).optional(),
       brand: Joi.string().optional(),
       description: Joi.string().optional(),
-      category: Joi.string().optional(),
+      categoryId: Joi.string().optional(),
       isActive: Joi.boolean().optional(),
     });
 
@@ -74,7 +85,7 @@ export default class ProductController {
       const productId = req.params.id;
       await ProductService.deleteProduct(userId, productId);
 
-      return responseSuccess(res, 200, null, 'Product deleted successfully');
+      return responseSuccess(res, 200, null, 'Product archived successfully');
     } catch (error) {
       next(error);
     }

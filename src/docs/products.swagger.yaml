@@ -1,0 +1,50 @@
+tags:
+  - name: Products
+    description: Operations related to product listings
+
+paths:
+  /v1/products:
+    get:
+      summary: Get all products
+      tags: [Products]
+      responses:
+        '200':
+          description: List of products retrieved successfully
+    post:
+      summary: Create a new product
+      tags: [Products]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [storeId, name, price]
+              properties:
+                storeId:
+                  type: string
+                  example: cmqwjvltm0008nheoeemlhp9v
+                categoryId:
+                  type: string
+                  example: cat_12345
+                name:
+                  type: string
+                  example: Organic Fertilizer
+                brand:
+                  type: string
+                  example: GreenThumb
+                price:
+                  type: number
+                  example: 199.50
+                description:
+                  type: string
+                  example: Premium plant food
+      responses:
+        '201':
+          description: Product created successfully
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized

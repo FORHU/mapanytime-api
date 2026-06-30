@@ -1,0 +1,63 @@
+tags:
+  - name: Stores
+    description: Operations related to store management
+
+paths:
+  /v1/stores:
+    get:
+      summary: Get all stores
+      tags: [Stores]
+      responses:
+        '200':
+          description: List of stores retrieved successfully
+    post:
+      summary: Create a new store
+      tags: [Stores]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [storeName]
+              properties:
+                storeName:
+                  type: string
+                  example: Luzon Route Merchant 01
+                description:
+                  type: string
+                  example: A great place for local goods.
+      responses:
+        '201':
+          description: Store created successfully
+        '401':
+          description: Unauthorized
+
+/v1/stores/my-stores:
+  get:
+    summary: Retrieve all store branches owned by the authenticated seller
+    description: Fetches a list of stores and their corresponding location data tied to the seller's JWT.
+    tags: [Stores]
+    security:
+      - BearerAuth: []
+    responses:
+      '200':
+        description: List of the seller's stores retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuccessResponse'
+      '401':
+        description: Unauthorized (Missing or invalid token)
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErrorResponse'
+      '403':
+        description: Forbidden (User is authenticated but not registered as a seller)
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErrorResponse'

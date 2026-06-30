@@ -24,6 +24,7 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
     'audio/aac',
     'audio/x-wav',
     'audio/mpeg3',
+    'application/pdf',
     'application/json',
   ];
 
@@ -42,3 +43,10 @@ export const upload = multer({
     fileSize: 20 * 1024 * 1024, // 20MB max
   },
 });
+
+export const uploadStoreDocuments = upload.fields([
+  { name: 'mayorsPermit', maxCount: 1 },
+  { name: 'tinId', maxCount: 1 },
+  { name: 'dtiCertificate', maxCount: 1 },
+  { name: 'govId', maxCount: 1 },
+]);

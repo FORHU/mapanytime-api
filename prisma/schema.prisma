@@ -18,10 +18,12 @@ model Users {
   avatarId        String?           @unique
   accountStatus   UserAccountStatus @default(ACTIVE)
   isEmailVerified Boolean           @default(false)
+  isOnBoarding    Boolean           @default(false)
   countryCode     String?
   lastLoginAt     DateTime?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
+
 
   avatar            Files?                  @relation(fields: [avatarId], references: [id])
   session           Session[]
@@ -30,6 +32,7 @@ model Users {
   verifiedDocuments DocumentVerifications[]
   sentAdminInvites  AdminInvites[]
 }
+
 
 model Roles {
   id          String   @id @default(cuid())
@@ -41,11 +44,13 @@ model Roles {
   users Users[] @relation("UserRoles")
 }
 
+
 enum UserAccountStatus {
   ACTIVE
   SUSPENDED
   DEACTIVATED
 }
+
 
 model Session {
   id             String    @id @default(cuid())
@@ -89,7 +94,7 @@ model Sellers {
 
   users                 Users                   @relation(fields: [userId], references: [id])
   documentVerifications DocumentVerifications[]
-  store                 Stores?
+  stores                Stores[]
 }
 
 enum ApplicationStatus {
@@ -111,15 +116,18 @@ model Buyers {
 model DocumentVerifications {
   id                 String             @id @default(cuid())
   sellerId           String
+  storeId            String // CHANGED: Added to link the document to a specific branch
   verificationStatus VerificationStatus @default(PENDING)
   verifiedById       String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
   seller          Sellers     @relation(fields: [sellerId], references: [id])
+  store           Stores      @relation(fields: [storeId], references: [id])
   documents       Documents[]
   verifiedByAdmin Users?      @relation(fields: [verifiedById], references: [id])
 }
+
 
 enum VerificationStatus {
   PENDING
@@ -137,12 +145,15 @@ model Documents {
 
   documentVerification DocumentVerifications @relation(fields: [documentVerificationsId], references: [id])
   files                Files                 @relation(fields: [fileId], references: [id])
+
 }
+
 
 enum DocumentTypes {
   MAYORS_PERMIT
   TIN_ID
   DTI_CERTIFICATE
+  GOV_ID
 }
 
 model AdminInvites {
@@ -158,6 +169,7 @@ model AdminInvites {
   inviter Users @relation(fields: [inviterId], references: [id])
 }
 
+
 enum InviteStatus {
   PENDING
   ACCEPTED
@@ -167,18 +179,20 @@ enum InviteStatus {
 
 model Stores {
   id          String   @id @default(cuid())
-  sellerId    String   @unique
+  sellerId    String // CHANGED: Removed @unique so a seller can have many stores
   storeName   String
   description String?
   isActive    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  seller         Sellers         @relation(fields: [sellerId], references: [id])
-  storeHours     StoreHours[]
-  storeLocations StoreLocations?
-  storeReviews   StoreReviews[]
-  products       Products[]
+  seller                   Sellers                     @relation(fields: [sellerId], references: [id])
+  storeHours              StoreHours[]
+  storeLocations        StoreLocations?
+  storeReviews            StoreReviews[]
+  products                Products[]
+  documentVerifications DocumentVerifications[] // CHANGED: Added relation to bind documents to this specific store
+  categories            Categories[]
 
   @@index([isActive])
 }
@@ -192,7 +206,7 @@ model StoreHours {
   isClosed  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
+ 
   store Stores @relation(fields: [storeId], references: [id])
 }
 
@@ -231,16 +245,50 @@ model Products {
   id            String    @id @default(cuid())
   storeId       String
   productFileId String?
+  categoryId    String?
   name          String
   brand         String?
   description   String?
-  category      String?
   price         Float
   isActive      Boolean   @default(false)
-  listedAt      DateTime? // When the product was made available for purchase
+  listedAt      DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  store       Stores @relation(fields: [storeId], references: [id])
-  productFile Files? @relation(fields: [productFileId], references: [id])
+  store       Stores      @relation(fields: [storeId], references: [id])
+  productFile Files?      @relation(fields: [productFileId], references: [id])
+  category    Categories? @relation(fields: [categoryId], references: [id])
+  tags        Tags[]
+}
+
+model Categories {
+  id            String         @id @default(cuid())
+  storeId       String         
+  name          String         
+  description   String?
+  status        CategoryStatus @default(APPROVED) // Keeping attribute fr scalability reasons
+  requestedById String?        // for offensive category titles, accountable seller will be identified
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  products Products[]
+  store    Stores     @relation(fields: [storeId], references: [id])
+
+  @@unique([name, storeId])
+}
+
+enum CategoryStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Tags {
+  id        String   @id @default(cuid())
+  productId String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Products @relation(fields: [productId], references: [id], onDelete: Cascade)
 }

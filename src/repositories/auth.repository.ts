@@ -6,18 +6,35 @@ export default class AuthRepo {
     return prisma.users.create({
       data: {
         ...data,
-
         isEmailVerified: true,
         accountStatus: 'ACTIVE',
       },
-      include: { avatar: true, roles: true },
+      include: {
+        avatar: true,
+        roles: true,
+        seller: {
+          include: { stores: true }, // Fetches the stores array
+        },
+      },
+    });
+  }
+
+  static async createSeller(userId: string) {
+    return prisma.sellers.create({
+      data: { userId },
     });
   }
 
   static async findUserByEmail(email: string) {
     return prisma.users.findFirst({
       where: { email: email, accountStatus: 'ACTIVE' },
-      include: { avatar: true, roles: true },
+      include: {
+        avatar: true,
+        roles: true,
+        seller: {
+          include: { stores: true },
+        },
+      },
     });
   }
 
@@ -25,15 +42,26 @@ export default class AuthRepo {
     return prisma.users.update({
       where: { id: userId },
       data: { lastLoginAt: new Date(), updatedAt: new Date() },
-
-      include: { avatar: true, roles: true },
+      include: {
+        avatar: true,
+        roles: true,
+        seller: {
+          include: { stores: true },
+        },
+      },
     });
   }
 
   static async findUserById(userId: string) {
     return prisma.users.findFirst({
       where: { id: userId, accountStatus: 'ACTIVE' },
-      include: { avatar: true },
+      include: {
+        avatar: true,
+        roles: true, // Added roles for consistency
+        seller: {
+          include: { stores: true },
+        },
+      },
     });
   }
 
