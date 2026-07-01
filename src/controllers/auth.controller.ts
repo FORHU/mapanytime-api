@@ -3,6 +3,7 @@ import { Users } from '@prisma/client';
 import Joi from 'joi';
 import AuthSvc from '../services/auth.service';
 import { responseSuccess, responseError } from '../helpers/response.helper';
+import logger from '../utils/logger';
 
 export default class AuthController {
   /**
@@ -78,7 +79,14 @@ export default class AuthController {
       const user = req.user as Users;
       const userId = user?.id;
 
+      logger.info(
+        `[Auth] Logout request received (user: ${userId ?? 'none'}, hasRefreshToken: ${Boolean(
+          refreshToken,
+        )})`,
+      );
+
       if (!userId) {
+        logger.warn('[Auth] Logout rejected — no authenticated user');
         return responseError(res, 401, 'Unauthorized');
       }
 
