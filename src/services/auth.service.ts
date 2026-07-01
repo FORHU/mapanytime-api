@@ -63,6 +63,11 @@ export default class AuthSvc {
     const user = await AuthRepo.findUserById(decoded.userId);
     if (!user) throw { status: 404, message: 'User not found' };
 
+    // Rotate the refresh token: invalidate the one just used before issuing a
+    // new session, so old sessions don't accumulate and a leaked token can't be
+    // replayed after a legitimate refresh.
+    await AuthRepo.deleteSession(refreshToken);
+
     return this.generateAuthResponse(user, 'local', false);
   }
 
