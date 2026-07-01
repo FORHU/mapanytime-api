@@ -8,21 +8,20 @@ export default class CategoryController {
     const schema = Joi.object({
       name: Joi.string().required(),
       description: Joi.string().optional(),
-      storeId: Joi.string().required(),
+      parentId: Joi.string().optional(),
     });
 
     const { error, value } = schema.validate(req.body);
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized');
-
-      const data = await CategoryService.createCategory(userId, value.storeId, {
+      const servicePayload = {
         name: value.name,
         description: value.description,
-      });
+        parentId: value.parentId,
+      };
 
+      const data = await CategoryService.createCategory(servicePayload);
       return responseSuccess(res, 201, data, 'Category created successfully');
     } catch (error) {
       next(error);
@@ -30,15 +29,51 @@ export default class CategoryController {
   }
 
   static async index(req: Request, res: Response, next: NextFunction) {
-    const storeId = req.query.storeId as string;
+    try {
+      const servicePayload = {
+        parentId: req.query.parentId as string | undefined,
+      };
 
-    if (!storeId) {
-      return responseError(res, 400, 'storeId query parameter is required');
+      const data = await CategoryService.listCategories(servicePayload);
+      return responseSuccess(res, 200, data);
+    } catch (error) {
+      next(error);
     }
+  }
+
+  static async update(req: Request, res: Response, next: NextFunction) {
+    const { id } = req.params;
+    const schema = Joi.object({
+      name: Joi.string().optional(),
+      description: Joi.string().optional(),
+    });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
 
     try {
-      const data = await CategoryService.listCategories(storeId);
-      return responseSuccess(res, 200, data);
+      const servicePayload = {
+        categoryId: id,
+        updateData: value,
+      };
+
+      const data = await CategoryService.updateCategory(servicePayload);
+      return responseSuccess(res, 200, data, 'Category updated successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async destroy(req: Request, res: Response, next: NextFunction) {
+    const { id } = req.params;
+
+    try {
+      const servicePayload = {
+        categoryId: id,
+      };
+
+      const result = await CategoryService.deleteCategory(servicePayload);
+      return responseSuccess(res, 200, null, result.message);
     } catch (error) {
       next(error);
     }

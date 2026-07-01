@@ -1,52 +1,67 @@
 import CategoryRepository from '../repositories/category.repository';
-import ProductRepository from '../repositories/product.repository';
 import { prisma } from '../utils/prisma';
 
 export default class CategoryService {
-  static async createCategory(
-    userId: string,
-    storeId: string,
-    data: { name: string; description?: string },
-  ) {
-    const seller = await ProductRepository.getStoreByUserId(userId);
-    if (!seller || seller.applicationStatus !== 'APPROVED') {
-      throw { status: 403, message: 'User is not an approved seller.' };
+  static async createCategory(payload: { name: string; description?: string; parentId?: string }) {
+    const { name, description, parentId } = payload;
+
+    // Validate Parent Category exists if parentId is provided
+    if (parentId) {
+      const parentExists = await prisma.categories.findUnique({ where: { id: parentId } });
+      if (!parentExists) throw { status: 404, message: 'Parent category not found.' };
     }
 
-    const store = await prisma.stores.findUnique({
-      where: { id: storeId },
-      include: { documentVerifications: true },
+    // Create the global category
+    return CategoryRepository.createCategory({ name, description, parentId });
+  }
+
+  static async listCategories(payload: { parentId?: string }) {
+    const { parentId } = payload;
+
+    if (parentId) {
+      return CategoryRepository.getSubCategoriesByParentId(parentId);
+    }
+    return CategoryRepository.getRootCategories();
+  }
+
+  static async updateCategory(payload: {
+    categoryId: string;
+    updateData: { name?: string; description?: string };
+  }) {
+    const { categoryId, updateData } = payload;
+
+    const categoryExists = await prisma.categories.findUnique({
+      where: { id: categoryId },
     });
 
-    if (!store) throw { status: 404, message: 'Store branch not found.' };
+    if (!categoryExists) throw { status: 404, message: 'Category not found.' };
 
-    const isVerified = store.documentVerifications.some(
-      (doc) => doc.verificationStatus === 'APPROVED',
-    );
+    return CategoryRepository.updateCategory(categoryId, updateData);
+  }
 
-    if (!isVerified) {
-      throw { status: 403, message: 'This store branch is not verified.' };
-    }
-    const existingCategory = await prisma.categories.findUnique({
-      where: {
-        name_storeId: {
-          name: data.name,
-          storeId: storeId,
-        },
+  static async deleteCategory(payload: { categoryId: string }) {
+    const { categoryId } = payload;
+
+    const category = await prisma.categories.findUnique({
+      where: { id: categoryId },
+      include: {
+        children: { take: 1 },
+        products: { take: 1 },
+        stores: { take: 1 },
       },
     });
 
-    if (existingCategory) {
-      throw { status: 409, message: 'A category with this name already exists in your store.' };
-    }
+    if (!category) throw { status: 404, message: 'Category not found.' };
 
-    return CategoryRepository.createCategory({
-      ...data,
-      requestedById: userId,
-      storeId: storeId, // Pass the storeId to the repository
-    });
-  }
-  static async listCategories(storeId: string) {
-    return CategoryRepository.getCategoriesByStoreId(storeId);
+    const hasDependencies =
+      category.children.length > 0 || category.products.length > 0 || category.stores.length > 0;
+
+    if (hasDependencies) {
+      await CategoryRepository.softDeleteCategory(categoryId);
+      return { message: 'Category soft-deleted because it contains existing dependencies.' };
+    } else {
+      await CategoryRepository.hardDeleteCategory(categoryId);
+      return { message: 'Category permanently deleted.' };
+    }
   }
 }

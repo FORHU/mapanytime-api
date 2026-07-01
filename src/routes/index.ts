@@ -19,6 +19,7 @@ router.use('/v1/auth', authRoute);
 router.use('/v1/users', userRoute);
 router.use('/v1/file-uploads', fileUploadRoute);
 router.use('/v1/products', productRoute);
+
 router.use('/v1/stores', storeRoute);
 router.use('/health', healthRouter);
 router.use('/v1/categories', categoryRoute);
