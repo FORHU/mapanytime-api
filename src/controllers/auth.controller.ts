@@ -21,9 +21,10 @@ export default class AuthController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const data = await AuthSvc.register(value);
-      // CHANGED: Passed 'data' instead of 'null' to return the tokens
-      return responseSuccess(res, 201, data, 'Registration successful');
+      await AuthSvc.register(value);
+      // Registration returns only a message + status code — no tokens or user
+      // data. The client redirects to login afterwards.
+      return responseSuccess(res, 201, null, 'Registration successful');
     } catch (error) {
       next(error);
     }

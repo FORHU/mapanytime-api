@@ -37,8 +37,9 @@ export default class AuthSvc {
       await AuthRepo.createSeller(user.id);
     }
 
-    const userWithSeller = await AuthRepo.findUserById(user.id);
-    return this.generateAuthResponse(userWithSeller as Users, 'local');
+    // Registration does not log the user in: no tokens or session are issued
+    // and no user data is returned. The client redirects to login afterwards.
+    return null;
   }
 
   static async login(data: { email: string; password: string }) {
@@ -97,9 +98,15 @@ export default class AuthSvc {
 
     const stores = (user as Users & { seller?: { stores: unknown[] } }).seller?.stores || [];
 
+    // Never leak the password hash to clients.
+    const { passwordHash: _passwordHash, ...safeUser } = user as Users & {
+      passwordHash?: string;
+    };
+
     return {
       accessToken,
       refreshToken,
+      user: safeUser,
       stores,
       location: { country: user.countryCode },
     };
