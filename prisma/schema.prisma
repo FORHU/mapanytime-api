@@ -31,6 +31,9 @@ model Users {
   buyer             Buyers?
   verifiedDocuments DocumentVerifications[]
   sentAdminInvites  AdminInvites[]
+
+  @@index([email])
+  @@index([accountStatus])
 }
 
 
@@ -179,21 +182,22 @@ enum InviteStatus {
 
 model Stores {
   id          String   @id @default(cuid())
-  sellerId    String // CHANGED: Removed @unique so a seller can have many stores
+  sellerId    String 
   storeName   String
   description String?
   isActive    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  seller                   Sellers                     @relation(fields: [sellerId], references: [id])
-  storeHours              StoreHours[]
+  seller                Sellers                 @relation(fields: [sellerId], references: [id])
+  storeHours            StoreHours[]
   storeLocations        StoreLocations?
-  storeReviews            StoreReviews[]
-  products                Products[]
-  documentVerifications DocumentVerifications[] // CHANGED: Added relation to bind documents to this specific store
-  categories            Categories[]
+  storeReviews          StoreReviews[]
+  products              Products[]
+  documentVerifications DocumentVerifications[] 
+  categories            Categories[] 
 
+  @@index([sellerId])
   @@index([isActive])
 }
 
@@ -206,7 +210,7 @@ model StoreHours {
   isClosed  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
- 
+
   store Stores @relation(fields: [storeId], references: [id])
 }
 
@@ -259,22 +263,29 @@ model Products {
   productFile Files?      @relation(fields: [productFileId], references: [id])
   category    Categories? @relation(fields: [categoryId], references: [id])
   tags        Tags[]
+
+  @@index([storeId])
+  @@index([categoryId])
+  @@index([isActive])
 }
 
 model Categories {
-  id            String         @id @default(cuid())
-  storeId       String         
-  name          String         
-  description   String?
-  status        CategoryStatus @default(APPROVED) // Keeping attribute fr scalability reasons
-  requestedById String?        // for offensive category titles, accountable seller will be identified
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id          String       @id @default(cuid())
+  name        String       @unique
+  description String?
+  parentId    String? 
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())     
+  updatedAt   DateTime     @updatedAt
 
-  products Products[]
-  store    Stores     @relation(fields: [storeId], references: [id])
+  parent      Categories?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Categories[] @relation("CategoryHierarchy")
 
-  @@unique([name, storeId])
+  products    Products[]
+  stores      Stores[]     // Implicit Many-to-Many relation for stores selecting their parent categories
+
+  @@index([parentId]) 
+  @@index([name])
 }
 
 enum CategoryStatus {
@@ -291,4 +302,6 @@ model Tags {
   updatedAt DateTime @updatedAt
 
   product Products @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  
 }

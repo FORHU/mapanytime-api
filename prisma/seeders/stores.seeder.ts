@@ -3,10 +3,9 @@ import { PrismaClient } from '@prisma/client';
 export async function seedStores(prisma: PrismaClient) {
   console.log('🌱 Clearing old stores for massive re-seed...');
   await prisma.tags.deleteMany();
+  await prisma.products.deleteMany();
   await prisma.documents.deleteMany();
   await prisma.documentVerifications.deleteMany();
-  await prisma.products.deleteMany();
-  await prisma.categories.deleteMany();
   await prisma.storeLocations.deleteMany();
   await prisma.stores.deleteMany();
   await prisma.sellers.deleteMany();
@@ -108,30 +107,33 @@ export async function seedStores(prisma: PrismaClient) {
   console.log(`✅ ${stores.length} Stores successfully safely rendered into database!`);
 
   // --- ADDED: MEMORY-SAFE PRODUCT SEEDING ---
-  console.log('🌱 Seeding 50-100 Products and Categories for each store...');
+  console.log('🌱 Fetching global sub-categories for products...');
+  // Fetch only categories that have a parent (meaning they are product sub-categories)
+  const subCategories = await prisma.categories.findMany({
+    where: { parentId: { not: null } },
+  });
+
+  if (subCategories.length === 0) {
+    throw new Error('No sub-categories found. Ensure seedCategories runs first.');
+  }
+
+  console.log('🌱 Seeding 50-100 Products for each store...');
   const PRODUCT_CHUNK_LIMIT = 5000;
   let productPayload = [];
 
   for (const store of stores) {
-    // Creates a category strictly tied to this specific store
-    const dummyCategory = await prisma.categories.create({
-      data: {
-        storeId: store.id,
-        name: 'General Load Test Items',
-        description: 'Default category for 50k stress test',
-      },
-    });
-
-    // Generates a random number between 50 and 100 products
     const productCount = Math.floor(Math.random() * 51) + 50;
 
     for (let p = 0; p < productCount; p++) {
+      // Randomly assign one of the global sub-categories
+      const randomCategory = subCategories[Math.floor(Math.random() * subCategories.length)];
+
       productPayload.push({
         storeId: store.id,
-        categoryId: dummyCategory.id,
+        categoryId: randomCategory.id, // Updated to use the global category ID
         name: `Automated Item ${p + 1} - ${store.storeName}`,
         description: 'Standard product generated for load testing.',
-        price: Math.floor(Math.random() * 5000) + 100, // Random price 100 - 5100
+        price: Math.floor(Math.random() * 5000) + 100,
       });
     }
 
