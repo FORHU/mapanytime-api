@@ -15,7 +15,7 @@ export default class CategoryRepository {
   static async getRootCategories() {
     return prisma.categories.findMany({
       where: { parentId: null },
-      include: { children: true },
+      include: { parent: true, children: true },
     });
   }
 
@@ -23,7 +23,40 @@ export default class CategoryRepository {
   static async getSubCategoriesByParentId(parentId: string) {
     return prisma.categories.findMany({
       where: { parentId: parentId },
+      include: { parent: true, children: true },
     });
+  }
+
+  static async findById(id: string) {
+    return prisma.categories.findUnique({ where: { id } });
+  }
+
+  static async findByIdOrName(identifier: string) {
+    return prisma.categories.findFirst({
+      where: {
+        OR: [{ id: identifier }, { name: identifier }],
+      },
+    });
+  }
+
+  static async getDescendantCategoryIds(categoryId: string) {
+    const ids = [categoryId];
+    let queue = [categoryId];
+
+    while (queue.length > 0) {
+      const children = await prisma.categories.findMany({
+        where: { parentId: { in: queue } },
+        select: { id: true },
+      });
+
+      const childIds = children.map((child) => child.id);
+      if (childIds.length === 0) break;
+
+      queue = childIds.filter((id) => !ids.includes(id));
+      ids.push(...queue);
+    }
+
+    return ids;
   }
 
   static async updateCategory(

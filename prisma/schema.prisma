@@ -14,7 +14,6 @@ model Users {
   firstName       String?
   lastName        String?
   phoneNumber     String?
-  roles           Roles[]           @relation("UserRoles")
   avatarId        String?           @unique
   accountStatus   USERACCOUNTSTATUS @default(ACTIVE)
   isEmailVerified Boolean           @default(false)
@@ -24,7 +23,7 @@ model Users {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-
+  roles             Roles[]                 @relation("UserRoles")
   avatar            Files?                  @relation(fields: [avatarId], references: [id])
   session           Session[]
   seller            Sellers?
@@ -36,17 +35,14 @@ model Users {
   @@index([accountStatus])
 }
 
-
 model Roles {
   id          String   @id @default(cuid())
   roleName    String   @unique
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-
-  users Users[] @relation("UserRoles")
+  users       Users[]  @relation("UserRoles")
 }
-
 
 enum USERACCOUNTSTATUS {
   ACTIVE
@@ -54,105 +50,83 @@ enum USERACCOUNTSTATUS {
   DEACTIVATED
 }
 
-
 model Session {
   id             String    @id @default(cuid())
   userId         String
-  provider       String
-  providerUserId String?
-  accessToken    String?
-  refreshToken   String?   @unique
-  expiresAt      DateTime?
-  scopes         String?
-  avatarUrl      String?
   createdAt      DateTime  @default(now())
+  expiresAt      DateTime?
+  refreshToken   String?   @unique
+  provider       String
+  accessToken    String?
+  avatarUrl      String?
+  providerUserId String?
+  scopes         String?
   updatedAt      DateTime  @updatedAt
+  users          Users     @relation(fields: [userId], references: [id])
 
-  users Users @relation(fields: [userId], references: [id])
-
-  // Ensures no two different users can link the exact same external social account
   @@unique([provider, providerUserId])
 }
 
 model Files {
-  id        String   @id @default(cuid())
+  id        String      @id @default(cuid())
   userId    String
   fileName  String
   fileUrl   String
   metaData  Json?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  users     Users?
-
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
   documents Documents[]
   products  Products[]
+  users     Users?
 }
 
 model Sellers {
-  id                String            @id @default(cuid())
-  userId            String            @unique
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
-  applicationStatus ApplicationStatus @default(PENDING)
-
-  users                 Users                   @relation(fields: [userId], references: [id])
+  id                    String                  @id @default(cuid())
+  userId                String                  @unique
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  applicationStatus     ApplicationStatus       @default(PENDING)
   documentVerifications DocumentVerifications[]
+  users                 Users                   @relation(fields: [userId], references: [id])
   stores                Stores[]
-}
-
-enum ApplicationStatus {
-  PENDING
-  APPROVED
-  REJECTED
 }
 
 model Buyers {
   id          String   @id @default(cuid())
   userId      String   @unique
-  displayName String
   createdAt   DateTime @default(now())
+  displayName String
   updatedAt   DateTime @updatedAt
 
-  users Users @relation(fields: [userId], references: [id])
-  review   StoreReviews[]
-  orders   Orders[]
+  users  Users          @relation(fields: [userId], references: [id])
+  review StoreReviews[]
+  orders Orders[]
 }
 
 model DocumentVerifications {
   id                 String             @id @default(cuid())
   sellerId           String
-  storeId            String // CHANGED: Added to link the document to a specific branch
   verificationStatus VerificationStatus @default(PENDING)
   verifiedById       String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
-
-  seller          Sellers     @relation(fields: [sellerId], references: [id])
-  store           Stores      @relation(fields: [storeId], references: [id])
-  documents       Documents[]
-  verifiedByAdmin Users?      @relation(fields: [verifiedById], references: [id])
-}
-
-
-enum VerificationStatus {
-  PENDING
-  APPROVED
-  REJECTED
+  storeId            String
+  seller             Sellers            @relation(fields: [sellerId], references: [id])
+  store              Stores             @relation(fields: [storeId], references: [id])
+  verifiedByAdmin    Users?             @relation(fields: [verifiedById], references: [id])
+  documents          Documents[]
 }
 
 model Documents {
-  id                      String        @id @default(cuid())
+  id                      String                @id @default(cuid())
   documentVerificationsId String
   fileId                  String
   documentType            DOCUMENTTYPES
-  createdAt               DateTime      @default(now())
-  updatedAt               DateTime      @updatedAt
-
-  documentVerification DocumentVerifications @relation(fields: [documentVerificationsId], references: [id])
-  files                Files                 @relation(fields: [fileId], references: [id])
-
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  documentVerification    DocumentVerifications @relation(fields: [documentVerificationsId], references: [id])
+  files                   Files                 @relation(fields: [fileId], references: [id])
 }
-
 
 enum DOCUMENTTYPES {
   MAYORS_PERMIT
@@ -163,17 +137,15 @@ enum DOCUMENTTYPES {
 
 model AdminInvites {
   id        String       @id @default(cuid())
-  email     String       @unique // Ensures only one active invite per email
-  token     String       @unique // The secure random string sent in the email link
+  email     String       @unique
+  token     String       @unique
   status    INVITESTATUS @default(PENDING)
-  inviterId String // The ID of the Admin who created this invite
+  inviterId String
   expiresAt DateTime
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
-
-  inviter Users @relation(fields: [inviterId], references: [id])
+  inviter   Users        @relation(fields: [inviterId], references: [id])
 }
-
 
 enum INVITESTATUS {
   PENDING
@@ -183,23 +155,21 @@ enum INVITESTATUS {
 }
 
 model Stores {
-  id          String   @id @default(cuid())
-  sellerId    String 
-  storeName   String
-  description String?
-  isActive    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  seller                Sellers                 @relation(fields: [sellerId], references: [id])
+  id                    String                  @id @default(cuid())
+  sellerId              String
+  storeName             String
+  description           String?
+  isActive              Boolean                 @default(false)
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  documentVerifications DocumentVerifications[]
+  products              Products[]
   storeHours            StoreHours[]
   storeLocations        StoreLocations?
   storeReviews          StoreReviews[]
-  products              Products[]
-  documentVerifications DocumentVerifications[] 
-  categories            Categories[]
+  seller                Sellers                 @relation(fields: [sellerId], references: [id])
+  categories            Categories[]            @relation("CategoriesToStores")
   orders                Orders[]
-  //inventory             Inventory[]
 
   @@index([sellerId])
   @@index([isActive])
@@ -208,14 +178,13 @@ model Stores {
 model StoreHours {
   id        String   @id @default(cuid())
   storeId   String
-  dayOfWeek Int // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-  openTime  String // Format: "HH:mm"
-  closeTime String // Format: "HH:mm"
+  dayOfWeek Int
+  openTime  String
+  closeTime String
   isClosed  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  store Stores @relation(fields: [storeId], references: [id])
+  store     Stores   @relation(fields: [storeId], references: [id])
 }
 
 model StoreLocations {
@@ -231,8 +200,8 @@ model StoreLocations {
   longitude      Float
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  store          Stores   @relation(fields: [storeId], references: [id])
 
-  store Stores @relation(fields: [storeId], references: [id])
   @@index([latitude, longitude])
 }
 
@@ -240,34 +209,31 @@ model StoreReviews {
   id        String   @id @default(cuid())
   storeId   String
   buyerId   String
-  rating    Int // e.g., 1 to 5
+  rating    Int
   comment   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  store Stores @relation(fields: [storeId], references: [id])
-  buyer     Buyers      @relation(fields: [buyerId], references: [id])
+  store     Stores   @relation(fields: [storeId], references: [id])
+  buyer     Buyers   @relation(fields: [buyerId], references: [id])
 }
 
 model Products {
-  id            String    @id @default(cuid())
+  id            String      @id @default(cuid())
   storeId       String
   productFileId String?
-  categoryId    String?
   name          String
   brand         String?
   description   String?
   price         Float
-  isActive      Boolean   @default(false)
+  isActive      Boolean     @default(false)
   listedAt      DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  store       Stores      @relation(fields: [storeId], references: [id])
-  productFile Files?      @relation(fields: [productFileId], references: [id])
-  category    Categories? @relation(fields: [categoryId], references: [id])
-  tags        Tags[]
-  //inventory   Inventory[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  categoryId    String?
+  category      Categories? @relation(fields: [categoryId], references: [id])
+  productFile   Files?      @relation(fields: [productFileId], references: [id])
+  store         Stores      @relation(fields: [storeId], references: [id])
+  tags          Tags[]
 
   @@index([storeId])
   @@index([categoryId])
@@ -278,18 +244,16 @@ model Categories {
   id          String       @id @default(cuid())
   name        String       @unique
   description String?
-  parentId    String? 
-  isActive    Boolean      @default(true)
-  createdAt   DateTime     @default(now())     
+  createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
-
+  isActive    Boolean      @default(true)
+  parentId    String?
   parent      Categories?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
   children    Categories[] @relation("CategoryHierarchy")
-
   products    Products[]
-  stores      Stores[]     // Implicit Many-to-Many relation for stores selecting their parent categories
+  stores      Stores[]     @relation("CategoriesToStores")
 
-  @@index([parentId]) 
+  @@index([parentId])
   @@index([name])
 }
 
@@ -299,28 +263,42 @@ model Tags {
   name      String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  product   Products @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
 
-  product Products @relation(fields: [productId], references: [id], onDelete: Cascade)
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
 
-  
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CategoryStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 model Orders {
-  id          String    @id @default(cuid())
+  id          String           @id @default(cuid())
   buyerId     String
   storeId     String
   totalAmount Float
   type        FULLFILLMENTTYPE @default(PICKUP)
-  status      ORDERSTATUS @default(PENDING)
+  status      ORDERSTATUS      @default(PENDING)
   completedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
-  buyer      Buyers      @relation(fields: [buyerId], references: [id])
-  store      Stores      @relation(fields: [storeId], references: [id])
-  orderitems  OrderItems[]
+  buyer      Buyers       @relation(fields: [buyerId], references: [id])
+  store      Stores       @relation(fields: [storeId], references: [id])
+  orderitems OrderItems[]
   payment    Payments[]
-
 }
 
 enum FULLFILLMENTTYPE {
@@ -337,7 +315,7 @@ enum ORDERSTATUS {
 }
 
 model OrderItems {
-  id        String    @id @default(cuid())
+  id        String   @id @default(cuid())
   orderId   String
   productId String
   quantity  Int
@@ -345,30 +323,17 @@ model OrderItems {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  order Orders    @relation(fields: [orderId], references: [id])
+  order Orders @relation(fields: [orderId], references: [id])
 }
 
-/*model Inventory {
-  id        String    @id @default(cuid())
-  productId String
-  storeId   String
-  quantityOnHand    Int @default(0)
-  quantityReserved  Int @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  product Products @relation(fields: [productId], references: [id])
-  store   Stores   @relation(fields: [storeId], references: [id])
-}*/
-
 model Payments {
-  id       String    @id @default(cuid())
-  orderId  String
-  amount   Float
+  id            String        @id @default(cuid())
+  orderId       String
+  amount        Float
   paymentMethod PAYMENTMETHOD
-  status   PAYMENTSTATUS @default(PENDING)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  status        PAYMENTSTATUS @default(PENDING)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   order Orders @relation(fields: [orderId], references: [id])
 }
@@ -385,4 +350,3 @@ enum PAYMENTSTATUS {
   FAILED
   REFUNDED
 }
- 

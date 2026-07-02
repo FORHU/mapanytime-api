@@ -1,10 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 
 export async function seedCategories(prisma: PrismaClient) {
-  console.log('🌱 Clearing old categories...');
-  await prisma.categories.deleteMany();
-
-  console.log('🌱 Seeding Global Categories...');
+  console.log('🌱 Seeding Global Categories (idempotent upserts)...');
 
   const categoriesToSeed = [
     {
@@ -156,23 +153,24 @@ export async function seedCategories(prisma: PrismaClient) {
   ];
 
   for (const parent of categoriesToSeed) {
-    const parentCategory = await prisma.categories.create({
-      data: {
+    // Upsert parent category (idempotent)
+    const parentCategory = await prisma.categories.upsert({
+      where: { name: parent.name },
+      update: { description: parent.description },
+      create: {
         name: parent.name,
         description: parent.description,
       },
     });
 
-    // Create the child sub-categories linked to this parent
-    const childData = parent.subCategories.map((subName) => ({
-      name: subName,
-      parentId: parentCategory.id,
-    }));
-
-    await prisma.categories.createMany({
-      data: childData,
-      skipDuplicates: true,
-    });
+    // Upsert each child sub-category and link to parent
+    for (const subName of parent.subCategories) {
+      await prisma.categories.upsert({
+        where: { name: subName },
+        update: { parentId: parentCategory.id },
+        create: { name: subName, parentId: parentCategory.id },
+      });
+    }
   }
 
   console.log('✅ Global hierarchical categories seeded!');
