@@ -38,7 +38,7 @@ export default class AuthSvc {
     }
 
     const userWithSeller = await AuthRepo.findUserById(user.id);
-    return this.generateAuthResponse(userWithSeller as Users, 'local');
+    return this.generateAuthResponse(userWithSeller as Users, 'local', true, false);
   }
 
   static async login(data: { email: string; password: string }) {
@@ -71,7 +71,12 @@ export default class AuthSvc {
     return { message: 'Logged out successfully' };
   }
 
-  private static async generateAuthResponse(user: Users, provider: string, includeUser = true) {
+  private static async generateAuthResponse(
+    user: Users,
+    provider: string,
+    includeUser = true,
+    includeUserDetails = true,
+  ) {
     const accessToken = jwt.sign({ userId: user.id }, ACCESS_TOKEN_SECRET, {
       expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'],
     });
@@ -102,6 +107,18 @@ export default class AuthSvc {
       refreshToken,
       stores,
       location: { country: user.countryCode },
+      ...(includeUserDetails
+        ? {
+            user: {
+              id: user.id,
+              email: user.email,
+              firstName: user.firstName,
+              lastName: user.lastName,
+              countryCode: user.countryCode,
+              onboardingCompleted: user.isOnBoarding,
+            },
+          }
+        : {}),
     };
   }
 }
