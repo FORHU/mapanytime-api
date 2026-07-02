@@ -1,19 +1,31 @@
 tags:
   - name: Categories
-    description: Operations related to product categories
+    description: Global hierarchical product categories managed by administrators
 
 paths:
   /v1/categories:
     get:
-      summary: Get all approved categories
+      summary: Retrieve categories
+      description: Fetches root categories if no parentId is provided. If a parentId is provided, fetches the specific sub-categories. Open to all authenticated users.
       tags: [Categories]
-      security: []
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: parentId
+          schema:
+            type: string
+          required: false
+          description: The ID of the parent category. Leave empty to retrieve generic store root categories.
       responses:
         '200':
           description: List of categories retrieved successfully
+        '401':
+          description: Unauthorized (Invalid or missing token)
 
     post:
-      summary: Create a new category
+      summary: Create a new global category
+      description: Creates a new category. Only accessible by users with the ADMIN role.
       tags: [Categories]
       security:
         - BearerAuth: []
@@ -23,17 +35,18 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, storeId]
+              required: [name]
               properties:
                 name:
                   type: string
-                  example: Gardening Tools
+                  example: Seasonal Promotions
                 description:
                   type: string
-                  example: Handheld tools for gardening
-                storeId:
+                  example: Temporary categories for holidays
+                parentId:
                   type: string
-                  example: cmqwjvltm0008nheoeemlhp9v
+                  example: cmr1kabey0004nh306b2ziapm
+                  description: Optional. The ID of the parent category if creating a sub-category.
       responses:
         '201':
           description: Category created successfully
@@ -42,4 +55,66 @@ paths:
         '401':
           description: Unauthorized
         '403':
-          description: Forbidden (Store not verified or user not an approved seller)
+          description: Forbidden (User is not an administrator)
+
+  /v1/categories/{id}:
+    patch:
+      summary: Update a category
+      description: Modifies the name or description of an existing category. Only accessible by Admins.
+      tags: [Categories]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The unique identifier of the category to update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Updated Category Name
+                description:
+                  type: string
+                  example: Updated category description
+      responses:
+        '200':
+          description: Category updated successfully
+        '400':
+          description: Bad request (Validation error)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (User is not an administrator)
+        '404':
+          description: Category not found
+
+    delete:
+      summary: Delete a category
+      description: Performs a safe hybrid delete. Hard deletes the category if it has no dependencies. Soft deletes (isActive = false) if sub-categories, products, or stores are linked to it. Only accessible by Admins.
+      tags: [Categories]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The unique identifier of the category to delete.
+      responses:
+        '200':
+          description: Category successfully deleted (hard or soft depending on dependencies)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (User is not an administrator)
+        '404':
+          description: Category not found

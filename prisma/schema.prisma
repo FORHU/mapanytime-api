@@ -16,7 +16,7 @@ model Users {
   phoneNumber     String?
   roles           Roles[]           @relation("UserRoles")
   avatarId        String?           @unique
-  accountStatus   UserAccountStatus @default(ACTIVE)
+  accountStatus   USERACCOUNTSTATUS @default(ACTIVE)
   isEmailVerified Boolean           @default(false)
   isOnBoarding    Boolean           @default(false)
   countryCode     String?
@@ -48,7 +48,7 @@ model Roles {
 }
 
 
-enum UserAccountStatus {
+enum USERACCOUNTSTATUS {
   ACTIVE
   SUSPENDED
   DEACTIVATED
@@ -114,6 +114,8 @@ model Buyers {
   updatedAt   DateTime @updatedAt
 
   users Users @relation(fields: [userId], references: [id])
+  review   StoreReviews[]
+  orders   Orders[]
 }
 
 model DocumentVerifications {
@@ -142,7 +144,7 @@ model Documents {
   id                      String        @id @default(cuid())
   documentVerificationsId String
   fileId                  String
-  documentType            DocumentTypes
+  documentType            DOCUMENTTYPES
   createdAt               DateTime      @default(now())
   updatedAt               DateTime      @updatedAt
 
@@ -152,7 +154,7 @@ model Documents {
 }
 
 
-enum DocumentTypes {
+enum DOCUMENTTYPES {
   MAYORS_PERMIT
   TIN_ID
   DTI_CERTIFICATE
@@ -163,7 +165,7 @@ model AdminInvites {
   id        String       @id @default(cuid())
   email     String       @unique // Ensures only one active invite per email
   token     String       @unique // The secure random string sent in the email link
-  status    InviteStatus @default(PENDING)
+  status    INVITESTATUS @default(PENDING)
   inviterId String // The ID of the Admin who created this invite
   expiresAt DateTime
   createdAt DateTime     @default(now())
@@ -173,7 +175,7 @@ model AdminInvites {
 }
 
 
-enum InviteStatus {
+enum INVITESTATUS {
   PENDING
   ACCEPTED
   REVOKED
@@ -195,7 +197,9 @@ model Stores {
   storeReviews          StoreReviews[]
   products              Products[]
   documentVerifications DocumentVerifications[] 
-  categories            Categories[] 
+  categories            Categories[]
+  orders                Orders[]
+  //inventory             Inventory[]
 
   @@index([sellerId])
   @@index([isActive])
@@ -242,7 +246,7 @@ model StoreReviews {
   updatedAt DateTime @updatedAt
 
   store Stores @relation(fields: [storeId], references: [id])
-  //buyer     Buyers      @relation(fields: [buyerId], references: [id])
+  buyer     Buyers      @relation(fields: [buyerId], references: [id])
 }
 
 model Products {
@@ -263,6 +267,7 @@ model Products {
   productFile Files?      @relation(fields: [productFileId], references: [id])
   category    Categories? @relation(fields: [categoryId], references: [id])
   tags        Tags[]
+  //inventory   Inventory[]
 
   @@index([storeId])
   @@index([categoryId])
@@ -288,12 +293,6 @@ model Categories {
   @@index([name])
 }
 
-enum CategoryStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
 model Tags {
   id        String   @id @default(cuid())
   productId String
@@ -305,3 +304,85 @@ model Tags {
 
   
 }
+
+model Orders {
+  id          String    @id @default(cuid())
+  buyerId     String
+  storeId     String
+  totalAmount Float
+  type        FULLFILLMENTTYPE @default(PICKUP)
+  status      ORDERSTATUS @default(PENDING)
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  buyer      Buyers      @relation(fields: [buyerId], references: [id])
+  store      Stores      @relation(fields: [storeId], references: [id])
+  orderitems  OrderItems[]
+  payment    Payments[]
+
+}
+
+enum FULLFILLMENTTYPE {
+  DELIVERY
+  PICKUP
+}
+
+enum ORDERSTATUS {
+  PENDING
+  PROCESSING
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+model OrderItems {
+  id        String    @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order Orders    @relation(fields: [orderId], references: [id])
+}
+
+/*model Inventory {
+  id        String    @id @default(cuid())
+  productId String
+  storeId   String
+  quantityOnHand    Int @default(0)
+  quantityReserved  Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Products @relation(fields: [productId], references: [id])
+  store   Stores   @relation(fields: [storeId], references: [id])
+}*/
+
+model Payments {
+  id       String    @id @default(cuid())
+  orderId  String
+  amount   Float
+  paymentMethod PAYMENTMETHOD
+  status   PAYMENTSTATUS @default(PENDING)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order Orders @relation(fields: [orderId], references: [id])
+}
+
+enum PAYMENTMETHOD {
+  BANK
+  GCASH
+  CASH_ON_DELIVERY
+}
+
+enum PAYMENTSTATUS {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+ 
