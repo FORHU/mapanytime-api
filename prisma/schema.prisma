@@ -8,27 +8,28 @@ datasource db {
 }
 
 model Users {
-  id                String                  @id @default(cuid())
-  email             String                  @unique
-  passwordHash      String
-  firstName         String?
-  lastName          String?
-  phoneNumber       String?
-  avatarId          String?                 @unique
-  accountStatus     UserAccountStatus       @default(ACTIVE)
-  isEmailVerified   Boolean                 @default(false)
-  lastLoginAt       DateTime?
-  createdAt         DateTime                @default(now())
-  updatedAt         DateTime                @updatedAt
-  countryCode       String?
-  isOnBoarding      Boolean                 @default(false)
-  sentAdminInvites  AdminInvites[]
+  id              String            @id @default(cuid())
+  email           String            @unique
+  passwordHash    String
+  firstName       String?
+  lastName        String?
+  phoneNumber     String?
+  avatarId        String?           @unique
+  accountStatus   USERACCOUNTSTATUS @default(ACTIVE)
+  isEmailVerified Boolean           @default(false)
+  isOnBoarding    Boolean           @default(false)
+  countryCode     String?
+  lastLoginAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  roles             Roles[]                 @relation("UserRoles")
+  avatar            Files?                  @relation(fields: [avatarId], references: [id])
+  session           Session[]
+  seller            Sellers?
   buyer             Buyers?
   verifiedDocuments DocumentVerifications[]
-  seller            Sellers?
-  session           Session[]
-  avatar            Files?                  @relation(fields: [avatarId], references: [id])
-  roles             Roles[]                 @relation("UserRoles")
+  sentAdminInvites  AdminInvites[]
 
   @@index([email])
   @@index([accountStatus])
@@ -41,6 +42,12 @@ model Roles {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   users       Users[]  @relation("UserRoles")
+}
+
+enum USERACCOUNTSTATUS {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
 }
 
 model Session {
@@ -90,7 +97,10 @@ model Buyers {
   createdAt   DateTime @default(now())
   displayName String
   updatedAt   DateTime @updatedAt
-  users       Users    @relation(fields: [userId], references: [id])
+
+  users  Users          @relation(fields: [userId], references: [id])
+  review StoreReviews[]
+  orders Orders[]
 }
 
 model DocumentVerifications {
@@ -111,23 +121,37 @@ model Documents {
   id                      String                @id @default(cuid())
   documentVerificationsId String
   fileId                  String
-  documentType            DocumentTypes
+  documentType            DOCUMENTTYPES
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt
   documentVerification    DocumentVerifications @relation(fields: [documentVerificationsId], references: [id])
   files                   Files                 @relation(fields: [fileId], references: [id])
 }
 
+enum DOCUMENTTYPES {
+  MAYORS_PERMIT
+  TIN_ID
+  DTI_CERTIFICATE
+  GOV_ID
+}
+
 model AdminInvites {
   id        String       @id @default(cuid())
   email     String       @unique
   token     String       @unique
-  status    InviteStatus @default(PENDING)
+  status    INVITESTATUS @default(PENDING)
   inviterId String
   expiresAt DateTime
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
   inviter   Users        @relation(fields: [inviterId], references: [id])
+}
+
+enum INVITESTATUS {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
 }
 
 model Stores {
@@ -145,6 +169,7 @@ model Stores {
   storeReviews          StoreReviews[]
   seller                Sellers                 @relation(fields: [sellerId], references: [id])
   categories            Categories[]            @relation("CategoriesToStores")
+  orders                Orders[]
 
   @@index([sellerId])
   @@index([isActive])
@@ -189,6 +214,7 @@ model StoreReviews {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   store     Stores   @relation(fields: [storeId], references: [id])
+  buyer     Buyers   @relation(fields: [buyerId], references: [id])
 }
 
 model Products {
@@ -240,12 +266,6 @@ model Tags {
   product   Products @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
-enum UserAccountStatus {
-  ACTIVE
-  SUSPENDED
-  DEACTIVATED
-}
-
 enum ApplicationStatus {
   PENDING
   APPROVED
@@ -258,22 +278,75 @@ enum VerificationStatus {
   REJECTED
 }
 
-enum DocumentTypes {
-  MAYORS_PERMIT
-  TIN_ID
-  DTI_CERTIFICATE
-  GOV_ID
-}
-
-enum InviteStatus {
-  PENDING
-  ACCEPTED
-  REVOKED
-  EXPIRED
-}
-
 enum CategoryStatus {
   PENDING
   APPROVED
   REJECTED
+}
+
+model Orders {
+  id          String           @id @default(cuid())
+  buyerId     String
+  storeId     String
+  totalAmount Float
+  type        FULLFILLMENTTYPE @default(PICKUP)
+  status      ORDERSTATUS      @default(PENDING)
+  completedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  buyer      Buyers       @relation(fields: [buyerId], references: [id])
+  store      Stores       @relation(fields: [storeId], references: [id])
+  orderitems OrderItems[]
+  payment    Payments[]
+}
+
+enum FULLFILLMENTTYPE {
+  DELIVERY
+  PICKUP
+}
+
+enum ORDERSTATUS {
+  PENDING
+  PROCESSING
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+model OrderItems {
+  id        String   @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order Orders @relation(fields: [orderId], references: [id])
+}
+
+model Payments {
+  id            String        @id @default(cuid())
+  orderId       String
+  amount        Float
+  paymentMethod PAYMENT_METHOD
+  status        PAYMENT_STATUS @default(PENDING)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  order Orders @relation(fields: [orderId], references: [id])
+}
+
+enum PAYMENT_METHOD {
+  BANK
+  GCASH
+  CASH_ON_DELIVERY
+}
+
+enum PAYMENT_STATUS {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
 }
