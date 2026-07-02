@@ -117,16 +117,32 @@ export async function seedStores(prisma: PrismaClient) {
     throw new Error('No sub-categories found. Ensure seedCategories runs first.');
   }
 
+  // Map each sub-category to its parent so a store can be tagged with the
+  // PARENT categories of the products it sells (the map filters by parent and
+  // expands to descendants server-side).
+  const subToParent = new Map<string, string>();
+  for (const c of subCategories) {
+    if (c.parentId) subToParent.set(c.id, c.parentId);
+  }
+
   console.log('🌱 Seeding 50-100 Products for each store...');
   const PRODUCT_CHUNK_LIMIT = 5000;
   let productPayload = [];
 
+  // Collected after products are generated: which parent categories each store
+  // ends up covering, so we can populate the Store↔Category M2M.
+  const storeCategoryLinks: { storeId: string; parentIds: string[] }[] = [];
+
   for (const store of stores) {
     const productCount = Math.floor(Math.random() * 51) + 50;
+    const storeParentIds = new Set<string>();
 
     for (let p = 0; p < productCount; p++) {
       // Randomly assign one of the global sub-categories
       const randomCategory = subCategories[Math.floor(Math.random() * subCategories.length)];
+
+      const parentId = subToParent.get(randomCategory.id);
+      if (parentId) storeParentIds.add(parentId);
 
       productPayload.push({
         storeId: store.id,
@@ -136,6 +152,8 @@ export async function seedStores(prisma: PrismaClient) {
         price: Math.floor(Math.random() * 5000) + 100,
       });
     }
+
+    storeCategoryLinks.push({ storeId: store.id, parentIds: [...storeParentIds] });
 
     // Flushes to the database before the array consumes too much RAM
     if (productPayload.length >= PRODUCT_CHUNK_LIMIT) {
@@ -155,6 +173,17 @@ export async function seedStores(prisma: PrismaClient) {
     });
   }
   console.log('✅ Products and Categories successfully seeded!');
+
+  // --- Link stores to the parent categories of their products (M2M) ---
+  console.log('🌱 Linking stores to their product categories...');
+  for (const link of storeCategoryLinks) {
+    if (link.parentIds.length === 0) continue;
+    await prisma.stores.update({
+      where: { id: link.storeId },
+      data: { categories: { connect: link.parentIds.map((id) => ({ id })) } },
+    });
+  }
+  console.log('✅ Store categories linked!');
 
   // --- AUTOMATED VERIFICATION FOR TEST ACCOUNTS ---
   console.log('🌱 Automating verification for test accounts...');
