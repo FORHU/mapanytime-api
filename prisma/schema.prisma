@@ -85,7 +85,7 @@ model Sellers {
   userId                String                  @unique
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
-  applicationStatus     APPLICATION_STATUS       @default(PENDING)
+  applicationStatus     ApplicationStatus       @default(PENDING)
   documentVerifications DocumentVerifications[]
   users                 Users                   @relation(fields: [userId], references: [id])
   stores                Stores[]
@@ -106,7 +106,7 @@ model Buyers {
 model DocumentVerifications {
   id                 String             @id @default(cuid())
   sellerId           String
-  verificationStatus VERIFICATION_STATUS @default(PENDING)
+  verificationStatus VerificationStatus @default(PENDING)
   verifiedById       String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
@@ -121,14 +121,14 @@ model Documents {
   id                      String                @id @default(cuid())
   documentVerificationsId String
   fileId                  String
-  documentType            DOCUMENT_TYPES
+  documentType            DOCUMENTTYPES
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt
   documentVerification    DocumentVerifications @relation(fields: [documentVerificationsId], references: [id])
   files                   Files                 @relation(fields: [fileId], references: [id])
 }
 
-enum DOCUMENT_TYPES {
+enum DOCUMENTTYPES {
   MAYORS_PERMIT
   TIN_ID
   DTI_CERTIFICATE
@@ -139,7 +139,7 @@ model AdminInvites {
   id        String       @id @default(cuid())
   email     String       @unique
   token     String       @unique
-  status    INVITE_STATUS @default(PENDING)
+  status    INVITESTATUS @default(PENDING)
   inviterId String
   expiresAt DateTime
   createdAt DateTime     @default(now())
@@ -147,7 +147,7 @@ model AdminInvites {
   inviter   Users        @relation(fields: [inviterId], references: [id])
 }
 
-enum INVITE_STATUS {
+enum INVITESTATUS {
   PENDING
   ACCEPTED
   REVOKED
@@ -266,19 +266,19 @@ model Tags {
   product   Products @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
-enum APPLICATION_STATUS {
+enum ApplicationStatus {
   PENDING
   APPROVED
   REJECTED
 }
 
-enum VERIFICATION_STATUS {
+enum VerificationStatus {
   PENDING
   APPROVED
   REJECTED
 }
 
-enum CATEGORY_STATUS {
+enum CategoryStatus {
   PENDING
   APPROVED
   REJECTED
@@ -289,7 +289,7 @@ model Orders {
   buyerId     String
   storeId     String
   totalAmount Float
-  type        FULLFILLMENT_TYPE @default(PICKUP)
+  type        FULLFILLMENTTYPE @default(PICKUP)
   status      ORDER_STATUS      @default(PENDING)
   completedAt DateTime?
   createdAt   DateTime         @default(now())
@@ -301,7 +301,7 @@ model Orders {
   payment    Payments[]
 }
 
-enum FULLFILLMENT_TYPE {
+enum FULLFILLMENTTYPE {
   DELIVERY
   PICKUP
 }
