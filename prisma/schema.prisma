@@ -290,7 +290,7 @@ model Orders {
   storeId     String
   totalAmount Float
   type        FULLFILLMENTTYPE @default(PICKUP)
-  status      ORDER_STATUS      @default(PENDING)
+  status      ORDERSTATUS      @default(PENDING)
   completedAt DateTime?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
@@ -306,7 +306,7 @@ enum FULLFILLMENTTYPE {
   PICKUP
 }
 
-enum ORDER_STATUS {
+enum ORDERSTATUS {
   PENDING
   PROCESSING
   COMPLETED
@@ -330,21 +330,21 @@ model Payments {
   id            String        @id @default(cuid())
   orderId       String
   amount        Float
-  paymentMethod PAYMENT_METHOD
-  status        PAYMENT_STATUS @default(PENDING)
+  paymentMethod PAYMENTMETHOD
+  status        PAYMENTSTATUS @default(PENDING)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
   order Orders @relation(fields: [orderId], references: [id])
 }
 
-enum PAYMENT_METHOD {
+enum PAYMENTMETHOD {
   BANK
   GCASH
   CASH_ON_DELIVERY
 }
 
-enum PAYMENT_STATUS {
+enum PAYMENTSTATUS {
   PENDING
   COMPLETED
   FAILED
