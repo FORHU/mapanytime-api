@@ -189,7 +189,10 @@ export function emitStoreRemoved(id: string, lat: number, lng: number): void {
   logger.info(`[Socket] store:removed → ${room} (${id})`);
 }
 
-export function emitNotificationToUser(userId: string, notification: NotificationEventPayload): void {
+export function emitNotificationToUser(
+  userId: string,
+  notification: NotificationEventPayload,
+): void {
   if (!io) return;
   const room = notificationChannel(userId);
   io.to(room).emit('notification:new', notification);

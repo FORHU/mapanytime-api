@@ -69,12 +69,16 @@ export default class StoreRepository {
       ))
     `;
 
-    const categoryJoin = categoryIds && categoryIds.length > 0
-      ? Prisma.sql`
+    const categoryJoin =
+      categoryIds && categoryIds.length > 0
+        ? Prisma.sql`
           JOIN "_CategoriesToStores" cs ON cs."B" = s."id"
-          AND cs."A" IN (${Prisma.join(categoryIds.map((id) => Prisma.sql`${id}`), ', ')})
+          AND cs."A" IN (${Prisma.join(
+            categoryIds.map((id) => Prisma.sql`${id}`),
+            ', ',
+          )})
         `
-      : Prisma.sql``;
+        : Prisma.sql``;
 
     const inViewport = Prisma.sql`
       s."isActive" = true
