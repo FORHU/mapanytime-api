@@ -1,10 +1,35 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
-import { haversineKm, roundKm } from '../utils/geo.util';
 
-// Defensive cap on how many in-viewport rows we pull into memory before
-// computing distances. Stops a zoomed-out viewport (e.g. a whole country)
-// from loading an unbounded result set into the Node process.
-const MAX_VIEWPORT_ROWS = 1000;
+/** A single store row returned by the distance-ordered viewport query. */
+export interface NearbyStore {
+  id: string;
+  storeName: string;
+  description: string | null;
+  isActive: boolean;
+  distanceKm: number;
+  coordinates: { lat: number; lng: number };
+  address: {
+    currentAddress: string;
+    city: string;
+    province: string;
+    country: string;
+  };
+}
+
+interface NearbyRow {
+  id: string;
+  storeName: string;
+  description: string | null;
+  isActive: boolean;
+  latitude: number;
+  longitude: number;
+  currentAddress: string;
+  city: string;
+  province: string;
+  country: string;
+  distanceKm: string; // Postgres NUMERIC → string over the wire
+}
 
 export default class StoreRepository {
   static async getActiveStoresWithLocations() {
@@ -14,56 +39,87 @@ export default class StoreRepository {
     });
   }
 
+  /**
+   * Distance-ordered, paginated stores within a viewport bounding box.
+   *
+   * The haversine distance and ORDER BY happen in Postgres, so the "nearest N"
+   * is always correct regardless of how many stores fall inside the box (the
+   * old in-memory approach capped at 1000 arbitrary rows before sorting, which
+   * could miss genuinely-nearer stores). Returns the page plus the total count
+   * in the box so callers can compute `hasMore`.
+   */
   static async getNearbyStores(
     north: number,
     south: number,
     east: number,
     west: number,
     limit: number,
+    offset: number,
+    categoryIds: string[] | undefined,
     centerLat: number,
     centerLng: number,
-  ) {
-    // 1. Prisma does the bounding-box filter (indexed Float columns). No raw
-    //    SQL — the query is type-checked, so a malformed clause can't compile.
-    const rows = await prisma.stores.findMany({
-      where: {
-        isActive: true,
-        storeLocations: {
-          latitude: { gte: south, lte: north },
-          longitude: { gte: west, lte: east },
-        },
-      },
-      include: { storeLocations: true },
-      take: MAX_VIEWPORT_ROWS,
-    });
+  ): Promise<{ items: NearbyStore[]; total: number }> {
+    // Great-circle distance (km) expressed in SQL, mirroring geo.util's
+    // haversineKm so client-side and server-side numbers agree.
+    const distanceKm = Prisma.sql`
+      6371 * 2 * asin(sqrt(
+        power(sin(radians(l."latitude" - ${centerLat}) / 2), 2) +
+        cos(radians(${centerLat})) * cos(radians(l."latitude")) *
+        power(sin(radians(l."longitude" - ${centerLng}) / 2), 2)
+      ))
+    `;
 
-    // 2. Haversine distance in TypeScript, then sort nearest-first and keep
-    //    only the requested number. The relation filter guarantees a location
-    //    exists, but TS still types it as nullable, so we guard.
-    return rows
-      .filter((row) => row.storeLocations !== null)
-      .map((row) => {
-        const loc = row.storeLocations!;
-        return {
-          id: row.id,
-          storeName: row.storeName,
-          description: row.description,
-          isActive: row.isActive,
-          distanceKm: roundKm(haversineKm(centerLat, centerLng, loc.latitude, loc.longitude)),
-          coordinates: {
-            lat: loc.latitude,
-            lng: loc.longitude,
-          },
-          address: {
-            currentAddress: loc.currentAddress,
-            city: loc.city,
-            province: loc.province,
-            country: loc.country,
-          },
-        };
-      })
-      .sort((a, b) => a.distanceKm - b.distanceKm)
-      .slice(0, limit);
+    const categoryJoin = categoryIds && categoryIds.length > 0
+      ? Prisma.sql`
+          JOIN "_CategoriesToStores" cs ON cs."B" = s."id"
+          AND cs."A" IN (${Prisma.join(categoryIds.map((id) => Prisma.sql`${id}`), ', ')})
+        `
+      : Prisma.sql``;
+
+    const inViewport = Prisma.sql`
+      s."isActive" = true
+      AND l."latitude" BETWEEN ${south} AND ${north}
+      AND l."longitude" BETWEEN ${west} AND ${east}
+    `;
+
+    const rows = await prisma.$queryRaw<NearbyRow[]>(Prisma.sql`
+      SELECT DISTINCT
+        s."id", s."storeName", s."description", s."isActive",
+        l."latitude", l."longitude",
+        l."currentAddress", l."city", l."province", l."country",
+        ROUND((${distanceKm})::numeric, 2) AS "distanceKm"
+      FROM "Stores" s
+      JOIN "StoreLocations" l ON l."storeId" = s."id"
+      ${categoryJoin}
+      WHERE ${inViewport}
+      ORDER BY "distanceKm" ASC
+      LIMIT ${limit} OFFSET ${offset}
+    `);
+
+    const totalRows = await prisma.$queryRaw<{ count: number }[]>(Prisma.sql`
+      SELECT COUNT(DISTINCT s."id")::int AS count
+      FROM "Stores" s
+      JOIN "StoreLocations" l ON l."storeId" = s."id"
+      ${categoryJoin}
+      WHERE ${inViewport}
+    `);
+
+    const items: NearbyStore[] = rows.map((r) => ({
+      id: r.id,
+      storeName: r.storeName,
+      description: r.description,
+      isActive: r.isActive,
+      distanceKm: Number(r.distanceKm),
+      coordinates: { lat: r.latitude, lng: r.longitude },
+      address: {
+        currentAddress: r.currentAddress,
+        city: r.city,
+        province: r.province,
+        country: r.country,
+      },
+    }));
+
+    return { items, total: Number(totalRows[0]?.count ?? 0) };
   }
 
   static async getStoresBySellerId(sellerId: string) {

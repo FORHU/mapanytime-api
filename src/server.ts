@@ -7,8 +7,12 @@ import logger from './utils/logger';
 import { PORT, NODE_ENV } from './config';
 import { prisma } from './utils/prisma';
 import { redis } from './infrastructure/redis';
+import { initSocket } from './infrastructure/socket';
 
 const server = http.createServer(app);
+
+// Realtime store updates (region-scoped rooms) share the HTTP server.
+initSocket(server);
 
 server.listen(Number(PORT), '0.0.0.0', () => {
   logger.info(`Server running on port ${PORT} in ${NODE_ENV} mode`);
