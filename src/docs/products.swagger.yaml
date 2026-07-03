@@ -67,7 +67,7 @@ paths:
                   type: array
                   items:
                     type: string
-                  example: ["organic", "farming", "fertilizer"]
+                  example: ['organic', 'farming', 'fertilizer']
                 isActive:
                   type: boolean
                   default: false

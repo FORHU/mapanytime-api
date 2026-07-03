@@ -88,7 +88,17 @@ paths:
                       example: Main hub for fresh produce.
                 locationData:
                   type: object
-                  required: [currentAddress, homeAddress, city, province, zipCode, country, latitude, longitude]
+                  required:
+                    [
+                      currentAddress,
+                      homeAddress,
+                      city,
+                      province,
+                      zipCode,
+                      country,
+                      latitude,
+                      longitude,
+                    ]
                   properties:
                     currentAddress:
                       type: string
@@ -126,16 +136,26 @@ paths:
                         example: 1
                       openTime:
                         type: string
-                        example: "08:00"
+                        example: '08:00'
                       closeTime:
                         type: string
-                        example: "18:00"
+                        example: '18:00'
                       isClosed:
                         type: boolean
                         default: false
                 documents:
                   type: object
-                  required: [mayorsPermitFileName, mayorsPermitKey, tinIdFileName, tinIdKey, dtiCertificateFileName, dtiCertificateKey, govIdFileName, govIdKey]
+                  required:
+                    [
+                      mayorsPermitFileName,
+                      mayorsPermitKey,
+                      tinIdFileName,
+                      tinIdKey,
+                      dtiCertificateFileName,
+                      dtiCertificateKey,
+                      govIdFileName,
+                      govIdKey,
+                    ]
                   properties:
                     mayorsPermitFileName:
                       type: string

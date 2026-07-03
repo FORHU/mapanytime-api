@@ -3,6 +3,7 @@ import { Users } from '@prisma/client';
 import Joi from 'joi';
 import AuthSvc from '../services/auth.service';
 import { responseSuccess, responseError } from '../helpers/response.helper';
+import logger from '../utils/logger';
 
 export default class AuthController {
   // Register a new user
@@ -20,9 +21,10 @@ export default class AuthController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const data = await AuthSvc.register(value);
-      // CHANGED: Passed 'data' instead of 'null' to return the tokens
-      return responseSuccess(res, 201, data, 'Registration successful');
+      await AuthSvc.register(value);
+      // Registration returns only a message + status code — no tokens or user
+      // data. The client redirects to login afterwards.
+      return responseSuccess(res, 201, null, 'Registration successful');
     } catch (error) {
       next(error);
     }
@@ -76,7 +78,14 @@ export default class AuthController {
       const user = req.user as Users;
       const userId = user?.id;
 
+      logger.info(
+        `[Auth] Logout request received (user: ${userId ?? 'none'}, hasRefreshToken: ${Boolean(
+          refreshToken,
+        )})`,
+      );
+
       if (!userId) {
+        logger.warn('[Auth] Logout rejected — no authenticated user');
         return responseError(res, 401, 'Unauthorized');
       }
 

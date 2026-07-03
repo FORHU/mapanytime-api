@@ -106,6 +106,8 @@ export default class StoreController {
       east: Joi.number().required(),
       west: Joi.number().required(),
       limit: Joi.number().integer().min(1).max(500).default(100),
+      offset: Joi.number().integer().min(0).default(0),
+      categoryId: Joi.string().optional(),
       // Optional: user's exact position for precise distance calculation.
       // Falls back to bounding-box midpoint in the service if omitted.
       lat: Joi.number().optional(),
@@ -122,6 +124,8 @@ export default class StoreController {
         value.east,
         value.west,
         value.limit,
+        value.offset,
+        value.categoryId,
         value.lat,
         value.lng,
       );
