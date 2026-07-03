@@ -14,6 +14,7 @@ export default class ProductService {
       categoryId?: string;
       tags?: string[];
       isActive?: boolean;
+      initialStock?: number;
     },
   ) {
     const seller = await ProductRepository.getStoreByUserId(userId);
@@ -59,6 +60,14 @@ export default class ProductService {
       store: { connect: { id: storeId } },
       ...(productData.categoryId && { category: { connect: { id: productData.categoryId } } }),
       ...(tagsData && { tags: tagsData }),
+      inventory: {
+        create: [
+          {
+            quantityOnHand: productData.initialStock || 0,
+            store: { connect: { id: storeId } },
+          },
+        ],
+      },
     });
   }
 

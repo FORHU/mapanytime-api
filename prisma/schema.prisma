@@ -199,7 +199,7 @@ model Stores {
   documentVerifications DocumentVerifications[] 
   categories            Categories[]
   orders                Orders[]
-  //inventory             Inventory[]
+  inventory             Inventory[]
 
   @@index([sellerId])
   @@index([isActive])
@@ -259,6 +259,7 @@ model Products {
   description   String?
   price         Float
   isActive      Boolean   @default(false)
+  totalSold     Int       @default(0)
   listedAt      DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -267,7 +268,7 @@ model Products {
   productFile Files?      @relation(fields: [productFileId], references: [id])
   category    Categories? @relation(fields: [categoryId], references: [id])
   tags        Tags[]
-  //inventory   Inventory[]
+  inventory   Inventory[]
 
   @@index([storeId])
   @@index([categoryId])
@@ -348,9 +349,9 @@ model OrderItems {
   order Orders    @relation(fields: [orderId], references: [id])
 }
 
-/*model Inventory {
+model Inventory {
   id        String    @id @default(cuid())
-  productId String
+  productId String    @unique
   storeId   String
   quantityOnHand    Int @default(0)
   quantityReserved  Int @default(0)
@@ -359,7 +360,7 @@ model OrderItems {
 
   product Products @relation(fields: [productId], references: [id])
   store   Stores   @relation(fields: [storeId], references: [id])
-}*/
+}
 
 model Payments {
   id       String    @id @default(cuid())

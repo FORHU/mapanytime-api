@@ -5,10 +5,10 @@ const options: swaggerJsdoc.Options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Node.js PostgreSQL API Template',
+      title: 'MapAnytime Marketplace API',
       version: '1.0.0',
       description:
-        'Enterprise-grade Express.js API with Event-Driven Architecture, RabbitMQ, Redis, and Prisma ORM.',
+        'Enterprise-grade Express.js API for the MapAnytime marketplace, featuring geospatial querying, S3 direct uploads, Redis caching, and interactive Prisma ORM transactions.',
       contact: {
         name: 'API Support',
         email: 'support@example.com',
