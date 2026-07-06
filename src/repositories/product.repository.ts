@@ -2,10 +2,9 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 
 export default class ProductRepository {
-  static async getStoreByUserId(userId: string) {
+  static async getSellerByUserId(userId: string) {
     return prisma.sellers.findUnique({
       where: { userId: userId },
-      include: { stores: true },
     });
   }
 

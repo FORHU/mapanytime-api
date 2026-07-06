@@ -2,6 +2,39 @@ import ProductRepository from '../repositories/product.repository';
 import { Prisma } from '@prisma/client';
 
 export default class ProductService {
+  // PRIVATE UTILITY METHODS
+  private static async validateSellerAndStoreAccess(userId: string, storeId: string) {
+    const seller = await ProductRepository.getSellerByUserId(userId);
+    if (!seller || seller.applicationStatus !== 'APPROVED') {
+      throw { status: 403, message: 'User is not an approved seller.' };
+    }
+
+    const store = await ProductRepository.getStoreById(storeId);
+    if (!store) {
+      throw { status: 404, message: 'Store branch not found.' };
+    }
+
+    // Direct foreign key comparison instead of heavy array mapping
+    if (store.sellerId !== seller.id) {
+      throw { status: 403, message: 'You do not own this store branch.' };
+    }
+
+    return { seller, store };
+  }
+
+  private static async validateProductAccess(userId: string, productId: string) {
+    const product = await ProductRepository.getProductById(productId);
+    if (!product) {
+      throw { status: 404, message: 'Product not found.' };
+    }
+
+    // Ensure the seller owns the product's store
+    await this.validateSellerAndStoreAccess(userId, product.storeId);
+
+    return product;
+  }
+
+  // CORE BUSINESS LOGIC
   static async createProduct(
     userId: string,
     storeId: string,
@@ -16,20 +49,7 @@ export default class ProductService {
       initialStock?: number;
     },
   ) {
-    const seller = await ProductRepository.getStoreByUserId(userId);
-
-    if (!seller || seller.applicationStatus !== 'APPROVED') {
-      throw { status: 403, message: 'User is not an approved seller.' };
-    }
-
-    const ownsStore = seller.stores.some((s) => s.id === storeId);
-    if (!ownsStore) {
-      throw { status: 403, message: 'You do not own this store branch.' };
-    }
-
-    const store = await ProductRepository.getStoreById(storeId);
-
-    if (!store) throw { status: 404, message: 'Store branch not found.' };
+    const { store } = await this.validateSellerAndStoreAccess(userId, storeId);
 
     const isVerified = store.documentVerifications.some(
       (doc) => doc.verificationStatus === 'APPROVED',
@@ -67,12 +87,7 @@ export default class ProductService {
   }
 
   static async getMyProducts(userId: string, storeId: string) {
-    const seller = await ProductRepository.getStoreByUserId(userId);
-    if (!seller) throw { status: 404, message: 'Seller profile not found.' };
-
-    const ownsStore = seller.stores.some((s) => s.id === storeId);
-    if (!ownsStore) throw { status: 403, message: 'You do not own this store branch.' };
-
+    await this.validateSellerAndStoreAccess(userId, storeId);
     return ProductRepository.getProductsByStoreId(storeId);
   }
 
@@ -81,32 +96,12 @@ export default class ProductService {
     productId: string,
     updateData: Prisma.ProductsUpdateInput,
   ) {
-    const seller = await ProductRepository.getStoreByUserId(userId);
-    if (!seller) throw { status: 404, message: 'Seller not found.' };
-
-    const product = await ProductRepository.getProductById(productId);
-    if (!product) throw { status: 404, message: 'Product not found.' };
-
-    const ownsStore = seller.stores.some((s) => s.id === product.storeId);
-    if (!ownsStore) {
-      throw { status: 403, message: 'You do not have permission to modify this product.' };
-    }
-
+    await this.validateProductAccess(userId, productId);
     return ProductRepository.updateProduct(productId, updateData);
   }
 
   static async deleteProduct(userId: string, productId: string) {
-    const seller = await ProductRepository.getStoreByUserId(userId);
-    if (!seller) throw { status: 404, message: 'Seller not found.' };
-
-    const product = await ProductRepository.getProductById(productId);
-    if (!product) throw { status: 404, message: 'Product not found.' };
-
-    const ownsStore = seller.stores.some((s) => s.id === product.storeId);
-    if (!ownsStore) {
-      throw { status: 403, message: 'You do not have permission to delete this product.' };
-    }
-
+    await this.validateProductAccess(userId, productId);
     return ProductRepository.deleteProduct(productId);
   }
 }

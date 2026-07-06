@@ -77,13 +77,15 @@ export default class OrderService {
   }
 
   static async completeOrder(userId: string, orderId: string, storeId: string) {
-    const seller = await ProductRepository.getStoreByUserId(userId);
+    // Fetch the seller using the optimized repository method
+    const seller = await ProductRepository.getSellerByUserId(userId);
     if (!seller || seller.applicationStatus !== 'APPROVED') {
       throw { status: 403, message: 'User is not an approved seller profile.' };
     }
 
-    const ownsStore = seller.stores.some((s) => s.id === storeId);
-    if (!ownsStore) {
+    // Fetch the store and verify ownership using a direct foreign key check
+    const store = await ProductRepository.getStoreById(storeId);
+    if (!store || store.sellerId !== seller.id) {
       throw { status: 403, message: 'You do not have administrative access to this branch.' };
     }
 
