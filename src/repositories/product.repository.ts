@@ -11,7 +11,10 @@ export default class ProductRepository {
   static async getStoreById(storeId: string) {
     return prisma.stores.findUnique({
       where: { id: storeId },
-      include: { documentVerifications: true },
+      include: {
+        documentVerifications: true,
+        seller: true,
+      },
     });
   }
 

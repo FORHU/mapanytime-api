@@ -4,22 +4,24 @@ import { Prisma } from '@prisma/client';
 export default class ProductService {
   // PRIVATE UTILITY METHODS
   private static async validateSellerAndStoreAccess(userId: string, storeId: string) {
-    const seller = await ProductRepository.getSellerByUserId(userId);
-    if (!seller || seller.applicationStatus !== 'APPROVED') {
-      throw { status: 403, message: 'User is not an approved seller.' };
-    }
-
+    // Single database trip
     const store = await ProductRepository.getStoreById(storeId);
+
     if (!store) {
       throw { status: 404, message: 'Store branch not found.' };
     }
 
-    // Direct foreign key comparison instead of heavy array mapping
-    if (store.sellerId !== seller.id) {
+    // Verify ownership directly through the joined seller object
+    if (store.seller.userId !== userId) {
       throw { status: 403, message: 'You do not own this store branch.' };
     }
 
-    return { seller, store };
+    // Verify approval status
+    if (store.seller.applicationStatus !== 'APPROVED') {
+      throw { status: 403, message: 'User is not an approved seller.' };
+    }
+
+    return { store };
   }
 
   private static async validateProductAccess(userId: string, productId: string) {
