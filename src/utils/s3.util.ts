@@ -1,4 +1,5 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import crypto from 'crypto';
 import logger from '../utils/logger';
 import {
@@ -6,7 +7,6 @@ import {
   AWS_ACCESS_KEY_ID,
   AWS_SECRET_ACCESS_KEY,
   AWS_S3_BUCKET_NAME,
-  S3_CDN_URL,
 } from '../config';
 
 const s3Client = new S3Client({
@@ -18,30 +18,40 @@ const s3Client = new S3Client({
 });
 
 export default class S3Util {
-  static async uploadBuffer(
-    file: Express.Multer.File,
+  // Generates a temporary URL the frontend can use to upload a file directly to S3.
+  static async generateUploadUrl(
+    originalFileName: string,
+    mimeType: string,
     folder: string = 'documents',
-  ): Promise<string> {
-    const fileExtension = file.originalname.split('.').pop();
+  ): Promise<{ uploadUrl: string; fileKey: string }> {
+    const fileExtension = originalFileName.split('.').pop();
     const randomName = crypto.randomBytes(16).toString('hex');
-    const key = `${folder}/${randomName}.${fileExtension}`;
+    const fileKey = `${folder}/${randomName}.${fileExtension}`;
 
     const command = new PutObjectCommand({
       Bucket: AWS_S3_BUCKET_NAME,
-      Key: key,
-      Body: file.buffer,
-      ContentType: file.mimetype,
+      Key: fileKey,
+      ContentType: mimeType,
     });
 
-    await s3Client.send(command);
+    // URL expires in 15 minutes (900 seconds)
+    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
 
-    logger.info(`[AWS S3] Successfully uploaded ${file.originalname} to ${key}`);
+    logger.info(`[AWS S3] Generated presigned upload URL for key: ${fileKey}`);
 
-    // If a CDN URL is provided in the environment, use it. Otherwise, fallback to the raw S3 URL.
-    if (S3_CDN_URL) {
-      return `${S3_CDN_URL}/${key}`;
-    }
+    return { uploadUrl, fileKey };
+  }
 
-    return `https://${AWS_S3_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${key}`;
+  // Generates a temporary URL to view/download a private file by its S3 Key.
+  static async getFileUrl(fileKey: string): Promise<string> {
+    const command = new GetObjectCommand({
+      Bucket: AWS_S3_BUCKET_NAME,
+      Key: fileKey,
+    });
+
+    // URL expires in 1 hour (3600 seconds)
+    const downloadUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+
+    return downloadUrl;
   }
 }

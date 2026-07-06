@@ -25,6 +25,15 @@ export default class AuthRepo {
     });
   }
 
+  static async createBuyer(userId: string, displayName: string) {
+    return prisma.buyers.create({
+      data: {
+        userId: userId,
+        displayName: displayName,
+      },
+    });
+  }
+
   static async findUserByEmail(email: string) {
     return prisma.users.findFirst({
       where: { email: email, accountStatus: 'ACTIVE' },

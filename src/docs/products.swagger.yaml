@@ -1,17 +1,39 @@
 tags:
   - name: Products
-    description: Operations related to product listings
+    description: Operations related to product listings and inventory initialization
 
 paths:
   /v1/products:
     get:
-      summary: Get all products
+      summary: Get all products for a specific store
+      description: Retrieves a list of products belonging to the specified store branch.
       tags: [Products]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: storeId
+          required: true
+          schema:
+            type: string
+          description: The unique identifier of the store branch.
       responses:
         '200':
           description: List of products retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          description: Bad request (Missing storeId parameter)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (User does not own the store)
+
     post:
       summary: Create a new product
+      description: Adds a new product to a specific store branch and initializes its inventory ledger.
       tags: [Products]
       security:
         - BearerAuth: []
@@ -21,14 +43,14 @@ paths:
           application/json:
             schema:
               type: object
-              required: [storeId, name, price]
+              required: [storeId, name, price, categoryId]
               properties:
                 storeId:
                   type: string
                   example: cmqwjvltm0008nheoeemlhp9v
                 categoryId:
                   type: string
-                  example: cat_12345
+                  example: cmqwjvltn0009nheo12345678
                 name:
                   type: string
                   example: Organic Fertilizer
@@ -41,10 +63,112 @@ paths:
                 description:
                   type: string
                   example: Premium plant food
+                tags:
+                  type: array
+                  items:
+                    type: string
+                  example: ['organic', 'farming', 'fertilizer']
+                isActive:
+                  type: boolean
+                  default: false
+                  description: Set to true to make the product visible to buyers immediately.
+                initialStock:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                  description: The starting physical quantity on hand.
       responses:
         '201':
           description: Product created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
         '400':
           description: Validation error
         '401':
           description: Unauthorized
+        '403':
+          description: Forbidden (User does not own the store or store is unverified)
+
+  /v1/products/{id}:
+    put:
+      summary: Update a product
+      description: Modifies an existing product's details. Only the fields provided will be updated.
+      tags: [Products]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The unique identifier of the product to update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Updated Organic Fertilizer
+                price:
+                  type: number
+                  example: 210.00
+                brand:
+                  type: string
+                  example: GreenThumb Premium
+                description:
+                  type: string
+                  example: Updated description for premium plant food
+                categoryId:
+                  type: string
+                  example: cmqwjvltn0009nheo12345678
+                isActive:
+                  type: boolean
+                  example: true
+      responses:
+        '200':
+          description: Product updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          description: Bad request (Validation error)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (User does not own the product)
+        '404':
+          description: Product or Seller not found
+
+    delete:
+      summary: Archive a product
+      description: Performs a soft delete (sets isActive to false) to ensure historical order data remains intact.
+      tags: [Products]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The unique identifier of the product to archive.
+      responses:
+        '200':
+          description: Product archived successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (User does not own the product)
+        '404':
+          description: Product or Seller not found

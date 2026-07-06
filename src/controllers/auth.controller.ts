@@ -6,14 +6,13 @@ import { responseSuccess, responseError } from '../helpers/response.helper';
 import logger from '../utils/logger';
 
 export default class AuthController {
-  /**
-   * Register a new user
-   */
+  // Register a new user
   static async register(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
       email: Joi.string().email().required(),
       password: Joi.string().min(6).required(),
-      name: Joi.string().optional(),
+      firstName: Joi.string().optional(),
+      lastName: Joi.string().optional(),
       roleName: Joi.string().required(),
       countryCode: Joi.string().max(3).optional(),
     });

@@ -14,6 +14,7 @@ export default class ProductController {
       categoryId: Joi.string().required(),
       tags: Joi.array().items(Joi.string()).optional(),
       isActive: Joi.boolean().default(false),
+      initialStock: Joi.number().integer().min(0).default(0),
     });
 
     const { error, value } = schema.validate(req.body);
