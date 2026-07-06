@@ -1,59 +1,62 @@
 import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import OrderService from '../services/order.service';
+import CartService from '../services/cart.service';
 import { responseSuccess, responseError } from '../helpers/response.helper';
 import { prisma } from '../utils/prisma';
 
 export default class OrderController {
   static async create(req: Request, res: Response, next: NextFunction) {
+    // Validate only the fulfillment details from the frontend
     const schema = Joi.object({
-      storeId: Joi.string().required(),
       type: Joi.string().valid('DELIVERY', 'PICKUP').required(),
       paymentMethod: Joi.string().valid('BANK', 'GCASH', 'CASH_ON_DELIVERY').required(),
-      items: Joi.array()
-        .items(
-          Joi.object({
-            productId: Joi.string().required(),
-            quantity: Joi.number().integer().min(1).required(),
-          }),
-        )
-        .min(1)
-        .required(),
     });
 
     const { error, value } = schema.validate(req.body);
     if (error) return responseError(res, 400, error.message);
 
     try {
-      // Safely extract the root User ID using the pattern from middleware
       const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
 
-      if (!userId) {
-        return responseError(res, 401, 'Unauthorized access.');
-      }
-
-      // Fetch the Buyer profile associated with this User account
       const buyer = await prisma.buyers.findUnique({
         where: { userId: userId },
       });
 
-      // Prevent users without a registered Buyer profile from making orders
       if (!buyer) {
         return responseError(res, 403, 'Only registered buyers can create orders.');
       }
 
-      // Construct the payload using the valid buyer.id
+      // Retrieve the trusted storeId and items from the Redis server cache
+      const cart = await CartService.getCart(userId);
+
+      if (!cart || !cart.storeId || cart.items.length === 0) {
+        return responseError(res, 400, 'Your checkout failed because your cart is empty.');
+      }
+
+      // Construct the payload safely on the backend
       const servicePayload = {
         buyerId: buyer.id,
-        storeId: value.storeId,
+        storeId: cart.storeId, // Pulled from Redis
         type: value.type,
         paymentMethod: value.paymentMethod,
-        items: value.items,
+        items: cart.items, // Pulled from Redis
       };
 
       const data = await OrderService.createOrder(servicePayload);
+
+      // Clear the cart after successful creation
+      await CartService.clearCart(userId);
+
       return responseSuccess(res, 201, data, 'Order created successfully');
     } catch (error) {
+      // Dynamically extract the exact status type expected by responseError
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
       next(error);
     }
   }
@@ -74,6 +77,37 @@ export default class OrderController {
       const data = await OrderService.completeOrder(userId, value.orderId, value.storeId);
       return responseSuccess(res, 200, data, 'Order has been fulfilled successfully');
     } catch (error) {
+      // Dynamically extract the exact status type expected by responseError
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
+      next(error);
+    }
+  }
+
+  static async cancel(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({
+      orderId: Joi.string().required(),
+    });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
+      const data = await OrderService.cancelOrder(userId, value.orderId);
+      return responseSuccess(res, 200, data, 'Order cancelled successfully');
+    } catch (error) {
+      // Dynamically extract the exact status type expected by responseError
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
       next(error);
     }
   }

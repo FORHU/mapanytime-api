@@ -8,20 +8,34 @@ import { PORT, NODE_ENV } from './config';
 import { prisma } from './utils/prisma';
 import { redis } from './infrastructure/redis';
 import { initSocket } from './infrastructure/socket';
+import RedisUtil from './utils/redis.util';
 
 const server = http.createServer(app);
 
 // Realtime store updates (region-scoped rooms) share the HTTP server.
 initSocket(server);
 
-server.listen(Number(PORT), '0.0.0.0', () => {
-  logger.info(`Server running on port ${PORT} in ${NODE_ENV} mode`);
-});
+// Wrap the server startup in an async function to await infrastructure initialization
+const startServer = async () => {
+  try {
+    // Initialize the Redis Utility before opening the port to traffic
+    await RedisUtil.initialize();
+
+    server.listen(Number(PORT), '0.0.0.0', () => {
+      logger.info(`Server running on port ${PORT} in ${NODE_ENV} mode`);
+    });
+  } catch (error) {
+    logger.error('Failed to initialize critical infrastructure:', error);
+    process.exit(1);
+  }
+};
+
+startServer();
 
 const gracefulShutdown = async (signal: string) => {
   logger.info(`[Shutdown] ${signal} received. Starting graceful shutdown...`);
 
-  // 1. Stop accepting new connections
+  // Stop accepting new connections
   server.close(async (err) => {
     if (err) {
       logger.error('[Shutdown] Error closing HTTP server:', err);
@@ -29,9 +43,14 @@ const gracefulShutdown = async (signal: string) => {
     }
 
     try {
-      // 2. Disconnect from all infrastructure
+      // Disconnect from all infrastructure
       await redis.close();
       await prisma.$disconnect();
+
+      // Also close the utility client gracefully
+      if (RedisUtil.client?.isOpen) {
+        await RedisUtil.client.disconnect();
+      }
 
       logger.info('[Shutdown] All connections closed. Goodbye.');
       process.exit(0);

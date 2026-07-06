@@ -5,8 +5,7 @@ import { authenticate } from '../middleware/auth.middleware';
 const router = Router();
 
 router.post('/', authenticate, OrderController.create);
-
-// ADDED: Endpoint for store owners to complete orders
 router.patch('/complete', authenticate, OrderController.complete);
+router.patch('/cancel', authenticate, OrderController.cancel);
 
 export default router;

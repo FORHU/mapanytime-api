@@ -7,6 +7,8 @@ import productRoute from './product.route';
 import storeRoute from './store.route';
 import categoryRoute from './category.route';
 import orderRoute from './order.route';
+import inventoryRoutes from './inventory.route';
+import cartRoutes from './cart.route';
 
 const router = express.Router();
 
@@ -24,5 +26,7 @@ router.use('/v1/stores', storeRoute);
 router.use('/health', healthRouter);
 router.use('/v1/categories', categoryRoute);
 router.use('/v1/orders', orderRoute);
+router.use('/v1/inventory', inventoryRoutes);
+router.use('/v1/cart', cartRoutes);
 
 export default router;
