@@ -1,6 +1,7 @@
 import OrderRepository from '../repositories/order.repository';
 import ProductRepository from '../repositories/product.repository';
 import { prisma } from '../utils/prisma';
+import { emitNotificationToUser } from '../infrastructure/socket';
 
 export default class OrderService {
   static async createOrder(payload: {
@@ -11,7 +12,7 @@ export default class OrderService {
     items: { productId: string; quantity: number }[];
   }) {
     // The Service initiates the transaction to secure the logic phase
-    return prisma.$transaction(async (tx) => {
+    const order = await prisma.$transaction(async (tx) => {
       let totalAmount = 0;
       const orderItemsData = [];
 
@@ -73,6 +74,28 @@ export default class OrderService {
 
       return OrderRepository.insertOrder(orderData, tx);
     });
+
+    // After commit: push a realtime "new order" notification to the seller who
+    // owns the store. Best-effort — a socket failure must not fail the order.
+    try {
+      const store = await prisma.stores.findUnique({
+        where: { id: order.storeId },
+        include: { seller: { select: { userId: true } } },
+      });
+      if (store?.seller?.userId) {
+        emitNotificationToUser(store.seller.userId, {
+          id: order.id,
+          title: 'New order',
+          body: `You have a new order worth ₱${order.totalAmount.toLocaleString()}.`,
+          metadata: { orderId: order.id, storeId: order.storeId, type: 'ORDER_CREATED' },
+          sentAt: new Date().toISOString(),
+        });
+      }
+    } catch {
+      // Swallow — notification delivery is non-critical.
+    }
+
+    return order;
   }
 
   static async completeOrder(userId: string, orderId: string, storeId: string) {

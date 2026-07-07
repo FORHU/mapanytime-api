@@ -2,6 +2,7 @@ import PaymentRepository from '../repositories/payment.repository';
 import ProductRepository from '../repositories/product.repository';
 import { PAYMENTSTATUS } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import { emitNotificationToUser } from '../infrastructure/socket';
 
 export default class PaymentService {
   static async generateQrPayload(userId: string, orderId: string) {
@@ -40,45 +41,70 @@ export default class PaymentService {
     status: PAYMENTSTATUS,
     referenceNumber?: string,
   ) {
-    return prisma.$transaction(async (tx) => {
-      const payment = await tx.payments.findFirst({
+    const { payment, justCompleted } = await prisma.$transaction(async (tx) => {
+      const existing = await tx.payments.findFirst({
         where: { orderId },
         orderBy: { createdAt: 'desc' }, // Get the most recent payment attempt
       });
 
-      if (!payment) throw { status: 404, message: 'Payment record not found.' };
-      if (payment.status === 'COMPLETED') return payment;
-
-      let updatedPayment;
+      if (!existing) throw { status: 404, message: 'Payment record not found.' };
+      // Idempotent replay: already settled, nothing to transition or notify.
+      if (existing.status === 'COMPLETED') return { payment: existing, justCompleted: false };
 
       if (status === 'COMPLETED') {
         if (!referenceNumber) {
           throw { status: 400, message: 'A reference number is required for successful payments.' };
         }
-        updatedPayment = await tx.payments.update({
-          where: { id: payment.id },
+        const updated = await tx.payments.update({
+          where: { id: existing.id },
           data: {
             status: 'COMPLETED',
             referenceNumber,
             paidAt: new Date(),
           },
         });
-      } else {
-        updatedPayment = await tx.payments.update({
-          where: { id: payment.id },
-          data: { status },
-        });
-
-        // Automatically cancel the order if the payment fails
-        if (status === 'FAILED') {
-          await tx.orders.update({
-            where: { id: orderId },
-            data: { status: 'FAILED' },
-          });
-        }
+        return { payment: updated, justCompleted: true };
       }
 
-      return updatedPayment;
+      const updated = await tx.payments.update({
+        where: { id: existing.id },
+        data: { status },
+      });
+
+      // Automatically cancel the order if the payment fails
+      if (status === 'FAILED') {
+        await tx.orders.update({
+          where: { id: orderId },
+          data: { status: 'FAILED' },
+        });
+      }
+
+      return { payment: updated, justCompleted: false };
     });
+
+    // After commit: on a real PENDING → COMPLETED transition, push a realtime
+    // "payment received" notification to the buyer. Best-effort — a socket
+    // failure must not fail the webhook.
+    if (justCompleted) {
+      try {
+        const order = await prisma.orders.findUnique({
+          where: { id: orderId },
+          include: { buyer: { select: { userId: true } }, store: { select: { storeName: true } } },
+        });
+        if (order?.buyer?.userId) {
+          emitNotificationToUser(order.buyer.userId, {
+            id: payment.id,
+            title: 'Payment received',
+            body: `Your payment of ₱${payment.amount.toLocaleString()} to ${order.store.storeName} was successful.`,
+            metadata: { orderId, type: 'PAYMENT_COMPLETED' },
+            sentAt: new Date().toISOString(),
+          });
+        }
+      } catch {
+        // Swallow — notification delivery is non-critical.
+      }
+    }
+
+    return payment;
   }
 }
