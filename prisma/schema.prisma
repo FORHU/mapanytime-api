@@ -344,13 +344,15 @@ model Inventory {
 }
 
 model Payments {
-  id            String        @id @default(cuid())
-  orderId       String
-  amount        Float
-  paymentMethod PAYMENTMETHOD
-  status        PAYMENTSTATUS @default(PENDING)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id              String        @id @default(cuid())
+  orderId         String
+  amount          Float
+  paymentMethod   PAYMENTMETHOD
+  status          PAYMENTSTATUS @default(PENDING)
+  referenceNumber String?       @unique
+  paidAt          DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   order Orders @relation(fields: [orderId], references: [id])
 }
