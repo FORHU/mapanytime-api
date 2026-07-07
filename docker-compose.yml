@@ -45,7 +45,7 @@ services:
     build: .
     restart: always
     ports:
-      - '${PORT:-3002}:${PORT:-3002}'
+      - '${PORT:-4002}:${PORT:-4002}'
     env_file:
       - .env
     # Override the localhost-based URLs from .env so the container reaches

@@ -170,6 +170,7 @@ model Stores {
   seller                Sellers                 @relation(fields: [sellerId], references: [id])
   categories            Categories[]            @relation("CategoriesToStores")
   orders                Orders[]
+  inventory             Inventory[]
 
   @@index([sellerId])
   @@index([isActive])
@@ -218,22 +219,25 @@ model StoreReviews {
 }
 
 model Products {
-  id            String      @id @default(cuid())
+  id            String    @id @default(cuid())
   storeId       String
   productFileId String?
+  categoryId    String?
   name          String
   brand         String?
   description   String?
   price         Float
-  isActive      Boolean     @default(false)
+  isActive      Boolean   @default(false)
+  totalSold     Int       @default(0)
   listedAt      DateTime?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  categoryId    String?
-  category      Categories? @relation(fields: [categoryId], references: [id])
-  productFile   Files?      @relation(fields: [productFileId], references: [id])
-  store         Stores      @relation(fields: [storeId], references: [id])
-  tags          Tags[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  store       Stores      @relation(fields: [storeId], references: [id])
+  productFile Files?      @relation(fields: [productFileId], references: [id])
+  category    Categories? @relation(fields: [categoryId], references: [id])
+  tags        Tags[]
+  inventory   Inventory[]
 
   @@index([storeId])
   @@index([categoryId])
@@ -324,6 +328,19 @@ model OrderItems {
   updatedAt DateTime @updatedAt
 
   order Orders @relation(fields: [orderId], references: [id])
+}
+
+model Inventory {
+  id               String   @id @default(cuid())
+  productId        String   @unique
+  storeId          String
+  quantityOnHand   Int      @default(0)
+  quantityReserved Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  product Products @relation(fields: [productId], references: [id])
+  store   Stores   @relation(fields: [storeId], references: [id])
 }
 
 model Payments {

@@ -6,6 +6,9 @@ import healthRouter from './health.route';
 import productRoute from './product.route';
 import storeRoute from './store.route';
 import categoryRoute from './category.route';
+import orderRoute from './order.route';
+import inventoryRoutes from './inventory.route';
+import cartRoutes from './cart.route';
 
 const router = express.Router();
 
@@ -19,9 +22,11 @@ router.use('/v1/auth', authRoute);
 router.use('/v1/users', userRoute);
 router.use('/v1/file-uploads', fileUploadRoute);
 router.use('/v1/products', productRoute);
-
 router.use('/v1/stores', storeRoute);
 router.use('/health', healthRouter);
 router.use('/v1/categories', categoryRoute);
+router.use('/v1/orders', orderRoute);
+router.use('/v1/inventory', inventoryRoutes);
+router.use('/v1/cart', cartRoutes);
 
 export default router;

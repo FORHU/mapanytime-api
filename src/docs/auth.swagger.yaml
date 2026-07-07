@@ -22,12 +22,18 @@ paths:
                 password:
                   type: string
                   example: securePass123!
-                name:
+                firstName:
                   type: string
-                  example: Jane Doe
+                  example: Jane
+                lastName:
+                  type: string
+                  example: Doe
                 roleName:
                   type: string
                   example: BUYER
+                countryCode:
+                  type: string
+                  example: 63
       responses:
         '201':
           description: User created successfully

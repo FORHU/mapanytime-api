@@ -15,7 +15,8 @@ export default class AuthSvc {
   static async register(data: {
     email: string;
     password: string;
-    name?: string;
+    firstName?: string;
+    lastName?: string;
     roleName: string;
     countryCode?: string;
   }) {
@@ -30,17 +31,20 @@ export default class AuthSvc {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512').toString('hex');
 
-    // CHANGED: Assigned the result to 'user'
     const user = await AuthRepo.createUser({
       email: data.email,
       passwordHash: `${salt}:${hash}`,
-      firstName: data.name,
+      firstName: data.firstName,
+      lastName: data.lastName,
       countryCode: data.countryCode,
       roles: { connect: { roleName: data.roleName } },
     });
 
     if (data.roleName === 'SELLER') {
       await AuthRepo.createSeller(user.id);
+    } else if (data.roleName === 'BUYER') {
+      const displayName = [data.firstName, data.lastName].filter(Boolean).join(' ') || 'New Buyer';
+      await AuthRepo.createBuyer(user.id, displayName);
     }
 
     logger.info(`[Auth] User registered: ${user.id} (${data.email}) as ${data.roleName}`);
