@@ -9,6 +9,7 @@ import categoryRoute from './category.route';
 import orderRoute from './order.route';
 import inventoryRoutes from './inventory.route';
 import cartRoutes from './cart.route';
+import paymentRoute from './payment.route';
 
 const router = express.Router();
 
@@ -28,5 +29,6 @@ router.use('/v1/categories', categoryRoute);
 router.use('/v1/orders', orderRoute);
 router.use('/v1/inventory', inventoryRoutes);
 router.use('/v1/cart', cartRoutes);
+router.use('/v1/payments', paymentRoute);
 
 export default router;
