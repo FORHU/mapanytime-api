@@ -1,7 +1,6 @@
 import ProductRepository from '../repositories/product.repository';
 import CategoryRepository from '../repositories/category.repository';
 import { Prisma } from '@prisma/client';
-import { prisma } from '../utils/prisma';
 import { buildPage } from '../helpers/pagination.helper';
 
 export default class ProductService {
