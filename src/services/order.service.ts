@@ -71,7 +71,6 @@ export default class OrderService {
         },
       };
 
-      // Call the repository method to execute the insert
       return OrderRepository.insertOrder(orderData, tx);
     });
   }
@@ -97,6 +96,20 @@ export default class OrderService {
       if (order.status === 'COMPLETED') throw new Error('Order is already completed.');
       if (order.status === 'CANCELLED' || order.status === 'FAILED') {
         throw new Error(`Cannot complete a ${order.status.toLowerCase()} order.`);
+      }
+
+      // Payment Validation
+      const payment = await tx.payments.findFirst({
+        where: { orderId: orderId },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (!payment) {
+        throw new Error('No payment record found for this order.');
+      }
+
+      if (payment.status !== 'COMPLETED') {
+        throw new Error(`Cannot fulfill order. Payment status is currently: ${payment.status}.`);
       }
 
       for (const item of order.orderitems) {
