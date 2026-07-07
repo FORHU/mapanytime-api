@@ -110,6 +110,7 @@ export default class StoreService {
     categoryId?: string,
     centerLat?: number,
     centerLng?: number,
+    search?: string,
   ) {
     // Default center to midpoint of the bounding box if not explicitly provided
     const lat = centerLat ?? (north + south) / 2;
@@ -124,7 +125,8 @@ export default class StoreService {
     const w = west.toFixed(2);
     const cLat = lat.toFixed(2);
     const cLng = lng.toFixed(2);
-    const cacheKey = `stores:viewport:${n}:${s}:${e}:${w}:c:${cLat}:${cLng}:limit:${limit}:offset:${offset}:category:${categoryId ?? 'none'}`;
+    const searchKey = search?.trim().toLowerCase() || 'none';
+    const cacheKey = `stores:viewport:${n}:${s}:${e}:${w}:c:${cLat}:${cLng}:limit:${limit}:offset:${offset}:category:${categoryId ?? 'none'}:search:${searchKey}`;
 
     try {
       const redis = redisConnection.getClient();
@@ -159,6 +161,7 @@ export default class StoreService {
       categoryIds,
       lat,
       lng,
+      search,
     );
 
     const result = {

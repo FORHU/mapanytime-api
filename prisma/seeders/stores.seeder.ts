@@ -150,6 +150,7 @@ export async function seedStores(prisma: PrismaClient) {
         name: `Automated Item ${p + 1} - ${store.storeName}`,
         description: 'Standard product generated for load testing.',
         price: Math.floor(Math.random() * 5000) + 100,
+        isActive: true, // Listed so the buyer catalog (isActive: true) shows them
       });
     }
 

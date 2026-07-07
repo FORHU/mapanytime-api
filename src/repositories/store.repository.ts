@@ -58,6 +58,7 @@ export default class StoreRepository {
     categoryIds: string[] | undefined,
     centerLat: number,
     centerLng: number,
+    search?: string,
   ): Promise<{ items: NearbyStore[]; total: number }> {
     // Great-circle distance (km) expressed in SQL, mirroring geo.util's
     // haversineKm so client-side and server-side numbers agree.
@@ -80,10 +81,23 @@ export default class StoreRepository {
         `
         : Prisma.sql``;
 
+    // Optional free-text filter on store name / description (case-insensitive).
+    const term = search?.trim();
+    const searchFilter =
+      term && term.length > 0
+        ? Prisma.sql`
+          AND (
+            s."storeName" ILIKE ${`%${term}%`}
+            OR s."description" ILIKE ${`%${term}%`}
+          )
+        `
+        : Prisma.sql``;
+
     const inViewport = Prisma.sql`
       s."isActive" = true
       AND l."latitude" BETWEEN ${south} AND ${north}
       AND l."longitude" BETWEEN ${west} AND ${east}
+      ${searchFilter}
     `;
 
     const rows = await prisma.$queryRaw<NearbyRow[]>(Prisma.sql`

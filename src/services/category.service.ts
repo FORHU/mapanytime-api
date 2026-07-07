@@ -64,4 +64,18 @@ export default class CategoryService {
       return { message: 'Category permanently deleted.' };
     }
   }
+  // Root categories: those with no parent.
+  static async getAllRootCategories() {
+    return CategoryRepository.getRootCategories();
+  }
+
+  // Branch categories: those that have a parent (non-root).
+  static async getAllBranchCategories() {
+    return CategoryRepository.getBranchCategories();
+  }
+
+  // Full category forest: roots with their descendants nested.
+  static async getAllCategoryTrees() {
+    return CategoryRepository.getAllCategoryTrees();
+  }
 }

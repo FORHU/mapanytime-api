@@ -108,6 +108,8 @@ export default class StoreController {
       limit: Joi.number().integer().min(1).max(500).default(100),
       offset: Joi.number().integer().min(0).default(0),
       categoryId: Joi.string().optional(),
+      // Optional free-text filter on store name / description.
+      search: Joi.string().trim().allow('').optional(),
       // Optional: user's exact position for precise distance calculation.
       // Falls back to bounding-box midpoint in the service if omitted.
       lat: Joi.number().optional(),
@@ -128,6 +130,7 @@ export default class StoreController {
         value.categoryId,
         value.lat,
         value.lng,
+        value.search,
       );
       return responseSuccess(res, 200, data);
     } catch (error) {

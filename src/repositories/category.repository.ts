@@ -15,7 +15,10 @@ export default class CategoryRepository {
   static async getRootCategories() {
     return prisma.categories.findMany({
       where: { parentId: null },
-      include: { parent: true, children: true },
+      select: {
+        id: true,
+        name: true,
+      },
     });
   }
 
@@ -24,6 +27,39 @@ export default class CategoryRepository {
     return prisma.categories.findMany({
       where: { parentId: parentId },
       include: { parent: true, children: true },
+    });
+  }
+
+  // All branch (non-root) categories — any category that has a parent.
+  static async getBranchCategories() {
+    return prisma.categories.findMany({
+      where: { parentId: { not: null } },
+      select: {
+        id: true,
+        name: true,
+        parent: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  // Full category forest: root categories with their nested descendants,
+  // trimmed to id + name at every level.
+  static async getAllCategoryTrees() {
+    return prisma.categories.findMany({
+      where: { parentId: null },
+      select: {
+        id: true,
+        name: true,
+        children: {
+          select: {
+            id: true,
+            name: true,
+            children: {
+              select: { id: true, name: true },
+            },
+          },
+        },
+      },
     });
   }
 
