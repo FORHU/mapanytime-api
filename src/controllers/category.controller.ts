@@ -28,6 +28,36 @@ export default class CategoryController {
     }
   }
 
+  static async listRootCategories(req: Request, res: Response, next: NextFunction) {
+    try {
+      const categories = await CategoryService.getAllRootCategories();
+      if (!categories.length) return responseError(res, 404, 'No categories found');
+      return responseSuccess(res, 200, categories, 'Categories fetched successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async listBranchCategories(req: Request, res: Response, next: NextFunction) {
+    try {
+      const categories = await CategoryService.getAllBranchCategories();
+      if (!categories.length) return responseError(res, 404, 'No categories found');
+      return responseSuccess(res, 200, categories, 'Categories fetched successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async listCategoryTrees(req: Request, res: Response, next: NextFunction) {
+    try {
+      const categories = await CategoryService.getAllCategoryTrees();
+      if (!categories.length) return responseError(res, 404, 'No categories found');
+      return responseSuccess(res, 200, categories, 'Categories fetched successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async index(req: Request, res: Response, next: NextFunction) {
     try {
       const servicePayload = {

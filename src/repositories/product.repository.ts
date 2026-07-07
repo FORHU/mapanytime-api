@@ -42,4 +42,62 @@ export default class ProductRepository {
       data: { isActive: false },
     });
   }
+
+  static async getAllProducts(filters: {
+    storeId?: string;
+    categoryIds?: string[];
+    search?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    skip: number;
+    take: number;
+  }) {
+    const { storeId, categoryIds, search, minPrice, maxPrice, skip, take } = filters;
+
+    const hasPriceFilter = minPrice !== undefined || maxPrice !== undefined;
+    const term = search?.trim();
+
+    const where: Prisma.ProductsWhereInput = {
+      // Buyers only see products that are listed/active.
+      isActive: true,
+      ...(storeId ? { storeId } : {}),
+      ...(categoryIds?.length ? { categoryId: { in: categoryIds } } : {}),
+      ...(term
+        ? {
+            OR: [
+              { name: { contains: term, mode: 'insensitive' } },
+              { brand: { contains: term, mode: 'insensitive' } },
+              { description: { contains: term, mode: 'insensitive' } },
+              { store: { is: { storeName: { contains: term, mode: 'insensitive' } } } },
+            ],
+          }
+        : {}),
+      ...(hasPriceFilter
+        ? {
+            price: {
+              ...(minPrice !== undefined ? { gte: minPrice } : {}),
+              ...(maxPrice !== undefined ? { lte: maxPrice } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [items, total] = await prisma.$transaction([
+      prisma.products.findMany({
+        where,
+        include: {
+          category: true,
+          tags: true,
+          store: { select: { id: true, storeName: true } },
+          productFile: { select: { fileUrl: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+      }),
+      prisma.products.count({ where }),
+    ]);
+
+    return { items, total };
+  }
 }

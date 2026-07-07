@@ -1,6 +1,8 @@
 import ProductRepository from '../repositories/product.repository';
+import CategoryRepository from '../repositories/category.repository';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
+import { buildPage } from '../helpers/pagination.helper';
 
 export default class ProductService {
   static async createProduct(
@@ -105,5 +107,38 @@ export default class ProductService {
     }
 
     return ProductRepository.deleteProduct(productId);
+  }
+
+  static async getAllProducts(data: {
+    storeId?: string;
+    categoryId?: string;
+    search?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    page: number;
+    limit: number;
+    skip: number;
+  }) {
+    const { storeId, categoryId, search, minPrice, maxPrice, page, limit, skip } = data;
+
+    // Resolve an optional category filter to the set of matching category ids.
+    // A parent category matches products in any of its descendant categories.
+    let categoryIds: string[] | undefined;
+    if (categoryId) {
+      const category = await CategoryRepository.findByIdOrName(categoryId);
+      if (!category) throw { status: 404, message: 'Category not found.' };
+      categoryIds = await CategoryRepository.getDescendantCategoryIds(category.id);
+    }
+
+    const { items, total } = await ProductRepository.getAllProducts({
+      storeId,
+      categoryIds,
+      search,
+      minPrice,
+      maxPrice,
+      skip,
+      take: limit,
+    });
+    return buildPage(items, total, { page, limit });
   }
 }

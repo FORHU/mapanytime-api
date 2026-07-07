@@ -57,6 +57,98 @@ paths:
         '403':
           description: Forbidden (User is not an administrator)
 
+  /v1/categories/root:
+    get:
+      summary: Retrieve root categories
+      description: Returns all root categories (those with no parent), trimmed to id and name. Open to all authenticated users.
+      tags: [Categories]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Root categories retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: success }
+                  statusCode: { type: integer, example: 200 }
+                  message: { type: string, example: Categories fetched successfully }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, example: cmr1kabey0004nh306b2ziapm }
+                        name: { type: string, example: Food }
+        '401':
+          description: Unauthorized (Invalid or missing token)
+        '404':
+          description: No categories found
+
+  /v1/categories/branch:
+    get:
+      summary: Retrieve branch categories
+      description: Returns all branch (non-root) categories — those that have a parent — trimmed to id, name, and the parent's id and name. Open to all authenticated users.
+      tags: [Categories]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Branch categories retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: success }
+                  statusCode: { type: integer, example: 200 }
+                  message: { type: string, example: Categories fetched successfully }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, example: cmr1kabey0007nh306b2zi999 }
+                        name: { type: string, example: Coffee }
+                        parent:
+                          type: object
+                          properties:
+                            id: { type: string, example: cmr1kabey0004nh306b2ziapm }
+                            name: { type: string, example: Food }
+        '401':
+          description: Unauthorized (Invalid or missing token)
+        '404':
+          description: No categories found
+
+  /v1/categories/trees:
+    get:
+      summary: Retrieve the category tree
+      description: Returns root categories with their descendants nested (up to 3 levels deep), trimmed to id and name at every level. Open to all authenticated users.
+      tags: [Categories]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Category tree retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: success }
+                  statusCode: { type: integer, example: 200 }
+                  message: { type: string, example: Categories fetched successfully }
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CategoryTreeNode'
+        '401':
+          description: Unauthorized (Invalid or missing token)
+        '404':
+          description: No categories found
+
   /v1/categories/{id}:
     patch:
       summary: Update a category
@@ -118,3 +210,20 @@ paths:
           description: Forbidden (User is not an administrator)
         '404':
           description: Category not found
+
+components:
+  schemas:
+    # Recursive node used by GET /v1/categories/trees (id + name at every level).
+    CategoryTreeNode:
+      type: object
+      properties:
+        id:
+          type: string
+          example: cmr1kabey0004nh306b2ziapm
+        name:
+          type: string
+          example: Food
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategoryTreeNode'
