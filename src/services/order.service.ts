@@ -11,8 +11,19 @@ export default class OrderService {
     paymentMethod: 'BANK' | 'GCASH' | 'CASH_ON_DELIVERY';
     items: { productId: string; quantity: number }[];
   }) {
-    // The Service initiates the transaction to secure the logic phase
     const order = await prisma.$transaction(async (tx) => {
+      // Check if store exists and is active before proceeding with order creation
+      const store = await tx.stores.findUnique({
+        where: { id: payload.storeId },
+      });
+
+      if (!store) {
+        throw new Error('Store not found.');
+      }
+      if (!store.isActive) {
+        throw new Error(`Store ${store.storeName} is currently inactive and cannot accept orders.`);
+      }
+
       let totalAmount = 0;
       const orderItemsData = [];
 

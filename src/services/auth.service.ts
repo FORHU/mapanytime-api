@@ -2,6 +2,8 @@ import AuthRepo from '../repositories/auth.repository';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { Users } from '@prisma/client';
+import { prisma } from '../utils/prisma';
+import { DOCUMENTTYPES } from '@prisma/client';
 import {
   ACCESS_TOKEN_SECRET,
   REFRESH_TOKEN_SECRET,
@@ -19,6 +21,12 @@ export default class AuthSvc {
     lastName?: string;
     roleName: string;
     countryCode?: string;
+    sellerDocuments?: {
+      tinIdFileName: string;
+      tinIdKey: string;
+      govIdFileName: string;
+      govIdKey: string;
+    };
   }) {
     logger.info(`[Auth] Registration attempt for ${data.email} (role: ${data.roleName})`);
 
@@ -31,26 +39,66 @@ export default class AuthSvc {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512').toString('hex');
 
-    const user = await AuthRepo.createUser({
-      email: data.email,
-      passwordHash: `${salt}:${hash}`,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      countryCode: data.countryCode,
-      roles: { connect: { roleName: data.roleName } },
+    // Use Prisma transaction to ensure all identity records succeed or fail together
+    await prisma.$transaction(async (tx) => {
+      const user = await tx.users.create({
+        data: {
+          email: data.email,
+          passwordHash: `${salt}:${hash}`,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          countryCode: data.countryCode,
+          isEmailVerified: true,
+          accountStatus: 'ACTIVE',
+          roles: { connect: { roleName: data.roleName } },
+        },
+      });
+
+      if (data.roleName === 'SELLER' && data.sellerDocuments) {
+        const seller = await tx.sellers.create({
+          data: { userId: user.id },
+        });
+
+        // Create the global Identity Folder (storeId is null)
+        const docVerification = await tx.documentVerifications.create({
+          data: {
+            sellerId: seller.id,
+            verificationStatus: 'PENDING',
+          },
+        });
+
+        const attachDoc = async (fileName: string, fileUrl: string, type: DOCUMENTTYPES) => {
+          const file = await tx.files.create({
+            data: { userId: user.id, fileName, fileUrl },
+          });
+          await tx.documents.create({
+            data: {
+              documentVerificationsId: docVerification.id,
+              fileId: file.id,
+              documentType: type,
+            },
+          });
+        };
+
+        await attachDoc(
+          data.sellerDocuments.tinIdFileName,
+          data.sellerDocuments.tinIdKey,
+          'TIN_ID',
+        );
+        await attachDoc(
+          data.sellerDocuments.govIdFileName,
+          data.sellerDocuments.govIdKey,
+          'GOV_ID',
+        );
+      } else if (data.roleName === 'BUYER') {
+        const displayName =
+          [data.firstName, data.lastName].filter(Boolean).join(' ') || 'New Buyer';
+        await tx.buyers.create({
+          data: { userId: user.id, displayName },
+        });
+      }
     });
 
-    if (data.roleName === 'SELLER') {
-      await AuthRepo.createSeller(user.id);
-    } else if (data.roleName === 'BUYER') {
-      const displayName = [data.firstName, data.lastName].filter(Boolean).join(' ') || 'New Buyer';
-      await AuthRepo.createBuyer(user.id, displayName);
-    }
-
-    logger.info(`[Auth] User registered: ${user.id} (${data.email}) as ${data.roleName}`);
-
-    // Registration does not log the user in: no tokens or session are issued
-    // and no user data is returned. The client redirects to login afterwards.
     return null;
   }
 

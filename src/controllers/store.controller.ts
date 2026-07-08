@@ -7,7 +7,6 @@ import { Users } from '@prisma/client';
 export default class StoreController {
   static async createStore(req: Request, res: Response, next: NextFunction) {
     try {
-      // Define the much cleaner Joi Schema for a standard application/json payload
       const schema = Joi.object({
         storeData: Joi.object({
           storeName: Joi.string().required(),
@@ -37,16 +36,16 @@ export default class StoreController {
           .min(1)
           .required(),
 
-        // The frontend now simply passes the S3 keys it successfully uploaded
+        // Validation for the raw S3 keys
         documents: Joi.object({
           mayorsPermitFileName: Joi.string().required(),
           mayorsPermitKey: Joi.string().required(),
-          tinIdFileName: Joi.string().required(),
-          tinIdKey: Joi.string().required(),
           dtiCertificateFileName: Joi.string().required(),
           dtiCertificateKey: Joi.string().required(),
-          govIdFileName: Joi.string().required(),
-          govIdKey: Joi.string().required(),
+          birCertificateFileName: Joi.string().required(),
+          birCertificateKey: Joi.string().required(),
+          secCertificateFileName: Joi.string().required(),
+          secCertificateKey: Joi.string().required(),
         }).required(),
       });
 
@@ -60,37 +59,13 @@ export default class StoreController {
         return responseError(res, 403, 'User is not registered as a seller.');
       }
 
-      // Map the provided keys directly to the FileUploadData interface your service expects
-      const uploadedFiles = [
-        {
-          fileName: value.documents.mayorsPermitFileName,
-          fileUrl: value.documents.mayorsPermitKey, // We store the S3 Key in the DB as the URL/Path
-          documentType: 'MAYORS_PERMIT' as const,
-        },
-        {
-          fileName: value.documents.tinIdFileName,
-          fileUrl: value.documents.tinIdKey,
-          documentType: 'TIN_ID' as const,
-        },
-        {
-          fileName: value.documents.dtiCertificateFileName,
-          fileUrl: value.documents.dtiCertificateKey,
-          documentType: 'DTI_CERTIFICATE' as const,
-        },
-        {
-          fileName: value.documents.govIdFileName,
-          fileUrl: value.documents.govIdKey,
-          documentType: 'GOV_ID' as const,
-        },
-      ];
-
-      // Pass directly to the service. The backend does NO file processing here.
+      // Controller passes the raw data object directly to the service.
       const newStore = await StoreService.createStoreWithDocuments(
         sellerId,
         value.storeData,
         value.locationData,
         value.hoursData,
-        uploadedFiles,
+        value.documents,
       );
 
       return responseSuccess(res, 201, newStore, 'Store created successfully.');

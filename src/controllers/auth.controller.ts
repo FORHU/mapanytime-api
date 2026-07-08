@@ -15,6 +15,17 @@ export default class AuthController {
       lastName: Joi.string().optional(),
       roleName: Joi.string().required(),
       countryCode: Joi.string().max(3).optional(),
+
+      sellerDocuments: Joi.object({
+        tinIdFileName: Joi.string().required(),
+        tinIdKey: Joi.string().required(),
+        govIdFileName: Joi.string().required(),
+        govIdKey: Joi.string().required(),
+      }).when('roleName', {
+        is: 'SELLER',
+        then: Joi.required(),
+        otherwise: Joi.forbidden(),
+      }),
     });
 
     const { error, value } = schema.validate(req.body);
@@ -22,8 +33,6 @@ export default class AuthController {
 
     try {
       await AuthSvc.register(value);
-      // Registration returns only a message + status code — no tokens or user
-      // data. The client redirects to login afterwards.
       return responseSuccess(res, 201, null, 'Registration successful');
     } catch (error) {
       next(error);
