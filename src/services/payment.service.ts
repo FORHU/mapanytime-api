@@ -63,6 +63,15 @@ export default class PaymentService {
             paidAt: new Date(),
           },
         });
+
+        // Advance the order so its status reflects reality: PENDING = unpaid,
+        // PROCESSING = paid and awaiting seller fulfillment. Scoped to PENDING
+        // so we never regress an order that's already further along.
+        await tx.orders.updateMany({
+          where: { id: orderId, status: 'PENDING' },
+          data: { status: 'PROCESSING' },
+        });
+
         return { payment: updated, justCompleted: true };
       }
 
@@ -71,12 +80,29 @@ export default class PaymentService {
         data: { status },
       });
 
-      // Automatically cancel the order if the payment fails
+      // On failure: cancel the order AND release the stock it reserved at
+      // creation, so a failed/abandoned order doesn't lock inventory forever.
       if (status === 'FAILED') {
-        await tx.orders.update({
+        const order = await tx.orders.findUnique({
           where: { id: orderId },
-          data: { status: 'FAILED' },
+          include: { orderitems: true },
         });
+
+        // Only release when the reservation is still active (order not already
+        // terminal), so we never double-decrement quantityReserved.
+        if (order && (order.status === 'PENDING' || order.status === 'PROCESSING')) {
+          for (const item of order.orderitems) {
+            await tx.inventory.updateMany({
+              where: { productId: item.productId },
+              data: { quantityReserved: { decrement: item.quantity } },
+            });
+          }
+
+          await tx.orders.update({
+            where: { id: orderId },
+            data: { status: 'FAILED' },
+          });
+        }
       }
 
       return { payment: updated, justCompleted: false };

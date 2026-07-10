@@ -9,6 +9,7 @@ export default class OrderService {
     storeId: string;
     type: 'DELIVERY' | 'PICKUP';
     paymentMethod: 'BANK' | 'GCASH' | 'CASH_ON_DELIVERY';
+    pickupAt?: Date;
     items: { productId: string; quantity: number }[];
   }) {
     const order = await prisma.$transaction(async (tx) => {
@@ -70,6 +71,7 @@ export default class OrderService {
         storeId: payload.storeId,
         totalAmount,
         type: payload.type,
+        pickupAt: payload.pickupAt ?? null,
         status: 'PENDING' as const,
         orderitems: {
           create: orderItemsData,
