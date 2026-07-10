@@ -2,13 +2,13 @@ name: Deploy Staging
 
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ['CI']
     branches: [staging]
     types: [completed]
   workflow_dispatch:
     inputs:
       ref:
-        description: "Branch, tag, or SHA to deploy"
+        description: 'Branch, tag, or SHA to deploy'
         required: true
         default: staging
 
@@ -17,11 +17,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ECR_REPOSITORY: mapanytime-api-staging   # <-- must match the ECR repo you created
-  AWS_REGION: ap-southeast-1               # <-- set to your staging region
+  ECR_REPOSITORY: mapanytime-api-staging # <-- must match the ECR repo you created
+  AWS_REGION: ap-southeast-1 # <-- set to your staging region
   NODE_ENV: staging
   IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
-  EC2_IAM_ROLE_NAME: forhu-staging-mapanytime-api-role  # <-- EC2 instance profile role name
+  EC2_IAM_ROLE_NAME: forhu-staging-mapanytime-api-role # <-- EC2 instance profile role name
   CONTAINER_NAME: mapanytime-api
   APP_PORT: 3002
 

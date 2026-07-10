@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Branch, tag, or SHA to deploy"
+        description: 'Branch, tag, or SHA to deploy'
         required: true
         default: main
 
@@ -13,11 +13,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ECR_REPOSITORY: mapanytime-api-prod   # <-- must match the ECR repo you created
-  AWS_REGION: ap-southeast-1            # <-- set to your production region
+  ECR_REPOSITORY: mapanytime-api-prod # <-- must match the ECR repo you created
+  AWS_REGION: ap-southeast-1 # <-- set to your production region
   NODE_ENV: production
   IMAGE_TAG: ${{ github.sha }}
-  EC2_IAM_ROLE_NAME: forhu-production-mapanytime-api-role  # <-- EC2 instance profile role name
+  EC2_IAM_ROLE_NAME: forhu-production-mapanytime-api-role # <-- EC2 instance profile role name
   CONTAINER_NAME: mapanytime-api
   APP_PORT: 3002
 
