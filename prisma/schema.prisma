@@ -295,6 +295,7 @@ model Orders {
   totalAmount Float
   type        FULLFILLMENTTYPE @default(PICKUP)
   status      ORDERSTATUS      @default(PENDING)
+  pickupAt    DateTime?
   completedAt DateTime?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
