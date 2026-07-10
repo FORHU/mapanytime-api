@@ -106,13 +106,13 @@ model Buyers {
 model DocumentVerifications {
   id                 String             @id @default(cuid())
   sellerId           String
+  storeId            String?
   verificationStatus VerificationStatus @default(PENDING)
   verifiedById       String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
-  storeId            String
   seller             Sellers            @relation(fields: [sellerId], references: [id])
-  store              Stores             @relation(fields: [storeId], references: [id])
+  store              Stores?            @relation(fields: [storeId], references: [id])
   verifiedByAdmin    Users?             @relation(fields: [verifiedById], references: [id])
   documents          Documents[]
 }
@@ -129,10 +129,12 @@ model Documents {
 }
 
 enum DOCUMENTTYPES {
-  MAYORS_PERMIT
   TIN_ID
-  DTI_CERTIFICATE
   GOV_ID
+  DTI_CERTIFICATE
+  MAYORS_PERMIT
+  BIR_CERTIFICATE
+  SEC_CERTIFICATE
 }
 
 model AdminInvites {

@@ -3,41 +3,62 @@ import StoreRepository from '../repositories/store.repository';
 import { redisConnection } from '../infrastructure/redis/connection';
 import { emitStoreUpserted } from '../infrastructure/socket';
 import logger from '../utils/logger';
-import { Prisma, DOCUMENTTYPES } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 
-// Define the expected shapes of the incoming data
-interface FileUploadData {
-  fileName: string;
-  fileUrl: string;
-  documentType: DOCUMENTTYPES;
-}
 export default class StoreService {
   static async createStoreWithDocuments(
     sellerId: string,
     storeData: { storeName: string; description?: string },
     locationData: Prisma.StoreLocationsCreateWithoutStoreInput,
     hoursData: Prisma.StoreHoursCreateWithoutStoreInput[],
-    uploadedFiles: FileUploadData[],
+    rawDocuments: {
+      mayorsPermitFileName: string;
+      mayorsPermitKey: string;
+      dtiCertificateFileName: string;
+      dtiCertificateKey: string;
+      birCertificateFileName: string;
+      birCertificateKey: string;
+      secCertificateFileName: string;
+      secCertificateKey: string;
+    },
   ) {
+    // Mapping raw input to database-compliant structure
+    const uploadedFiles = [
+      {
+        fileName: rawDocuments.mayorsPermitFileName,
+        fileUrl: rawDocuments.mayorsPermitKey,
+        documentType: 'MAYORS_PERMIT' as const,
+      },
+      {
+        fileName: rawDocuments.dtiCertificateFileName,
+        fileUrl: rawDocuments.dtiCertificateKey,
+        documentType: 'DTI_CERTIFICATE' as const,
+      },
+      {
+        fileName: rawDocuments.birCertificateFileName,
+        fileUrl: rawDocuments.birCertificateKey,
+        documentType: 'BIR_CERTIFICATE' as const,
+      },
+      {
+        fileName: rawDocuments.secCertificateFileName,
+        fileUrl: rawDocuments.secCertificateKey,
+        documentType: 'SEC_CERTIFICATE' as const,
+      },
+    ];
+
     const created = await prisma.$transaction(async (tx) => {
-      // 1. Create the Store along with its Location and Hours
       const newStore = await tx.stores.create({
         data: {
           sellerId,
           storeName: storeData.storeName,
           description: storeData.description,
-          isActive: false, // Default state requiring admin approval
-          storeLocations: {
-            create: locationData,
-          },
-          storeHours: {
-            create: hoursData,
-          },
+          isActive: false,
+          storeLocations: { create: locationData },
+          storeHours: { create: hoursData },
         },
       });
 
-      // 2. Create the Document Verification record for this specific branch
       const docVerification = await tx.documentVerifications.create({
         data: {
           sellerId,
@@ -46,18 +67,15 @@ export default class StoreService {
         },
       });
 
-      // 3. Process each uploaded file, create its File record, and link it as a Document
       for (const file of uploadedFiles) {
-        // A. Save the file metadata
         const savedFile = await tx.files.create({
           data: {
-            userId: sellerId, // Mapping back to the user who uploaded it
+            userId: sellerId,
             fileName: file.fileName,
             fileUrl: file.fileUrl,
           },
         });
 
-        // B. Link the File to the Verification record
         await tx.documents.create({
           data: {
             documentVerificationsId: docVerification.id,
@@ -67,29 +85,24 @@ export default class StoreService {
         });
       }
 
-      // Return the newly created store with its relations for the frontend
       return tx.stores.findUnique({
         where: { id: newStore.id },
         include: {
           storeLocations: true,
-          documentVerifications: {
-            include: { documents: true },
-          },
+          documentVerifications: { include: { documents: true } },
         },
       });
     });
 
-    // Notify clients viewing this region in real time. Best-effort: a socket
-    // failure must never fail store creation.
     try {
-      if (created) {
+      if (created && created.storeLocations) {
         emitStoreUpserted({
           id: created.id,
           storeName: created.storeName,
           isActive: created.isActive,
           coordinates: {
-            lat: locationData.latitude,
-            lng: locationData.longitude,
+            lat: created.storeLocations.latitude,
+            lng: created.storeLocations.longitude,
           },
         });
       }
