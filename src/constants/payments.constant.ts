@@ -1,4 +1,3 @@
-
 export const PAYMENT_STATUS = {
   PENDING: 'PENDING',
   COMPLETED: 'COMPLETED',
