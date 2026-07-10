@@ -11,6 +11,12 @@ export default class OrderController {
     const schema = Joi.object({
       type: Joi.string().valid('DELIVERY', 'PICKUP').required(),
       paymentMethod: Joi.string().valid('BANK', 'GCASH', 'CASH_ON_DELIVERY').required(),
+      // Buyer-set scheduled pickup time (ISO 8601, must be in the future).
+      // Required for PICKUP orders; ignored/optional for DELIVERY.
+      pickupAt: Joi.date()
+        .iso()
+        .greater('now')
+        .when('type', { is: 'PICKUP', then: Joi.required(), otherwise: Joi.optional() }),
     });
 
     const { error, value } = schema.validate(req.body);
@@ -41,6 +47,7 @@ export default class OrderController {
         storeId: cart.storeId, // Pulled from Redis
         type: value.type,
         paymentMethod: value.paymentMethod,
+        pickupAt: value.pickupAt as Date | undefined,
         items: cart.items, // Pulled from Redis
       };
 
