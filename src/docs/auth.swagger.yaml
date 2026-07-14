@@ -18,22 +18,39 @@ paths:
               properties:
                 email:
                   type: string
-                  example: newuser@example.com
+                  example: newseller1@example.com
                 password:
                   type: string
                   example: securePass123!
                 firstName:
                   type: string
-                  example: Jane
+                  example: Seller
                 lastName:
                   type: string
-                  example: Doe
+                  example: 1
                 roleName:
                   type: string
-                  example: BUYER
+                  example: SELLER
                 countryCode:
                   type: string
-                  example: 63
+                  example: +63
+                sellerDocuments:
+                  type: object
+                  description: Required only if roleName is SELLER
+                  required: [tinIdFileName, tinIdKey, govIdFileName, govIdKey]
+                  properties:
+                    tinIdFileName:
+                      type: string
+                      example: tin.jpg
+                    tinIdKey:
+                      type: string
+                      example: documents/abcdef12346.jpg
+                    govIdFileName:
+                      type: string
+                      example: id.png
+                    govIdKey:
+                      type: string
+                      example: documents/abcdef12348.png
       responses:
         '201':
           description: User created successfully
@@ -59,10 +76,10 @@ paths:
               properties:
                 email:
                   type: string
-                  example: dual@example.com
+                  example: newseller1@example.com
                 password:
                   type: string
-                  example: Dual123
+                  example: securePass123!
       responses:
         '200':
           description: Login successful

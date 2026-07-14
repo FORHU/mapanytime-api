@@ -16,13 +16,30 @@ app.set('trust proxy', 1);
 
 // Assign correlationId + requestId to every request (must be first)
 app.use(correlationMiddleware);
-app.use(helmet());
+
+// Configure Helmet to allow Swagger UI inline scripts and styles
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'validator.swagger.io'],
+        upgradeInsecureRequests: null,
+      },
+    },
+    // Stop Helmet from blocking cross-network data reading
+    crossOriginResourcePolicy: false,
+  }),
+);
 
 app.use(
   cors({
-    origin: ['http://localhost:4000'],
+    // Allow all origins in development, or restrict to specific IPs later
+    origin: isDev ? '*' : ['http://localhost:4000'],
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   }),
 );

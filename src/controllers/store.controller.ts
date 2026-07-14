@@ -11,6 +11,7 @@ export default class StoreController {
         storeData: Joi.object({
           storeName: Joi.string().required(),
           description: Joi.string().allow('', null).optional(),
+          categoryIds: Joi.array().items(Joi.string()).min(1).required(),
         }).required(),
 
         locationData: Joi.object({

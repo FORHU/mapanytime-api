@@ -40,6 +40,24 @@ paths:
             type: integer
             default: 100
         - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - in: query
+          name: categoryId
+          required: false
+          schema:
+            type: string
+          description: Filter stores by a specific category ID
+        - in: query
+          name: search
+          required: false
+          schema:
+            type: string
+          description: Free-text filter on store name or description
+        - in: query
           name: lat
           required: false
           schema:
@@ -78,7 +96,7 @@ paths:
               properties:
                 storeData:
                   type: object
-                  required: [storeName]
+                  required: [storeName, categoryIds]
                   properties:
                     storeName:
                       type: string
@@ -86,6 +104,12 @@ paths:
                     description:
                       type: string
                       example: Main hub for fresh produce.
+                    categoryIds:
+                      type: array
+                      items:
+                        type: string
+                      description: Array of category IDs to associate with the store.
+                      example: ['parentCategory1', 'parentCategory2']
                 locationData:
                   type: object
                   required:
@@ -149,12 +173,12 @@ paths:
                     [
                       mayorsPermitFileName,
                       mayorsPermitKey,
-                      tinIdFileName,
-                      tinIdKey,
                       dtiCertificateFileName,
                       dtiCertificateKey,
-                      govIdFileName,
-                      govIdKey,
+                      birCertificateFileName,
+                      birCertificateKey,
+                      secCertificateFileName,
+                      secCertificateKey,
                     ]
                   properties:
                     mayorsPermitFileName:
@@ -162,25 +186,25 @@ paths:
                       example: permit.pdf
                     mayorsPermitKey:
                       type: string
-                      example: compliance/abcdef12345.pdf
-                    tinIdFileName:
-                      type: string
-                      example: tin.jpg
-                    tinIdKey:
-                      type: string
-                      example: compliance/abcdef12346.jpg
+                      example: documents/abcdef12345.pdf
                     dtiCertificateFileName:
                       type: string
                       example: dti.pdf
                     dtiCertificateKey:
                       type: string
-                      example: compliance/abcdef12347.pdf
-                    govIdFileName:
+                      example: documents/abcdef12347.pdf
+                    birCertificateFileName:
                       type: string
-                      example: id.png
-                    govIdKey:
+                      example: bir.pdf
+                    birCertificateKey:
                       type: string
-                      example: compliance/abcdef12348.png
+                      example: documents/abcdef12348.pdf
+                    secCertificateFileName:
+                      type: string
+                      example: sec.pdf
+                    secCertificateKey:
+                      type: string
+                      example: documents/abcdef12349.pdf
       responses:
         '201':
           description: Store created successfully
