@@ -1,0 +1,52 @@
+tags:
+  - name: Payments
+    description: Payment processing and external webhooks
+
+paths:
+  /v1/payments/qr-payload/{orderId}:
+    get:
+      summary: Get QR Code Payload for an Order
+      description: Generates the necessary data payload for the frontend to render a payment QR code.
+      tags: [Payments]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: orderId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: QR Payload generated successfully
+        '401':
+          description: Unauthorized access
+
+  /v1/payments/mock-webhook:
+    post:
+      summary: Mock Payment Webhook
+      description: Simulates an external payment gateway (like PayMongo or GCash) sending a status update to the backend. Does not require authentication.
+      tags: [Payments]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId, status]
+              properties:
+                orderId:
+                  type: string
+                status:
+                  type: string
+                  enum: [PENDING, COMPLETED, FAILED, REFUNDED]
+                  example: COMPLETED
+                referenceNumber:
+                  type: string
+                  description: Optional transaction reference from the payment provider.
+      responses:
+        '200':
+          description: Mock webhook processed successfully
+        '400':
+          description: Validation error

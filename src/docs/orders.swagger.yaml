@@ -1,0 +1,94 @@
+tags:
+  - name: Orders
+    description: Order creation and fulfillment operations
+
+paths:
+  /v1/orders:
+    post:
+      summary: Create a new order from the active cart
+      description: Creates an order using the items securely stored in the user's Redis cart. Fails if the cart is empty.
+      tags: [Orders]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, paymentMethod]
+              properties:
+                type:
+                  type: string
+                  enum: [DELIVERY, PICKUP]
+                  example: PICKUP
+                paymentMethod:
+                  type: string
+                  enum: [BANK, GCASH, CASH_ON_DELIVERY]
+                  example: GCASH
+                pickupAt:
+                  type: string
+                  format: date-time
+                  description: Required if type is PICKUP. Must be a future date (ISO 8601).
+                  example: '2026-07-15T14:30:00.000Z'
+      responses:
+        '201':
+          description: Order created successfully
+        '400':
+          description: Validation Error or Empty Cart
+        '401':
+          description: Unauthorized access
+        '403':
+          description: Only registered buyers can create orders
+
+  /v1/orders/complete:
+    patch:
+      summary: Fulfill/Complete an order
+      description: Allows a seller to mark an order as completed once payment is secured.
+      tags: [Orders]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId, storeId]
+              properties:
+                orderId:
+                  type: string
+                storeId:
+                  type: string
+      responses:
+        '200':
+          description: Order has been fulfilled successfully
+        '400':
+          description: Validation Error
+        '401':
+          description: Unauthorized access
+
+  /v1/orders/cancel:
+    patch:
+      summary: Cancel a pending order
+      description: Allows a buyer to cancel their own pending order. Restores inventory reservations.
+      tags: [Orders]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId]
+              properties:
+                orderId:
+                  type: string
+      responses:
+        '200':
+          description: Order cancelled successfully
+        '400':
+          description: Validation Error
+        '401':
+          description: Unauthorized access

@@ -19,10 +19,13 @@ export default class OrderService {
       });
 
       if (!store) {
-        throw new Error('Store not found.');
+        throw { status: 404, message: 'Store not found.' };
       }
       if (!store.isActive) {
-        throw new Error(`Store ${store.storeName} is currently inactive and cannot accept orders.`);
+        throw {
+          status: 400,
+          message: `Store ${store.storeName} is currently inactive and cannot accept orders.`,
+        };
       }
 
       let totalAmount = 0;

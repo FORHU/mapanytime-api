@@ -9,7 +9,7 @@ import { prisma } from '../utils/prisma';
 export default class StoreService {
   static async createStoreWithDocuments(
     sellerId: string,
-    storeData: { storeName: string; description?: string },
+    storeData: { storeName: string; description?: string; categoryIds: string[] },
     locationData: Prisma.StoreLocationsCreateWithoutStoreInput,
     hoursData: Prisma.StoreHoursCreateWithoutStoreInput[],
     rawDocuments: {
@@ -56,6 +56,9 @@ export default class StoreService {
           isActive: false,
           storeLocations: { create: locationData },
           storeHours: { create: hoursData },
+          categories: {
+            connect: storeData.categoryIds.map((id) => ({ id })),
+          },
         },
       });
 

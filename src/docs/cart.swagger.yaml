@@ -1,0 +1,67 @@
+tags:
+  - name: Cart
+    description: Operations related to the user's shopping cart (Redis cache)
+
+paths:
+  /v1/cart:
+    get:
+      summary: Retrieve the current user's active cart
+      tags: [Cart]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Cart retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '401':
+          description: Unauthorized access
+
+    delete:
+      summary: Empty the cart manually
+      tags: [Cart]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Cart cleared successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '401':
+          description: Unauthorized access
+
+  /v1/cart/add:
+    post:
+      summary: Add an item to the cart or update its quantity
+      tags: [Cart]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [storeId, productId, quantity]
+              properties:
+                storeId:
+                  type: string
+                  example: cmqwjvltm0008nheoeemlhp9v
+                productId:
+                  type: string
+                  example: cmqwjvltn0009nheo12345678
+                quantity:
+                  type: integer
+                  minimum: 1
+                  example: 2
+      responses:
+        '200':
+          description: Item added to cart successfully
+        '400':
+          description: Validation Error
+        '401':
+          description: Unauthorized access
