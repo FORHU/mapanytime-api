@@ -202,4 +202,22 @@ export default class StoreService {
   static async getMyStores(sellerId: string) {
     return StoreRepository.getStoresBySellerId(sellerId);
   }
+
+  /**
+   * Returns storefront details (store + location + hours + categories) for a
+   * given store id. Throws 404 if the store does not exist or is inactive.
+   */
+  static async getStoreById(id: string) {
+    const store = await StoreRepository.getStoreById(id);
+
+    if (!store) {
+      throw { status: 404, message: 'Store not found.' };
+    }
+
+    if (!store.isActive) {
+      throw { status: 404, message: 'Store is not currently active.' };
+    }
+
+    return store;
+  }
 }
