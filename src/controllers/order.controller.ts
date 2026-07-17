@@ -4,13 +4,14 @@ import OrderService from '../services/order.service';
 import CartService from '../services/cart.service';
 import { responseSuccess, responseError } from '../helpers/response.helper';
 import { prisma } from '../utils/prisma';
+import { PAYMENTMETHOD, FULLFILLMENTTYPE } from '@prisma/client';
 
 export default class OrderController {
   static async create(req: Request, res: Response, next: NextFunction) {
     // Validate only the fulfillment details from the frontend
     const schema = Joi.object({
-      type: Joi.string().valid('DELIVERY', 'PICKUP').required(),
-      paymentMethod: Joi.string().valid('BANK', 'GCASH', 'CASH_ON_DELIVERY').required(),
+      type: Joi.string().valid(...Object.values(FULLFILLMENTTYPE)).required(),
+      paymentMethod: Joi.string().valid(...Object.values(PAYMENTMETHOD)).required(),
       // Buyer-set scheduled pickup time (ISO 8601, must be in the future).
       // Required for PICKUP orders; ignored/optional for DELIVERY.
       pickupAt: Joi.date()
@@ -112,6 +113,22 @@ export default class OrderController {
       // Dynamically extract the exact status type expected by responseError
       const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
 
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
+      next(error);
+    }
+  }
+
+  static async getOrders(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
+      const data = await OrderService.getMyOrders(userId);
+      return responseSuccess(res, 200, data, 'Orders fetched successfully');
+    } catch (error) {
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
       if (err.status) {
         return responseError(res, err.status, err.message || 'An error occurred');
       }

@@ -3,12 +3,14 @@ import ProductRepository from '../repositories/product.repository';
 import { prisma } from '../utils/prisma';
 import { emitNotificationToUser } from '../infrastructure/socket';
 
+import { PAYMENTMETHOD, FULLFILLMENTTYPE } from '@prisma/client';
+
 export default class OrderService {
   static async createOrder(payload: {
     buyerId: string;
     storeId: string;
-    type: 'DELIVERY' | 'PICKUP';
-    paymentMethod: 'BANK' | 'GCASH' | 'CASH_ON_DELIVERY';
+    type: FULLFILLMENTTYPE;
+    paymentMethod: PAYMENTMETHOD;
     pickupAt?: Date;
     items: { productId: string; quantity: number }[];
   }) {
@@ -216,5 +218,17 @@ export default class OrderService {
       const err = error as Error;
       throw { status: 400, message: err.message };
     }
+  }
+
+  static async getMyOrders(userId: string) {
+    const buyer = await prisma.buyers.findUnique({
+      where: { userId: userId },
+    });
+
+    if (!buyer) {
+      throw { status: 403, message: 'Only registered buyers can view orders.' };
+    }
+
+    return OrderRepository.getOrdersByBuyerId(buyer.id);
   }
 }
