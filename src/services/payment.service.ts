@@ -15,7 +15,10 @@ export default class PaymentService {
     if (!payment) throw { status: 404, message: 'Payment record not found.' };
 
     if (payment.paymentMethod !== 'E_WALLET' && payment.paymentMethod !== 'BANK') {
-      throw { status: 400, message: 'QR codes are only available for E-Wallet and Bank transfers.' };
+      throw {
+        status: 400,
+        message: 'QR codes are only available for E-Wallet and Bank transfers.',
+      };
     }
 
     const store = await ProductRepository.getStoreById(payment.order.storeId);
