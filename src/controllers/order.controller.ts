@@ -10,7 +10,7 @@ export default class OrderController {
     // Validate only the fulfillment details from the frontend
     const schema = Joi.object({
       type: Joi.string().valid('DELIVERY', 'PICKUP').required(),
-      paymentMethod: Joi.string().valid('BANK', 'GCASH', 'CASH_ON_DELIVERY').required(),
+      paymentMethod: Joi.string().valid('BANK', 'E_WALLET', 'CASH_ON_DELIVERY').required(),
       // Buyer-set scheduled pickup time (ISO 8601, must be in the future).
       // Required for PICKUP orders; ignored/optional for DELIVERY.
       pickupAt: Joi.date()

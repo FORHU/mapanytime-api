@@ -2,13 +2,14 @@ import OrderRepository from '../repositories/order.repository';
 import ProductRepository from '../repositories/product.repository';
 import { prisma } from '../utils/prisma';
 import { emitNotificationToUser } from '../infrastructure/socket';
+import { PAYMENTMETHOD, FULLFILLMENTTYPE } from '@prisma/client';
 
 export default class OrderService {
   static async createOrder(payload: {
     buyerId: string;
     storeId: string;
-    type: 'DELIVERY' | 'PICKUP';
-    paymentMethod: 'BANK' | 'GCASH' | 'CASH_ON_DELIVERY';
+    type: FULLFILLMENTTYPE;
+    paymentMethod: PAYMENTMETHOD;
     pickupAt?: Date;
     items: { productId: string; quantity: number }[];
   }) {

@@ -362,7 +362,7 @@ model Payments {
 
 enum PAYMENTMETHOD {
   BANK
-  GCASH
+  E_WALLET
   CASH_ON_DELIVERY
 }
 
