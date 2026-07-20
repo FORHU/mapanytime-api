@@ -130,4 +130,23 @@ export default class StoreController {
       next(error);
     }
   }
+
+  static async getById(req: Request, res: Response, next: NextFunction) {
+    const { id } = req.params;
+
+    if (!id) {
+      return responseError(res, 400, 'Store id is required.');
+    }
+
+    try {
+      const store = await StoreService.getStoreById(id);
+      return responseSuccess(res, 200, store);
+    } catch (error) {
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
+      next(error);
+    }
+  }
 }

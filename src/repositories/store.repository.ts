@@ -144,7 +144,24 @@ export default class StoreRepository {
     return prisma.stores.findMany({
       where: { sellerId: sellerId },
       include: { storeLocations: true },
-      orderBy: { createdAt: 'desc' }, // Optional: puts newest stores at the top
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
+   * Returns a single store by id with its location and hours.
+   * Used by the buyer storefront page.
+   */
+  static async getStoreById(id: string) {
+    return prisma.stores.findUnique({
+      where: { id },
+      include: {
+        storeLocations: true,
+        storeHours: {
+          orderBy: { dayOfWeek: 'asc' },
+        },
+        categories: true,
+      },
     });
   }
 }

@@ -221,4 +221,16 @@ export default class OrderService {
       throw { status: 400, message: err.message };
     }
   }
+
+  static async getMyOrders(userId: string) {
+    const buyer = await prisma.buyers.findUnique({
+      where: { userId: userId },
+    });
+
+    if (!buyer) {
+      throw { status: 403, message: 'Only registered buyers can view orders.' };
+    }
+
+    return OrderRepository.getOrdersByBuyerId(buyer.id);
+  }
 }
