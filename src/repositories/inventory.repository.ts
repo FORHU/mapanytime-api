@@ -9,7 +9,7 @@ export default class InventoryRepository {
       },
     });
   }
-  
+
   static async getInventoryByProductId(productId: string) {
     return prisma.inventory.findUnique({
       where: { productId },

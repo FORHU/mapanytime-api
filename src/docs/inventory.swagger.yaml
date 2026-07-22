@@ -39,7 +39,7 @@ paths:
           description: Forbidden
         '404':
           description: Product not found
-          
+
   /v1/inventory/{productId}:
     get:
       summary: Get product inventory
@@ -61,4 +61,4 @@ paths:
         '401':
           description: Unauthorized
         '404':
-          description: Inventory not found      
+          description: Inventory not found
