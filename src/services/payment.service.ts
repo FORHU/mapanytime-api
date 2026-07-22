@@ -1,6 +1,6 @@
 import PaymentRepository from '../repositories/payment.repository';
 import ProductRepository from '../repositories/product.repository';
-import { PAYMENTSTATUS } from '@prisma/client';
+import { PAYMENTSTATUS, PAYMENTMETHOD } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { emitNotificationToUser } from '../infrastructure/socket';
 
@@ -14,7 +14,10 @@ export default class PaymentService {
     const payment = await PaymentRepository.getPaymentByOrderId(orderId);
     if (!payment) throw { status: 404, message: 'Payment record not found.' };
 
-    if (payment.paymentMethod !== 'E_WALLET' && payment.paymentMethod !== 'BANK') {
+    if (
+      payment.paymentMethod !== PAYMENTMETHOD.E_WALLET &&
+      payment.paymentMethod !== PAYMENTMETHOD.BANK
+    ) {
       throw {
         status: 400,
         message: 'QR codes are only available for E-Wallet and Bank transfers.',
@@ -112,13 +115,20 @@ export default class PaymentService {
     });
 
     // After commit: on a real PENDING → COMPLETED transition, push a realtime
-    // "payment received" notification to the buyer. Best-effort — a socket
-    // failure must not fail the webhook.
+    // "payment received" notification to the buyer, and a "ready for preparation"
+    // notification to the seller. Best-effort — a socket failure must not fail the webhook.
     if (justCompleted) {
       try {
         const order = await prisma.orders.findUnique({
           where: { id: orderId },
-          include: { buyer: { select: { userId: true } }, store: { select: { storeName: true } } },
+          include: {
+            buyer: { select: { userId: true } },
+            store: {
+              include: {
+                seller: { select: { userId: true } },
+              },
+            },
+          },
         });
         if (order?.buyer?.userId) {
           emitNotificationToUser(order.buyer.userId, {
@@ -126,6 +136,15 @@ export default class PaymentService {
             title: 'Payment received',
             body: `Your payment of ₱${payment.amount.toLocaleString()} to ${order.store.storeName} was successful.`,
             metadata: { orderId, type: 'PAYMENT_COMPLETED' },
+            sentAt: new Date().toISOString(),
+          });
+        }
+        if (order?.store?.seller?.userId) {
+          emitNotificationToUser(order.store.seller.userId, {
+            id: order.id,
+            title: 'Order Paid & Ready',
+            body: `Order ₱${payment.amount.toLocaleString()} is paid and ready for preparation.`,
+            metadata: { orderId, type: 'ORDER_PAID' },
             sentAt: new Date().toISOString(),
           });
         }

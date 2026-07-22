@@ -77,4 +77,34 @@ export default class OrderRepository {
       })),
     }));
   }
+
+  // Fetches a store's order history for merchant/seller dashboards
+  static async getOrdersByStoreId(storeId: string) {
+    const orders = await prisma.orders.findMany({
+      where: { storeId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        buyer: { select: { displayName: true } },
+        orderitems: true,
+      },
+    });
+
+    if (orders.length === 0) return [];
+
+    const productIds = orders.flatMap((o) => o.orderitems.map((i) => i.productId));
+    const products = await prisma.products.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, name: true },
+    });
+
+    const productMap = Object.fromEntries(products.map((p) => [p.id, p.name]));
+
+    return orders.map((order) => ({
+      ...order,
+      orderitems: order.orderitems.map((item) => ({
+        ...item,
+        product: { name: productMap[item.productId] ?? 'Unknown Product' },
+      })),
+    }));
+  }
 }

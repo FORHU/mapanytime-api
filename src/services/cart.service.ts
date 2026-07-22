@@ -22,6 +22,23 @@ export default class CartService {
 
   // Adds an item to the cart. Enforces single-store checkout rule.
   static async addToCart(userId: string, storeId: string, productId: string, quantity: number) {
+    const cart = await this.getCart(userId);
+
+    // If quantity is 0, remove the item directly and bypass other checks
+    if (quantity === 0) {
+      const existingItemIndex = cart.items.findIndex(
+        (item: CartItem) => item.productId === productId,
+      );
+      if (existingItemIndex >= 0) {
+        cart.items.splice(existingItemIndex, 1);
+      }
+      if (cart.items.length === 0) {
+        cart.storeId = null;
+      }
+      await RedisUtil.client.setEx(`cart:${userId}`, 604800, JSON.stringify(cart));
+      return cart;
+    }
+
     // Validate the store exists and is legally allowed to operate
     const store = await prisma.stores.findUnique({
       where: { id: storeId },
@@ -45,9 +62,6 @@ export default class CartService {
       throw { status: 400, message: 'Product does not belong to this store.' };
     if (!product.isActive) throw { status: 400, message: 'Product is not available for purchase.' };
 
-    // Fetch the current cart first, so we know how many items are already in it
-    const cart = await this.getCart(userId);
-
     // Restrict carts to a single store per transaction
     if (cart.storeId && cart.storeId !== storeId && cart.items.length > 0) {
       throw {
@@ -68,16 +82,8 @@ export default class CartService {
 
     const availableStock = inventory.quantityOnHand - inventory.quantityReserved;
 
-    // Check existing quantity in the cart
-    const existingItemIndex = cart.items.findIndex(
-      (item: CartItem) => item.productId === productId,
-    );
-    const existingQuantity = existingItemIndex >= 0 ? cart.items[existingItemIndex].quantity : 0;
-
-    // The total they want to have in their cart vs what is actually on the shelf
-    const totalRequestedQuantity = existingQuantity + quantity;
-
-    if (totalRequestedQuantity > availableStock) {
+    // Check quantity against available stock (absolute quantity)
+    if (quantity > availableStock) {
       throw {
         status: 400,
         message: `Insufficient stock for ${product.name}. Only ${availableStock} left.`,
@@ -87,8 +93,11 @@ export default class CartService {
     // Update the Cart
     cart.storeId = storeId;
 
+    const existingItemIndex = cart.items.findIndex(
+      (item: CartItem) => item.productId === productId,
+    );
     if (existingItemIndex >= 0) {
-      cart.items[existingItemIndex].quantity += quantity;
+      cart.items[existingItemIndex].quantity = quantity;
     } else {
       cart.items.push({ productId, quantity, unitPrice: product.price });
     }

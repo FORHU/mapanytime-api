@@ -25,7 +25,7 @@ export default class CartController {
     const schema = Joi.object({
       storeId: Joi.string().required(),
       productId: Joi.string().required(),
-      quantity: Joi.number().integer().min(1).required(),
+      quantity: Joi.number().integer().min(0).required(),
     });
 
     const { error, value } = schema.validate(req.body);

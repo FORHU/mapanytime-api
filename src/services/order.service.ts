@@ -233,4 +233,24 @@ export default class OrderService {
 
     return OrderRepository.getOrdersByBuyerId(buyer.id);
   }
+
+  static async getStoreOrders(userId: string, storeId: string) {
+    const seller = await prisma.sellers.findUnique({
+      where: { userId: userId },
+    });
+
+    if (!seller) {
+      throw { status: 403, message: 'Only registered sellers can view store orders.' };
+    }
+
+    const store = await prisma.stores.findUnique({
+      where: { id: storeId },
+    });
+
+    if (!store || store.sellerId !== seller.id) {
+      throw { status: 403, message: 'Unauthorized store access.' };
+    }
+
+    return OrderRepository.getOrdersByStoreId(storeId);
+  }
 }

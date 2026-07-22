@@ -124,13 +124,32 @@ export default class OrderController {
     }
   }
 
-  static async getOrders(req: Request, res: Response, next: NextFunction) {
+  static async getBuyerOrders(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized access.');
 
       const data = await OrderService.getMyOrders(userId);
-      return responseSuccess(res, 200, data, 'Orders fetched successfully');
+      return responseSuccess(res, 200, data, 'Buyer orders fetched successfully');
+    } catch (error) {
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
+      next(error);
+    }
+  }
+
+  static async getSellerOrders(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
+      const storeId = req.query.storeId as string;
+      if (!storeId) return responseError(res, 400, 'storeId query parameter is required.');
+
+      const data = await OrderService.getStoreOrders(userId, storeId);
+      return responseSuccess(res, 200, data, 'Seller store orders fetched successfully');
     } catch (error) {
       const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
       if (err.status) {
