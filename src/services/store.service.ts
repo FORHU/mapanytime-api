@@ -12,6 +12,7 @@ export default class StoreService {
     storeData: { storeName: string; description?: string; categoryIds: string[] },
     locationData: Prisma.StoreLocationsCreateWithoutStoreInput,
     hoursData: Prisma.StoreHoursCreateWithoutStoreInput[],
+    /* --- ORIGINAL STRICT LOGIC (COMMENTED OUT FOR MVP BYPASS) ---
     rawDocuments: {
       mayorsPermitFileName: string;
       mayorsPermitKey: string;
@@ -22,7 +23,22 @@ export default class StoreService {
       secCertificateFileName: string;
       secCertificateKey: string;
     },
+    --- END ORIGINAL STRICT LOGIC --- */
+
+    // --- START BYPASS LOGIC ---
+    rawDocuments?: {
+      mayorsPermitFileName: string;
+      mayorsPermitKey: string;
+      dtiCertificateFileName: string;
+      dtiCertificateKey: string;
+      birCertificateFileName: string;
+      birCertificateKey: string;
+      secCertificateFileName: string;
+      secCertificateKey: string;
+    },
+    // --- END BYPASS LOGIC ---
   ) {
+    /* --- ORIGINAL STRICT LOGIC (COMMENTED OUT FOR MVP BYPASS) ---
     // Mapping raw input to database-compliant structure
     const uploadedFiles = [
       {
@@ -46,6 +62,34 @@ export default class StoreService {
         documentType: 'SEC_CERTIFICATE' as const,
       },
     ];
+    --- END ORIGINAL STRICT LOGIC --- */
+
+    // --- START BYPASS LOGIC ---
+    const uploadedFiles = rawDocuments
+      ? [
+          {
+            fileName: rawDocuments.mayorsPermitFileName,
+            fileUrl: rawDocuments.mayorsPermitKey,
+            documentType: 'MAYORS_PERMIT' as const,
+          },
+          {
+            fileName: rawDocuments.dtiCertificateFileName,
+            fileUrl: rawDocuments.dtiCertificateKey,
+            documentType: 'DTI_CERTIFICATE' as const,
+          },
+          {
+            fileName: rawDocuments.birCertificateFileName,
+            fileUrl: rawDocuments.birCertificateKey,
+            documentType: 'BIR_CERTIFICATE' as const,
+          },
+          {
+            fileName: rawDocuments.secCertificateFileName,
+            fileUrl: rawDocuments.secCertificateKey,
+            documentType: 'SEC_CERTIFICATE' as const,
+          },
+        ]
+      : [];
+    // --- END BYPASS LOGIC ---
 
     const created = await prisma.$transaction(async (tx) => {
       const newStore = await tx.stores.create({
@@ -128,13 +172,9 @@ export default class StoreService {
     centerLng?: number,
     search?: string,
   ) {
-    // Default center to midpoint of the bounding box if not explicitly provided
     const lat = centerLat ?? (north + south) / 2;
     const lng = centerLng ?? (east + west) / 2;
 
-    // Cache key buckets to 2 decimal places for better hit rates on similar
-    // viewports; page (limit/offset) is part of the key so each page is cached
-    // independently.
     const n = north.toFixed(2);
     const s = south.toFixed(2);
     const e = east.toFixed(2);
@@ -190,7 +230,6 @@ export default class StoreService {
 
     try {
       const redis = redisConnection.getClient();
-      // Cache for 60 seconds
       await redis.setEx(cacheKey, 60, JSON.stringify(result));
     } catch (err) {
       logger.warn(`[Redis] Cache write failed for ${cacheKey}.`);

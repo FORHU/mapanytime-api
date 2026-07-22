@@ -14,8 +14,11 @@ export default class PaymentService {
     const payment = await PaymentRepository.getPaymentByOrderId(orderId);
     if (!payment) throw { status: 404, message: 'Payment record not found.' };
 
-    if (payment.paymentMethod !== 'GCASH' && payment.paymentMethod !== 'BANK') {
-      throw { status: 400, message: 'QR codes are only available for GCash and Bank transfers.' };
+    if (payment.paymentMethod !== 'E_WALLET' && payment.paymentMethod !== 'BANK') {
+      throw {
+        status: 400,
+        message: 'QR codes are only available for E-Wallet and Bank transfers.',
+      };
     }
 
     const store = await ProductRepository.getStoreById(payment.order.storeId);

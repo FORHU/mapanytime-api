@@ -29,4 +29,20 @@ export default class InventoryController {
       next(error);
     }
   }
+
+  static async getInventory(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { productId } = req.params;
+      if (!productId) return responseError(res, 400, 'Product ID is required.');
+
+      const data = await InventoryService.getInventory(productId);
+      return responseSuccess(res, 200, data, 'Inventory fetched successfully.');
+    } catch (error) {
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
+      next(error);
+    }
+  }
 }

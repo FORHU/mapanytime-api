@@ -2,7 +2,6 @@ import OrderRepository from '../repositories/order.repository';
 import ProductRepository from '../repositories/product.repository';
 import { prisma } from '../utils/prisma';
 import { emitNotificationToUser } from '../infrastructure/socket';
-
 import { PAYMENTMETHOD, FULLFILLMENTTYPE } from '@prisma/client';
 
 export default class OrderService {

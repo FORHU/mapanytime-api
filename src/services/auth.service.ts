@@ -19,6 +19,7 @@ export default class AuthSvc {
     password: string;
     firstName?: string;
     lastName?: string;
+    phoneNumber?: string;
     roleName: string;
     countryCode?: string;
     sellerDocuments?: {
@@ -47,6 +48,7 @@ export default class AuthSvc {
           passwordHash: `${salt}:${hash}`,
           firstName: data.firstName,
           lastName: data.lastName,
+          phoneNumber: data.phoneNumber,
           countryCode: data.countryCode,
           isEmailVerified: true,
           accountStatus: 'ACTIVE',
@@ -54,6 +56,7 @@ export default class AuthSvc {
         },
       });
 
+      /* --- ORIGINAL STRICT LOGIC (COMMENTED OUT FOR MVP BYPASS) ---
       if (data.roleName === 'SELLER' && data.sellerDocuments) {
         const seller = await tx.sellers.create({
           data: { userId: user.id },
@@ -97,6 +100,54 @@ export default class AuthSvc {
           data: { userId: user.id, displayName },
         });
       }
+      --- END ORIGINAL STRICT LOGIC --- */
+
+      // --- START BYPASS LOGIC ---
+      if (data.roleName === 'SELLER') {
+        const seller = await tx.sellers.create({
+          data: { userId: user.id },
+        });
+
+        const docVerification = await tx.documentVerifications.create({
+          data: {
+            sellerId: seller.id,
+            verificationStatus: 'PENDING',
+          },
+        });
+
+        if (data.sellerDocuments) {
+          const attachDoc = async (fileName: string, fileUrl: string, type: DOCUMENTTYPES) => {
+            const file = await tx.files.create({
+              data: { userId: user.id, fileName, fileUrl },
+            });
+            await tx.documents.create({
+              data: {
+                documentVerificationsId: docVerification.id,
+                fileId: file.id,
+                documentType: type,
+              },
+            });
+          };
+
+          await attachDoc(
+            data.sellerDocuments.tinIdFileName,
+            data.sellerDocuments.tinIdKey,
+            'TIN_ID',
+          );
+          await attachDoc(
+            data.sellerDocuments.govIdFileName,
+            data.sellerDocuments.govIdKey,
+            'GOV_ID',
+          );
+        }
+      } else if (data.roleName === 'BUYER') {
+        const displayName =
+          [data.firstName, data.lastName].filter(Boolean).join(' ') || 'New Buyer';
+        await tx.buyers.create({
+          data: { userId: user.id, displayName },
+        });
+      }
+      // --- END BYPASS LOGIC ---
     });
 
     return null;
@@ -137,9 +188,6 @@ export default class AuthSvc {
 
     logger.info(`[Auth] Token refreshed for user ${user.id}`);
 
-    // Rotate the refresh token: invalidate the one just used before issuing a
-    // new session, so old sessions don't accumulate and a leaked token can't be
-    // replayed after a legitimate refresh.
     await AuthRepo.deleteSession(refreshToken);
 
     return this.generateAuthResponse(user, 'local', false);
@@ -178,7 +226,6 @@ export default class AuthSvc {
 
     const stores = (user as Users & { seller?: { stores: unknown[] } }).seller?.stores || [];
 
-    // Never leak the password hash to clients.
     const { passwordHash: _passwordHash, ...safeUser } = user as Users & {
       passwordHash?: string;
     };

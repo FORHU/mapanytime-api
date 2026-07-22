@@ -13,6 +13,7 @@ export default class AuthController {
       password: Joi.string().min(6).required(),
       firstName: Joi.string().optional(),
       lastName: Joi.string().optional(),
+      phoneNumber: Joi.string().optional(),
       roleName: Joi.string().required(),
       countryCode: Joi.string().max(3).optional(),
 
@@ -23,7 +24,7 @@ export default class AuthController {
         govIdKey: Joi.string().required(),
       }).when('roleName', {
         is: 'SELLER',
-        then: Joi.required(),
+        then: Joi.optional(), // revert to required to return to original logic
         otherwise: Joi.forbidden(),
       }),
     });
@@ -46,6 +47,7 @@ export default class AuthController {
     const schema = Joi.object({
       email: Joi.string().email().required(),
       password: Joi.string().required(),
+      roleName: Joi.string().required(),
     });
 
     const { error, value } = schema.validate(req.body);

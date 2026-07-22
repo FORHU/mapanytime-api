@@ -10,8 +10,12 @@ export default class OrderController {
   static async create(req: Request, res: Response, next: NextFunction) {
     // Validate only the fulfillment details from the frontend
     const schema = Joi.object({
-      type: Joi.string().valid(...Object.values(FULLFILLMENTTYPE)).required(),
-      paymentMethod: Joi.string().valid(...Object.values(PAYMENTMETHOD)).required(),
+      type: Joi.string()
+        .valid(...Object.values(FULLFILLMENTTYPE))
+        .required(),
+      paymentMethod: Joi.string()
+        .valid(...Object.values(PAYMENTMETHOD))
+        .required(),
       // Buyer-set scheduled pickup time (ISO 8601, must be in the future).
       // Required for PICKUP orders; ignored/optional for DELIVERY.
       pickupAt: Joi.date()

@@ -47,7 +47,7 @@ export default class StoreController {
           birCertificateKey: Joi.string().required(),
           secCertificateFileName: Joi.string().required(),
           secCertificateKey: Joi.string().required(),
-        }).required(),
+        }).optional(), // revert to required to return to original logic
       });
 
       const { error, value } = schema.validate(req.body);

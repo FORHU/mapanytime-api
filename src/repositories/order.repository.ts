@@ -60,13 +60,13 @@ export default class OrderRepository {
 
     // Manually stitch product names since Prisma schema is missing OrderItems -> Products relation
     if (orders.length === 0) return [];
-    
+
     const productIds = orders.flatMap((o) => o.orderitems.map((i) => i.productId));
     const products = await prisma.products.findMany({
       where: { id: { in: productIds } },
       select: { id: true, name: true },
     });
-    
+
     const productMap = Object.fromEntries(products.map((p) => [p.id, p.name]));
 
     return orders.map((o) => ({
