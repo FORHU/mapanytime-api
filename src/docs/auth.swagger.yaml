@@ -72,7 +72,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [email, password]
+              required: [email, password, roleName]
               properties:
                 email:
                   type: string
@@ -80,6 +80,9 @@ paths:
                 password:
                   type: string
                   example: securePass123!
+                roleName:
+                  type: string
+                  example: SELLER
       responses:
         '200':
           description: Login successful

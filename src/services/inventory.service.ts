@@ -24,4 +24,12 @@ export default class InventoryService {
     // Execute the restock
     return InventoryRepository.restock(productId, addedQuantity);
   }
+
+  static async getInventory(productId: string) {
+    const inventory = await InventoryRepository.getInventoryByProductId(productId);
+    if (!inventory) {
+      throw { status: 404, message: 'Inventory record not found for this product.' };
+    }
+    return inventory;
+  }
 }

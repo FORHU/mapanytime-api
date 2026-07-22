@@ -1,0 +1,64 @@
+paths:
+  /v1/inventory/{productId}/restock:
+    patch:
+      summary: Restock a product's inventory
+      description: Increments the physical stock of a specific product. Only accessible by the approved seller who owns the store associated with the product.
+      tags:
+        - Inventory
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+          description: The unique ID of the product being restocked
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - addedQuantity
+              properties:
+                addedQuantity:
+                  type: integer
+                  minimum: 1
+                  example: 10
+                  description: The number of new items to add to the current stock
+      responses:
+        '200':
+          description: Stock replenished successfully
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Product not found
+          
+  /v1/inventory/{productId}:
+    get:
+      summary: Get product inventory
+      description: Retrieves the current inventory stock level for a specific product.
+      tags:
+        - Inventory
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+          description: The unique ID of the product
+      responses:
+        '200':
+          description: Inventory fetched successfully
+        '401':
+          description: Unauthorized
+        '404':
+          description: Inventory not found      
