@@ -170,4 +170,18 @@ jobs:
               --log-opt awslogs-stream=mapanytime-api \
               --log-opt awslogs-create-group=true \
               ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+
+            docker stop ${{ env.CONTAINER_NAME }}-worker 2>/dev/null || true
+            docker rm   ${{ env.CONTAINER_NAME }}-worker 2>/dev/null || true
+            docker run -d --name ${{ env.CONTAINER_NAME }}-worker --restart unless-stopped \
+              --env-file /home/ec2-user/mapanytime-api.env \
+              -p 8080:8080 \
+              --log-driver awslogs \
+              --log-opt awslogs-region=${{ env.AWS_REGION }} \
+              --log-opt awslogs-group=/mapanytime-api/production \
+              --log-opt awslogs-stream=mapanytime-api-worker \
+              --log-opt awslogs-create-group=true \
+              ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
+              npm run worker
+
             docker image prune -f

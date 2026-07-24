@@ -51,9 +51,26 @@ services:
     # Override the localhost-based URLs from .env so the container reaches
     # the other services by their compose service names instead of itself.
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-node_postg_db}?schema=public
       REDIS_HOST: redis
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER}:${RABBITMQ_DEFAULT_PASS}@rabbitmq:5672/
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+    depends_on:
+      - db
+      - redis
+      - rabbitmq
+
+  worker:
+    build: .
+    command: npm run worker
+    restart: always
+    ports:
+      - '${WORKER_HEALTH_PORT:-8080}:8080'
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-node_postg_db}?schema=public
+      REDIS_HOST: redis
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
     depends_on:
       - db
       - redis
