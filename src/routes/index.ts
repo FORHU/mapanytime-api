@@ -10,6 +10,7 @@ import orderRoute from './order.route';
 import inventoryRoutes from './inventory.route';
 import cartRoutes from './cart.route';
 import paymentRoute from './payment.route';
+import rbacRoute from './rbac.route';
 
 const router = express.Router();
 
@@ -30,5 +31,6 @@ router.use('/v1/orders', orderRoute);
 router.use('/v1/inventory', inventoryRoutes);
 router.use('/v1/cart', cartRoutes);
 router.use('/v1/payments', paymentRoute);
+router.use('/v1/rbac', rbacRoute);
 
 export default router;

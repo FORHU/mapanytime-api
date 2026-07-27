@@ -2,12 +2,9 @@ import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 
 /**
- * Legit, hand-authored test data: 10 real-feeling stores with realistic
+ * Legit, hand-authored test data: 12 real-feeling stores with realistic
  * products, inventory, locations and approved seller/document verification —
  * enough to exercise the full map → products → cart → order → payment flow.
- *
- * Not for load testing. If you need thousands of dummy rows, write a separate
- * throwaway script; keep this file readable and true-to-life.
  */
 
 function hashPassword(raw: string): string {
@@ -38,7 +35,6 @@ interface SeedLocation {
 interface SeedStore {
   storeName: string;
   description: string;
-  /** Reuse an existing seeded account, or a fresh dedicated seller. */
   ownerEmail: string;
   ownerFirstName: string;
   ownerLastName: string;
@@ -46,14 +42,140 @@ interface SeedStore {
   products: SeedProduct[];
 }
 
-// Every store clusters inside Baguio, anchored on three landmarks so they
-// render tightly on the map: Baguio City Public Market (~16.4157, 120.5960),
-// Burnham Park (~16.4108, 120.5934) and Legarda Road (~16.4085, 120.5980).
 const STORES: SeedStore[] = [
+  {
+    storeName: 'Baguio Electrical & Power Supplies',
+    description:
+      'Authentic electrical supplies, wiring, LED lighting, circuit breakers, and power tools.',
+    ownerEmail: 'seller.electrical@mapanytime.test',
+    ownerFirstName: 'Fernando',
+    ownerLastName: 'Mendoza',
+    location: {
+      address: 'Upper General Luna Road, Baguio City',
+      city: 'Baguio City',
+      province: 'Benguet',
+      zipCode: '2600',
+      latitude: 16.4125,
+      longitude: 120.5972,
+    },
+    products: [
+      {
+        name: 'THHN Copper Wire #12 (100m Roll)',
+        brand: 'Phelps Dodge',
+        price: 4200,
+        category: 'Electrical',
+        stock: 25,
+      },
+      {
+        name: 'Heavy Duty Extension Cord 5m',
+        brand: 'Omni',
+        price: 480,
+        category: 'Electrical',
+        stock: 50,
+      },
+      {
+        name: 'LED Light Bulb 12W (Daylight)',
+        brand: 'Philips',
+        price: 185,
+        category: 'Electrical',
+        stock: 120,
+      },
+      {
+        name: 'Circuit Breaker 20A Single Pole',
+        brand: 'GE',
+        price: 320,
+        category: 'Electrical',
+        stock: 40,
+      },
+      {
+        name: 'Duplex Wall Outlet Socket',
+        brand: 'Panasonic',
+        price: 145,
+        category: 'Electrical',
+        stock: 80,
+      },
+      {
+        name: 'Electrical Tape Black (3-Pack)',
+        brand: '3M',
+        price: 95,
+        category: 'Electrical',
+        stock: 150,
+      },
+      {
+        name: 'Digital Multimeter Voltage Tester',
+        brand: 'Sanwa',
+        price: 1250,
+        category: 'Electrical',
+        stock: 15,
+      },
+      {
+        name: 'PVC Electrical Conduit Pipe 20mm (3m)',
+        brand: 'Neltex',
+        price: 110,
+        category: 'Electrical',
+        stock: 100,
+      },
+      {
+        name: 'Wall Light Switch 1-Gang',
+        brand: 'Omni',
+        price: 95,
+        category: 'Electrical',
+        stock: 90,
+      },
+    ],
+  },
+  {
+    storeName: 'Highland Hardware & Plumbing Depot',
+    description:
+      'Construction materials, power tools, plumbing fixtures, and home improvement hardware.',
+    ownerEmail: 'seller.hardware@mapanytime.test',
+    ownerFirstName: 'Eduardo',
+    ownerLastName: 'Garcia',
+    location: {
+      address: 'Lower Bonifacio Street, Baguio City',
+      city: 'Baguio City',
+      province: 'Benguet',
+      zipCode: '2600',
+      latitude: 16.414,
+      longitude: 120.5968,
+    },
+    products: [
+      {
+        name: 'Cordless Power Drill 18V',
+        brand: 'Makita',
+        price: 4850,
+        category: 'Hardware',
+        stock: 18,
+      },
+      {
+        name: 'Adjustable Pipe Wrench 12"',
+        brand: 'Stanley',
+        price: 650,
+        category: 'Plumbing',
+        stock: 30,
+      },
+      { name: 'PPR Pipe 3/4" (4m)', brand: 'Neltex', price: 280, category: 'Plumbing', stock: 60 },
+      {
+        name: 'Stainless Kitchen Faucet',
+        brand: 'American Standard',
+        price: 1850,
+        category: 'Plumbing',
+        stock: 22,
+      },
+      { name: 'Latex Paint White (4L)', brand: 'Boysen', price: 890, category: 'Paint', stock: 35 },
+      {
+        name: 'Steel Claw Hammer 16oz',
+        brand: 'Stanley',
+        price: 380,
+        category: 'Hardware',
+        stock: 45,
+      },
+    ],
+  },
   {
     storeName: 'Baguio Fresh Market',
     description: 'Farm-fresh highland produce, fruits and everyday grocery staples.',
-    ownerEmail: 'seller@example.com', // existing test seller — now owns a real store
+    ownerEmail: 'seller@example.com',
     ownerFirstName: 'Grace',
     ownerLastName: 'Piatos',
     location: {
@@ -84,7 +206,7 @@ const STORES: SeedStore[] = [
   {
     storeName: 'Session Brews Cafe',
     description: 'Cozy Session Road cafe serving specialty coffee and fresh-baked pastries.',
-    ownerEmail: 'dual@example.com', // existing dual buyer/seller account
+    ownerEmail: 'dual@example.com',
     ownerFirstName: 'Alex',
     ownerLastName: 'Mercer',
     location: {
@@ -335,7 +457,7 @@ const STORES: SeedStore[] = [
 ];
 
 export async function seedStores(prisma: PrismaClient) {
-  console.log('🌱 Seeding 10 legit stores with realistic products...');
+  console.log('🌱 Seeding 12 legit stores with realistic products & electrical supplies...');
 
   // Clean slate for the marketplace data, in FK-safe order. Keeps users/roles
   // so existing test logins survive; seller profiles are re-approved below.
@@ -350,7 +472,6 @@ export async function seedStores(prisma: PrismaClient) {
   await prisma.stores.deleteMany();
 
   // Category lookup by name → resolve each product's sub-category and its parent
-  // (the map filters by parent category and expands to descendants server-side).
   const categories = await prisma.categories.findMany();
   const catByName = new Map(categories.map((c) => [c.name, c]));
 
@@ -467,5 +588,5 @@ export async function seedStores(prisma: PrismaClient) {
     console.log(`✅ ${s.storeName} — ${s.products.length} products (${s.location.city})`);
   }
 
-  console.log('🎉 10 stores seeded with products, inventory and locations!');
+  console.log('🎉 12 stores seeded with products, inventory and locations!');
 }
