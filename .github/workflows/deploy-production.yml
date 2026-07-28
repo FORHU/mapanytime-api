@@ -13,11 +13,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ECR_REPOSITORY: mapanytime-api-prod # <-- must match the ECR repo you created
+  ECR_REPOSITORY: mapanytime # <-- must match the ECR repo you created
   AWS_REGION: ap-southeast-1 # <-- set to your production region
   NODE_ENV: production
   IMAGE_TAG: ${{ github.sha }}
-  EC2_IAM_ROLE_NAME: forhu-production-mapanytime-api-role # <-- EC2 instance profile role name
+  EC2_IAM_ROLE_NAME: mapanytime-role # <-- EC2 instance profile role name
   CONTAINER_NAME: mapanytime-api
   APP_PORT: 4002
 
@@ -156,6 +156,7 @@ jobs:
             # --entrypoint overrides the image CMD so only the migration runs (not the app).
             docker run --rm \
               --entrypoint npx \
+              --network mapanytime \
               --env-file /home/ec2-user/mapanytime-api.env \
               ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
               prisma migrate deploy
@@ -163,8 +164,9 @@ jobs:
             docker stop ${{ env.CONTAINER_NAME }} 2>/dev/null || true
             docker rm   ${{ env.CONTAINER_NAME }} 2>/dev/null || true
             docker run -d --name ${{ env.CONTAINER_NAME }} --restart unless-stopped \
+              --network mapanytime \
               --env-file /home/ec2-user/mapanytime-api.env \
-              -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
+              -p 127.0.0.1:${{ env.APP_PORT }}:${{ env.APP_PORT }} \
               --log-driver awslogs \
               --log-opt awslogs-region=${{ env.AWS_REGION }} \
               --log-opt awslogs-group=/mapanytime-api/production \
@@ -175,8 +177,9 @@ jobs:
             docker stop ${{ env.CONTAINER_NAME }}-worker 2>/dev/null || true
             docker rm   ${{ env.CONTAINER_NAME }}-worker 2>/dev/null || true
             docker run -d --name ${{ env.CONTAINER_NAME }}-worker --restart unless-stopped \
+              --network mapanytime \
               --env-file /home/ec2-user/mapanytime-api.env \
-              -p 8080:8080 \
+              -p 127.0.0.1:8080:8080 \
               --log-driver awslogs \
               --log-opt awslogs-region=${{ env.AWS_REGION }} \
               --log-opt awslogs-group=/mapanytime-api/production \

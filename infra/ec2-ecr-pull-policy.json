@@ -15,7 +15,7 @@
         "ecr:GetDownloadUrlForLayer",
         "ecr:BatchCheckLayerAvailability"
       ],
-      "Resource": "arn:aws:ecr:*:*:repository/mapanytime-api-*"
+      "Resource": "arn:aws:ecr:*:*:repository/mapanytime*"
     }
   ]
 }
