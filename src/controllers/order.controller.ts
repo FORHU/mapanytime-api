@@ -145,8 +145,7 @@ export default class OrderController {
       const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized access.');
 
-      const storeId = req.query.storeId as string;
-      if (!storeId) return responseError(res, 400, 'storeId query parameter is required.');
+      const storeId = (req.query.storeId as string) || 'ALL';
 
       const data = await OrderService.getStoreOrders(userId, storeId);
       return responseSuccess(res, 200, data, 'Seller store orders fetched successfully');

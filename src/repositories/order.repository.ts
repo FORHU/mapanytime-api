@@ -58,7 +58,6 @@ export default class OrderRepository {
       },
     });
 
-    // Manually stitch product names since Prisma schema is missing OrderItems -> Products relation
     if (orders.length === 0) return [];
 
     const productIds = orders.flatMap((o) => o.orderitems.map((i) => i.productId));
@@ -78,12 +77,20 @@ export default class OrderRepository {
     }));
   }
 
-  // Fetches a store's order history for merchant/seller dashboards
+  // Fetches orders for a single store ID
   static async getOrdersByStoreId(storeId: string) {
+    return this.getOrdersByStoreIds([storeId]);
+  }
+
+  // Fetches orders across multiple store IDs (e.g. all stores owned by a merchant)
+  static async getOrdersByStoreIds(storeIds: string[]) {
+    if (storeIds.length === 0) return [];
+
     const orders = await prisma.orders.findMany({
-      where: { storeId },
+      where: { storeId: { in: storeIds } },
       orderBy: { createdAt: 'desc' },
       include: {
+        store: { select: { storeName: true } },
         buyer: { select: { displayName: true } },
         orderitems: true,
       },
