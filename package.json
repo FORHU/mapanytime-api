@@ -42,7 +42,6 @@
     "multer": "^2.1.1",
     "node-cron": "^4.4.1",
     "nodemailer": "^9.0.1",
-    "prisma": "^6.19.2",
     "redis": "^5.11.0",
     "socket.io": "^4.8.3",
     "swagger-jsdoc": "^6.3.0",
@@ -51,6 +50,7 @@
     "winston": "^3.11.0"
   },
   "devDependencies": {
+    "prisma": "^6.19.2",
     "@types/amqplib": "^0.10.8",
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.15",
