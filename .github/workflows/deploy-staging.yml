@@ -82,6 +82,7 @@ jobs:
       - name: Write env file
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
           REDIS_HOST: ${{ secrets.REDIS_HOST || 'localhost' }}
           REDIS_PORT: ${{ secrets.REDIS_PORT || '6379' }}
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD || '' }}
@@ -112,6 +113,7 @@ jobs:
           DATABASE_URL=${DATABASE_URL}
           NODE_ENV=${{ env.NODE_ENV }}
           PORT=${{ env.APP_PORT }}
+          CORS_ORIGIN=${CORS_ORIGIN}
           REDIS_HOST=${REDIS_HOST}
           REDIS_PORT=${REDIS_PORT}
           REDIS_PASSWORD=${REDIS_PASSWORD}
