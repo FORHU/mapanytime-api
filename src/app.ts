@@ -34,10 +34,13 @@ app.use(
   }),
 );
 
+const corsOrigin = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  : '*';
+
 app.use(
   cors({
-    // Allow all origins in development, or restrict to specific IPs later
-    origin: isDev ? '*' : ['http://localhost:4000'],
+    origin: corsOrigin,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
