@@ -30,6 +30,7 @@ export default class UserRepository {
     const [users, total] = await Promise.all([
       prisma.users.findMany({
         where: { accountStatus: { not: 'DEACTIVATED' } },
+        include: {roles: true}, //it queries the users without including the roles; it means eyyy the role is always undefined in the FE
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },

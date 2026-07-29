@@ -48,7 +48,7 @@ export default class UserController {
   static async assignRole(req: Request, res: Response, next: NextFunction) {
     try {
       // Use Id (capital I) to match your getMe method
-      const userId = req.user?.id;
+      const userId = req.body.userId || req.user?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       const { roleName } = req.body;
