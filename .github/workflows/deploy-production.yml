@@ -166,7 +166,7 @@ jobs:
             docker run -d --name ${{ env.CONTAINER_NAME }} --restart unless-stopped \
               --network mapanytime \
               --env-file /home/ec2-user/mapanytime-api.env \
-              -p 127.0.0.1:${{ env.APP_PORT }}:${{ env.APP_PORT }} \
+              -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
               --log-driver awslogs \
               --log-opt awslogs-region=${{ env.AWS_REGION }} \
               --log-opt awslogs-group=/mapanytime-api/production \
