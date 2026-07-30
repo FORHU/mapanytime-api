@@ -31,7 +31,17 @@ export default class UserRepository {
     const [users, total] = await Promise.all([
       prisma.users.findMany({
         where: { accountStatus: { not: 'DEACTIVATED' } },
-        include: { roles: true },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          roles: { select: { id: true, roleName: true} },
+          avatar: { select: { fileUrl: true } },
+          createdAt: true,
+          updatedAt: true,
+        },
+        // include: { roles: true },
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },

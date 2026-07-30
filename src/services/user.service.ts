@@ -15,15 +15,14 @@ export default class UserService {
 
   static async listUsers(page?: number, limit?: number) {
     const result = await UserRepository.findAll(page, limit);
-    
-    const safeUsers = result.users.map((user) => {
-      const { passwordHash, ...userWithoutPassword } = user;
-      return userWithoutPassword;
-    });
+    // const safeUsers = result.users.map((user) => {
+    //   const { passwordHash, ...userWithoutPassword } = user;
+    //   return userWithoutPassword;
+    // });
 
     return {
       ...result,
-      users: safeUsers,
+      // users: safeUsers,
     };
   }
 

@@ -27,7 +27,7 @@ export default class UserController {
     try {
       const { page, limit } = parsePagination(req.query as Record<string, unknown>);
       const result = await UserService.listUsers(page, limit);
-      return responseSuccess(res, 200, pageFromRepo(result));
+      return responseSuccess(res, 200, result);
     } catch (error) {
       next(error);
     }
