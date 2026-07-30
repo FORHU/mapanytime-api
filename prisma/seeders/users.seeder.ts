@@ -4,6 +4,19 @@ import crypto from 'crypto';
 export async function seedUsers(prisma: PrismaClient) {
   console.log('🌱 Seeding base users...');
 
+  const defaultRoles = ['ADMIN', 'SELLER', 'BUYER'];
+  for (const roleName of defaultRoles) {
+    await prisma.roles.upsert({
+      where: { roleName },
+      update: {},
+      create: { 
+        roleName, 
+        description: `Default ${roleName} role` 
+      },
+    });
+  }
+  console.log('✅ Base roles seeded!');
+
   const usersToCreate = [
     {
       email: 'admin@example.com',
