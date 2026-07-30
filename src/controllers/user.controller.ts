@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import UserService from '../services/user.service';
 import { responseSuccess, responseError } from '../helpers/response.helper';
-import { parsePagination, pageFromRepo } from '../helpers/pagination.helper';
+import { parsePagination } from '../helpers/pagination.helper';
 
 export default class UserController {
   /**
