@@ -5,6 +5,7 @@ export default class UserRepository {
   static async findById(id: string) {
     return prisma.users.findFirst({
       where: { id: id, accountStatus: { not: 'DEACTIVATED' } },
+      include: { roles: true },
     });
   }
 
@@ -30,6 +31,7 @@ export default class UserRepository {
     const [users, total] = await Promise.all([
       prisma.users.findMany({
         where: { accountStatus: { not: 'DEACTIVATED' } },
+        include: { roles: true },
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -45,6 +47,17 @@ export default class UserRepository {
       data: {
         roles: {
           connect: { roleName: roleName }, // links the role without removing existing ones
+        },
+      },
+    });
+  }
+
+  static async setUserRoles(userId: string, roleNames: string[]) {
+    return prisma.users.update({
+      where: { id: userId },
+      data: {
+        roles: {
+          set: roleNames.map((name) => ({ roleName: name })),
         },
       },
     });
