@@ -9,9 +9,9 @@ export async function seedUsers(prisma: PrismaClient) {
     await prisma.roles.upsert({
       where: { roleName },
       update: {},
-      create: { 
-        roleName, 
-        description: `Default ${roleName} role` 
+      create: {
+        roleName,
+        description: `Default ${roleName} role`,
       },
     });
   }

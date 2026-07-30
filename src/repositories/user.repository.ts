@@ -36,7 +36,7 @@ export default class UserRepository {
           email: true,
           firstName: true,
           lastName: true,
-          roles: { select: { id: true, roleName: true} },
+          roles: { select: { id: true, roleName: true } },
           avatar: { select: { fileUrl: true } },
           createdAt: true,
           updatedAt: true,

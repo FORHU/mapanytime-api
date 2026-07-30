@@ -35,7 +35,7 @@ export default class RbacRepository {
       roleId,
       permissionId: id,
     }));
-    
+
     return prisma.rolePermissions.createMany({
       data: mappings,
     });

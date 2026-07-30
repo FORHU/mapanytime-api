@@ -20,7 +20,7 @@ export default class RbacService {
     const permissionIds = permissions.map((p) => p.id);
 
     await RbacRepository.clearRolePermissions(roleId);
-    
+
     if (permissionIds.length > 0) {
       await RbacRepository.assignPermissionsToRole(roleId, permissionIds);
     }
