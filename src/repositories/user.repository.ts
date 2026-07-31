@@ -41,7 +41,6 @@ export default class UserRepository {
           createdAt: true,
           updatedAt: true,
         },
-        // include: { roles: true },
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
@@ -56,7 +55,7 @@ export default class UserRepository {
       where: { id: userId },
       data: {
         roles: {
-          connect: { roleName: roleName }, // links the role without removing existing ones
+          connect: { roleName: roleName }, 
         },
       },
     });
@@ -70,6 +69,7 @@ export default class UserRepository {
           set: roleNames.map((name) => ({ roleName: name })),
         },
       },
+      include: { roles: true },
     });
   }
 }

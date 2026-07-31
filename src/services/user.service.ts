@@ -48,8 +48,8 @@ export default class UserService {
     if (!user) throw { status: 404, message: 'User not found' };
     if (!targetRole) throw { status: 400, message: 'Invalid role provided' };
 
-    const alreadyHasRole = user.roles.some((r: Roles) => r.roleName === roleName);
-    if (alreadyHasRole) return null;
+    const hasRole = user.roles.some((r: Roles) => r.roleName === roleName);
+    if (hasRole) throw { status: 400, message: 'User already has this role' };
 
     return UserRepository.addRoleToUser(userId, roleName);
   }
@@ -65,6 +65,8 @@ export default class UserService {
       throw { status: 400, message: 'One or more roles are invalid' };
     }
 
-    return UserRepository.setUserRoles(userId, roleNames);
+    const updatedUser = await UserRepository.setUserRoles(userId, roleNames);
+    const { passwordHash: _, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
   }
 }
