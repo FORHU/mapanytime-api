@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import UserService from '../services/user.service';
 import { responseSuccess, responseError } from '../helpers/response.helper';
-import { parsePagination, pageFromRepo } from '../helpers/pagination.helper';
+import { parsePagination } from '../helpers/pagination.helper';
 
 export default class UserController {
   /**
@@ -27,7 +27,7 @@ export default class UserController {
     try {
       const { page, limit } = parsePagination(req.query as Record<string, unknown>);
       const result = await UserService.listUsers(page, limit);
-      return responseSuccess(res, 200, pageFromRepo(result));
+      return responseSuccess(res, 200, result);
     } catch (error) {
       next(error);
     }
@@ -48,7 +48,7 @@ export default class UserController {
   static async assignRole(req: Request, res: Response, next: NextFunction) {
     try {
       // Use Id (capital I) to match your getMe method
-      const userId = req.user?.id;
+      const userId = req.body.userId || req.user?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       const { roleName } = req.body;

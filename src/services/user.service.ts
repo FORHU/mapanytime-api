@@ -14,7 +14,11 @@ export default class UserService {
   }
 
   static async listUsers(page?: number, limit?: number) {
-    return UserRepository.findAll(page, limit);
+    const result = await UserRepository.findAll(page, limit);
+
+    return {
+      ...result,
+    };
   }
 
   static async createUser(data: Prisma.UsersUncheckedCreateInput) {
@@ -44,9 +48,23 @@ export default class UserService {
     if (!user) throw { status: 404, message: 'User not found' };
     if (!targetRole) throw { status: 400, message: 'Invalid role provided' };
 
-    const hasRole = user.roles.some((r: Roles) => r.roleName === roleName);
-    if (hasRole) throw { status: 400, message: 'User already has this role' };
+    const alreadyHasRole = user.roles.some((r: Roles) => r.roleName === roleName);
+    if (alreadyHasRole) return null;
 
     return UserRepository.addRoleToUser(userId, roleName);
+  }
+
+  static async setUserRoles(userId: string, roleNames: string[]) {
+    const user = await prisma.users.findUnique({ where: { id: userId } });
+    if (!user) throw { status: 404, message: 'User not found' };
+
+    const foundRoles = await prisma.roles.findMany({
+      where: { roleName: { in: roleNames } },
+    });
+    if (foundRoles.length !== roleNames.length) {
+      throw { status: 400, message: 'One or more roles are invalid' };
+    }
+
+    return UserRepository.setUserRoles(userId, roleNames);
   }
 }
