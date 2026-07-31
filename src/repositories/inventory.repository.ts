@@ -2,7 +2,7 @@ import { prisma } from '../utils/prisma';
 
 export default class InventoryRepository {
   static async restock(productId: string, addedQuantity: number) {
-    return prisma.inventory.update({
+    return prisma.inventory.updateMany({
       where: { productId: productId },
       data: {
         quantityOnHand: { increment: addedQuantity },
@@ -11,7 +11,7 @@ export default class InventoryRepository {
   }
 
   static async getInventoryByProductId(productId: string) {
-    return prisma.inventory.findUnique({
+    return prisma.inventory.findFirst({
       where: { productId },
       select: {
         productId: true,

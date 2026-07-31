@@ -475,19 +475,36 @@ export async function seedStores(prisma: PrismaClient) {
   const categories = await prisma.categories.findMany();
   const catByName = new Map(categories.map((c) => [c.name, c]));
 
-  // Ensure the known test buyers have a Buyers profile so they can place orders.
+  // Ensure the known test buyers have a Buyers profile and default address.
   for (const email of ['buyer@example.com', 'dual@example.com']) {
     const user = await prisma.users.findUnique({ where: { email } });
     if (!user) continue;
-    const existing = await prisma.buyers.findUnique({ where: { userId: user.id } });
-    if (!existing) {
-      await prisma.buyers.create({
+    let buyer = await prisma.buyers.findUnique({ where: { userId: user.id } });
+    if (!buyer) {
+      buyer = await prisma.buyers.create({
         data: {
           userId: user.id,
           displayName: `${user.firstName ?? 'Buyer'} ${user.lastName ?? ''}`.trim(),
         },
       });
       console.log(`✅ Buyer profile ready for: ${email}`);
+    }
+    const hasAddress = await prisma.buyerAddresses.findFirst({ where: { buyerId: buyer.id } });
+    if (!hasAddress) {
+      await prisma.buyerAddresses.create({
+        data: {
+          buyerId: buyer.id,
+          addressType: 'SHIPPING',
+          recipientName: `${user.firstName ?? 'Buyer'} ${user.lastName ?? ''}`.trim(),
+          phoneNumber: '+639171234567',
+          streetAddress: 'Session Road, Baguio City',
+          city: 'Baguio City',
+          province: 'Benguet',
+          zipCode: '2600',
+          country: 'Philippines',
+          isDefault: true,
+        },
+      });
     }
   }
 
@@ -515,12 +532,22 @@ export async function seedStores(prisma: PrismaClient) {
       create: { userId: user.id, applicationStatus: 'APPROVED' },
     });
 
+    const storeSlug = s.storeName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+
     // Store + location.
     const store = await prisma.stores.create({
       data: {
         sellerId: seller.id,
         storeName: s.storeName,
+        slug: `${storeSlug}-${Math.floor(1000 + Math.random() * 9000)}`,
         description: s.description,
+        email: s.ownerEmail,
+        phone: '+639170001122',
+        returnPolicy: '7 days easy return & replacement for defective items.',
+        shippingPolicy: 'Same-day store pickup and local delivery available within 15km.',
         isActive: true,
         storeLocations: {
           create: {
@@ -556,7 +583,7 @@ export async function seedStores(prisma: PrismaClient) {
       }
       if (category.parentId) parentIds.add(category.parentId);
 
-      await prisma.products.create({
+      const product = await prisma.products.create({
         data: {
           storeId: store.id,
           categoryId: category.id,
@@ -565,14 +592,54 @@ export async function seedStores(prisma: PrismaClient) {
           description: `${p.name} available at ${s.storeName}.`,
           price: p.price,
           isActive: true,
+          status: 'APPROVED',
           listedAt: new Date(),
-          inventory: {
+          supplierProducts: {
             create: {
-              storeId: store.id,
-              quantityOnHand: p.stock,
-              quantityReserved: 0,
+              sellerId: seller.id,
+              supplierSku: `SKU-${store.id.slice(-4)}-${Math.floor(1000 + Math.random() * 9000)}`,
+              costPrice: Math.round(p.price * 0.7),
+              minimumOrderQty: 1,
+              supplyLeadDays: 2,
+              isAvailable: true,
             },
           },
+          variants: {
+            create: {
+              sku: `VAR-${store.id.slice(-4)}-${Math.floor(10000 + Math.random() * 90000)}`,
+              variantName: 'Standard',
+              price: p.price,
+              costPrice: Math.round(p.price * 0.7),
+              isActive: true,
+            },
+          },
+        },
+        include: { variants: true },
+      });
+
+      const defaultVariant = product.variants[0];
+
+      const inv = await prisma.inventory.create({
+        data: {
+          productId: product.id,
+          variantId: defaultVariant?.id,
+          storeId: store.id,
+          quantityOnHand: p.stock,
+          quantityReserved: 0,
+        },
+      });
+
+      await prisma.inventoryMovements.create({
+        data: {
+          inventoryId: inv.id,
+          productId: product.id,
+          variantId: defaultVariant?.id,
+          storeId: store.id,
+          movementType: 'RESTOCK',
+          quantityDelta: p.stock,
+          previousOnHand: 0,
+          newOnHand: p.stock,
+          note: 'Initial catalog stock ingestion.',
         },
       });
     }

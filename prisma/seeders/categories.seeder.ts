@@ -154,7 +154,7 @@ export async function seedCategories(prisma: PrismaClient) {
 
   for (const parent of categoriesToSeed) {
     // Upsert parent category (idempotent)
-    const parentCategory = await prisma.categories.upsert({
+    const rootCategory = await prisma.categories.upsert({
       where: { name: parent.name },
       update: { description: parent.description },
       create: {
@@ -163,12 +163,23 @@ export async function seedCategories(prisma: PrismaClient) {
       },
     });
 
+    await prisma.commissionRules.upsert({
+      where: { categoryId: rootCategory.id },
+      update: { commissionRate: 0.05, fixedFee: 10.0 },
+      create: {
+        categoryId: rootCategory.id,
+        commissionRate: 0.05,
+        fixedFee: 10.0,
+        isActive: true,
+      },
+    });
+
     // Upsert each child sub-category and link to parent
     for (const subName of parent.subCategories) {
       await prisma.categories.upsert({
         where: { name: subName },
-        update: { parentId: parentCategory.id },
-        create: { name: subName, parentId: parentCategory.id },
+        update: { parentId: rootCategory.id },
+        create: { name: subName, parentId: rootCategory.id },
       });
     }
   }
