@@ -4,10 +4,13 @@ import { authenticate } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
+// Public buyer catalog
+router.get('/all', ProductController.getAllProducts);
+
+// Authenticated routes
 router.use(authenticate);
 router.post('/', ProductController.create);
 router.get('/', ProductController.index);
-router.get('/all', ProductController.getAllProducts);
 router.put('/:id', ProductController.update);
 router.delete('/:id', ProductController.delete);
 

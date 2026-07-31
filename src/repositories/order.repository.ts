@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, ORDERSTATUS } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 
 export default class OrderRepository {
@@ -24,24 +24,27 @@ export default class OrderRepository {
     });
   }
 
-  // Executes the atomic status updates for completions and cancellations
+  // Executes atomic status updates for order state transitions
   static async updateOrderStatus(
     orderId: string,
-    orderStatus: 'COMPLETED' | 'CANCELLED',
-    paymentStatus: 'COMPLETED' | 'FAILED',
-    tx: Prisma.TransactionClient,
+    orderStatus: ORDERSTATUS,
+    paymentStatus?: 'PENDING' | 'COMPLETED' | 'FAILED',
+    tx?: Prisma.TransactionClient,
   ) {
-    return tx.orders.update({
+    const client = tx ?? prisma;
+    return client.orders.update({
       where: { id: orderId },
       data: {
         status: orderStatus,
-        completedAt: orderStatus === 'COMPLETED' ? new Date() : null,
-        payment: {
-          updateMany: {
-            where: { orderId: orderId },
-            data: { status: paymentStatus },
+        completedAt: orderStatus === 'COMPLETED' ? new Date() : undefined,
+        ...(paymentStatus && {
+          payment: {
+            updateMany: {
+              where: { orderId: orderId },
+              data: { status: paymentStatus },
+            },
           },
-        },
+        }),
       },
       include: { orderitems: true, payment: true },
     });

@@ -92,3 +92,39 @@ paths:
           description: Validation Error
         '401':
           description: Unauthorized access
+
+  /v1/orders/{id}/fulfill:
+    post:
+      summary: Update order fulfillment status
+      description: Allows a seller to advance order status through the fulfillment stages (PREPARING, READY_FOR_PICKUP, COMPLETED, CANCELLED).
+      tags: [Orders]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Order ID to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [PREPARING, PROCESSING, READY_FOR_PICKUP, COMPLETED, CANCELLED]
+                  example: PREPARING
+      responses:
+        '200':
+          description: Order status updated successfully
+        '400':
+          description: Invalid status or validation error
+        '401':
+          description: Unauthorized access
+        '403':
+          description: User does not own the order store

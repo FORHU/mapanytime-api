@@ -245,3 +245,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/stores/{id}:
+    get:
+      summary: Get store details by ID
+      description: Fetches a single active store by ID along with its locations, hours, and categories.
+      tags: [Stores]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Unique store ID
+      responses:
+        '200':
+          description: Store details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '400':
+          description: Store ID is required
+        '404':
+          description: Store not found or inactive

@@ -31,12 +31,16 @@ export default class OrderController {
       const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized access.');
 
-      const buyer = await prisma.buyers.findUnique({
+      let buyer = await prisma.buyers.findUnique({
         where: { userId: userId },
       });
 
       if (!buyer) {
-        return responseError(res, 403, 'Only registered buyers can create orders.');
+        const user = await prisma.users.findUnique({ where: { id: userId } });
+        const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Buyer';
+        buyer = await prisma.buyers.create({
+          data: { userId: userId, displayName },
+        });
       }
 
       // Retrieve the trusted storeId and items from the Redis server cache
@@ -149,6 +153,28 @@ export default class OrderController {
 
       const data = await OrderService.getStoreOrders(userId, storeId);
       return responseSuccess(res, 200, data, 'Seller store orders fetched successfully');
+    } catch (error) {
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
+      next(error);
+    }
+  }
+
+  static async fulfillOrder(req: Request, res: Response, next: NextFunction) {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!id) return responseError(res, 400, 'Order ID is required.');
+    if (!status) return responseError(res, 400, 'Fulfillment status is required.');
+
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
+      const data = await OrderService.updateFulfillmentStatus(userId, id, status);
+      return responseSuccess(res, 200, data, `Order status updated to ${status}`);
     } catch (error) {
       const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
       if (err.status) {

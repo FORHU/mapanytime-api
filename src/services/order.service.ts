@@ -2,7 +2,7 @@ import OrderRepository from '../repositories/order.repository';
 import ProductRepository from '../repositories/product.repository';
 import { prisma } from '../utils/prisma';
 import { emitNotificationToUser } from '../infrastructure/socket';
-import { PAYMENTMETHOD, FULLFILLMENTTYPE } from '@prisma/client';
+import { PAYMENTMETHOD, FULLFILLMENTTYPE, ORDERSTATUS } from '@prisma/client';
 
 export default class OrderService {
   static async createOrder(payload: {
@@ -95,15 +95,32 @@ export default class OrderService {
     // After commit: push a realtime "new order" notification to the seller who
     // owns the store. Best-effort — a socket failure must not fail the order.
     try {
-      const store = await prisma.stores.findUnique({
-        where: { id: order.storeId },
-        include: { seller: { select: { userId: true } } },
-      });
+      const [store, buyer] = await Promise.all([
+        prisma.stores.findUnique({
+          where: { id: order.storeId },
+          include: { seller: { select: { userId: true } } },
+        }),
+        prisma.buyers.findUnique({
+          where: { id: order.buyerId },
+          select: { userId: true },
+        }),
+      ]);
+
       if (store?.seller?.userId) {
         emitNotificationToUser(store.seller.userId, {
           id: order.id,
           title: 'New order',
           body: `You have a new order worth ₱${order.totalAmount.toLocaleString()}.`,
+          metadata: { orderId: order.id, storeId: order.storeId, type: 'ORDER_CREATED' },
+          sentAt: new Date().toISOString(),
+        });
+      }
+
+      if (buyer?.userId) {
+        emitNotificationToUser(buyer.userId, {
+          id: order.id,
+          title: 'Order Placed',
+          body: `Your order #${order.id.slice(0, 8).toUpperCase()} has been placed successfully.`,
           metadata: { orderId: order.id, storeId: order.storeId, type: 'ORDER_CREATED' },
           sentAt: new Date().toISOString(),
         });
@@ -148,8 +165,13 @@ export default class OrderService {
         throw new Error('No payment record found for this order.');
       }
 
-      if (payment.status !== 'COMPLETED') {
-        throw new Error(`Cannot fulfill order. Payment status is currently: ${payment.status}.`);
+      // For CASH_ON_DELIVERY or merchant fulfillment, completing the order settles the payment.
+      if (payment.status !== 'COMPLETED' && payment.paymentMethod !== 'CASH_ON_DELIVERY') {
+        // Automatically settle payment status to COMPLETED upon seller order fulfillment
+        await tx.payments.update({
+          where: { id: payment.id },
+          data: { status: 'COMPLETED' },
+        });
       }
 
       for (const item of order.orderitems) {
@@ -223,12 +245,16 @@ export default class OrderService {
   }
 
   static async getMyOrders(userId: string) {
-    const buyer = await prisma.buyers.findUnique({
+    let buyer = await prisma.buyers.findUnique({
       where: { userId: userId },
     });
 
     if (!buyer) {
-      throw { status: 403, message: 'Only registered buyers can view orders.' };
+      const user = await prisma.users.findUnique({ where: { id: userId } });
+      const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'Buyer';
+      buyer = await prisma.buyers.create({
+        data: { userId: userId, displayName },
+      });
     }
 
     return OrderRepository.getOrdersByBuyerId(buyer.id);
@@ -255,5 +281,67 @@ export default class OrderService {
     }
 
     return OrderRepository.getOrdersByStoreId(storeId);
+  }
+
+  static async updateFulfillmentStatus(userId: string, orderId: string, inputStatus: string) {
+    const statusUpper = (inputStatus || '').toUpperCase();
+    let normalizedStatus: ORDERSTATUS;
+
+    if (['PREPARING', 'PROCESSING'].includes(statusUpper)) {
+      normalizedStatus = 'PROCESSING';
+    } else if (['READY_FOR_PICKUP', 'READY'].includes(statusUpper)) {
+      normalizedStatus = 'READY_FOR_PICKUP';
+    } else if (['COMPLETED', 'PICKED_UP', 'SHIPPED', 'FULFILLED'].includes(statusUpper)) {
+      normalizedStatus = 'COMPLETED';
+    } else if (['CANCELLED', 'CANCELED'].includes(statusUpper)) {
+      normalizedStatus = 'CANCELLED';
+    } else {
+      throw {
+        status: 400,
+        message: `Invalid status '${inputStatus}'. Allowed: PREPARING, READY_FOR_PICKUP, COMPLETED, CANCELLED`,
+      };
+    }
+
+    const order = await prisma.orders.findUnique({
+      where: { id: orderId },
+      include: { buyer: true },
+    });
+    if (!order) throw { status: 404, message: 'Order not found.' };
+
+    if (normalizedStatus === 'COMPLETED') {
+      return this.completeOrder(userId, orderId, order.storeId);
+    }
+    if (normalizedStatus === 'CANCELLED') {
+      return this.cancelOrder(userId, orderId);
+    }
+
+    // Verify user owns the store for this order
+    const seller = await prisma.sellers.findUnique({ where: { userId } });
+    if (!seller) throw { status: 403, message: 'Only registered sellers can update order status.' };
+    const store = await prisma.stores.findUnique({ where: { id: order.storeId } });
+    if (!store || store.sellerId !== seller.id) {
+      throw { status: 403, message: 'Unauthorized. You do not own the store for this order.' };
+    }
+
+    const updated = await OrderRepository.updateOrderStatus(orderId, normalizedStatus);
+
+    try {
+      const titles: Record<string, string> = {
+        PROCESSING: 'Order is being prepared',
+        READY_FOR_PICKUP: 'Order is ready for pickup!',
+      };
+      const title = titles[normalizedStatus] || `Order status updated to ${normalizedStatus}`;
+      emitNotificationToUser(order.buyer.userId, {
+        id: orderId,
+        title,
+        body: `Your order status changed to ${normalizedStatus.replace(/_/g, ' ')}.`,
+        metadata: { orderId, status: normalizedStatus, type: 'ORDER_UPDATED' },
+        sentAt: new Date().toISOString(),
+      });
+    } catch {
+      // non-critical socket emission
+    }
+
+    return updated;
   }
 }
