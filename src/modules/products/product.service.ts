@@ -41,7 +41,19 @@ export default class ProductService {
       ...productFields,
       store: { connect: { id: storeId } },
       category: { connect: { id: payload.categoryId } },
-      tags: tags && tags.length > 0 ? { create: tags.map((name) => ({ name })) } : undefined,
+      tags:
+        tags && tags.length > 0
+          ? {
+              create: tags.map((name) => ({
+                tag: {
+                  connectOrCreate: {
+                    where: { name },
+                    create: { name },
+                  },
+                },
+              })),
+            }
+          : undefined,
     });
 
     await prisma.inventory.create({

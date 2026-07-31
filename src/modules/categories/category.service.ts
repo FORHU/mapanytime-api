@@ -43,7 +43,7 @@ export default class CategoryService {
     const category = await prisma.categories.findUnique({
       where: { id: categoryId },
       include: {
-        children: { take: 1 },
+        subCategories: { where: { deletedAt: null }, take: 1 },
         products: { take: 1 },
         stores: { take: 1 },
       },
@@ -52,7 +52,9 @@ export default class CategoryService {
     if (!category) throw { status: 404, message: 'Category not found.' };
 
     const hasDependencies =
-      category.children.length > 0 || category.products.length > 0 || category.stores.length > 0;
+      category.subCategories.length > 0 ||
+      category.products.length > 0 ||
+      category.stores.length > 0;
 
     if (hasDependencies) {
       await CategoryRepository.softDeleteCategory(categoryId);

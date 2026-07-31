@@ -18,7 +18,7 @@ model Users {
   firstName       String?
   lastName        String?
   phoneNumber     String?
-  avatarId        String?           @unique
+  avatarFileId    String?           @unique
   accountStatus   USERACCOUNTSTATUS @default(ACTIVE)
   isEmailVerified Boolean           @default(false)
   isOnBoarding    Boolean           @default(false)
@@ -28,7 +28,7 @@ model Users {
   updatedAt       DateTime          @updatedAt
 
   roles             Roles[]                 @relation("UserRoles")
-  avatar            Files?                  @relation(fields: [avatarId], references: [id])
+  avatarFile        Files?                  @relation("UserAvatar", fields: [avatarFileId], references: [id])
   session           Session[]
   seller            Sellers?
   buyer             Buyers?
@@ -94,17 +94,25 @@ model Session {
 }
 
 model Files {
-  id        String      @id @default(cuid())
-  userId    String
-  fileName  String
-  fileUrl   String
-  metaData  Json?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  documents Documents[]
-  products  Products[]
-  users     Users?
+  id              String    @id @default(cuid())
+  filename        String
+  originalName    String
+  mimeType        String
+  size            Int
+  storageProvider String    @default("S3")
+  bucket          String?
+  path            String
+  checksum        String?
+  uploadedById    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  avatarUser    Users?          @relation("UserAvatar")
+  documents     Documents[]
   productImages ProductImages[]
+  logoStores    Stores[]        @relation("StoreLogo")
+  bannerStores  Stores[]        @relation("StoreBanner")
 }
 
 model Sellers {
@@ -124,11 +132,11 @@ model Sellers {
 }
 
 model Buyers {
-  id          String   @id @default(cuid())
-  userId      String   @unique
-  createdAt   DateTime @default(now())
+  id          String    @id @default(cuid())
+  userId      String    @unique
+  createdAt   DateTime  @default(now())
   displayName String
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
   users          Users            @relation(fields: [userId], references: [id])
@@ -203,21 +211,25 @@ model Stores {
   sellerId              String
   storeName             String
   description           String?
-  logo                  String?
-  banner                String?
+  logoId                String?
+  bannerId              String?
   slug                  String?                 @unique
   phone                 String?
   email                 String?
   returnPolicy          String?
   shippingPolicy        String?
   socialLinks           Json?
-  rating                Float                   @default(0)
+  ratingAverage         Float                   @default(0)
+  ratingCount           Int                     @default(0)
   followersCount        Int                     @default(0)
   vacationMode          Boolean                 @default(false)
   isActive              Boolean                 @default(false)
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
   deletedAt             DateTime?
+
+  logoFile              Files?                  @relation("StoreLogo", fields: [logoId], references: [id])
+  bannerFile            Files?                  @relation("StoreBanner", fields: [bannerId], references: [id])
   documentVerifications DocumentVerifications[]
   products              Products[]
   storeHours            StoreHours[]
@@ -234,15 +246,17 @@ model Stores {
 }
 
 model StoreHours {
-  id        String   @id @default(cuid())
-  storeId   String
-  dayOfWeek Int
-  openTime  String
-  closeTime String
-  isClosed  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  store     Stores   @relation(fields: [storeId], references: [id])
+  id               String   @id @default(cuid())
+  storeId          String
+  dayOfWeek        Int
+  openMinutes      Int      // minutes since midnight, e.g. 480 = 08:00
+  closeMinutes     Int      // minutes since midnight, e.g. 1020 = 17:00
+  isClosed         Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  store            Stores   @relation(fields: [storeId], references: [id])
+
+  @@unique([storeId, dayOfWeek])
 }
 
 model StoreLocations {
@@ -273,6 +287,10 @@ model StoreReviews {
   updatedAt DateTime @updatedAt
   store     Stores   @relation(fields: [storeId], references: [id])
   buyer     Buyers   @relation(fields: [buyerId], references: [id])
+
+  @@unique([storeId, buyerId])
+  @@index([storeId])
+  @@index([buyerId])
 }
 
 // =========================================================================
@@ -291,12 +309,13 @@ enum PRODUCTSTATUS {
 model Products {
   id            String        @id @default(cuid())
   storeId       String
-  productFileId String?
   categoryId    String?
   name          String
   brand         String?
   description   String?
   price         Decimal       @db.Decimal(12, 2)
+  ratingAverage Float         @default(0)
+  ratingCount   Int           @default(0)
   isActive      Boolean       @default(false)
   status        PRODUCTSTATUS @default(APPROVED)
   totalSold     Int           @default(0)
@@ -306,9 +325,8 @@ model Products {
   deletedAt     DateTime?
 
   store              Stores               @relation(fields: [storeId], references: [id])
-  productFile        Files?               @relation(fields: [productFileId], references: [id])
   category           Categories?          @relation(fields: [categoryId], references: [id])
-  tags               Tags[]
+  tags               ProductTags[]
   inventory          Inventory[]
   orderitems         OrderItems[]
   productImages      ProductImages[]
@@ -409,30 +427,41 @@ model SupplierProducts {
 }
 
 model Categories {
-  id             String           @id @default(cuid())
-  name           String           @unique
-  description    String?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  isActive       Boolean          @default(true)
-  parentId       String?
-  parent         Categories?      @relation("CategoryHierarchy", fields: [parentId], references: [id])
-  children       Categories[]     @relation("CategoryHierarchy")
-  products       Products[]
-  stores         Stores[]         @relation("CategoriesToStores")
-  commissionRule CommissionRules?
+  id              String           @id @default(cuid())
+  parentId        String?
+  name            String
+  description     String?
+  status          CategoryStatus   @default(APPROVED)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+  parent          Categories?      @relation("CategoryToParent", fields: [parentId], references: [id])
+  subCategories   Categories[]     @relation("CategoryToParent")
+  products        Products[]
+  stores          Stores[]         @relation("CategoriesToStores")
+  commissionRules CommissionRules?
 
+  @@unique([parentId, name])
   @@index([parentId])
-  @@index([name])
+  @@index([status])
 }
 
 model Tags {
-  id        String   @id @default(cuid())
+  id          String        @id @default(cuid())
+  name        String        @unique
+  createdAt   DateTime      @default(now())
+  productTags ProductTags[]
+}
+
+model ProductTags {
   productId String
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  product   Products @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tagId     String
+
+  product Products @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tag     Tags     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([productId, tagId])
+  @@index([tagId])
 }
 
 enum ApplicationStatus {
@@ -458,25 +487,31 @@ enum CategoryStatus {
 // =========================================================================
 
 model Orders {
-  id                   String           @id @default(cuid())
-  buyerId              String
-  storeId              String
-  totalAmount          Decimal          @db.Decimal(12, 2)
-  subtotalAmount       Decimal          @default(0) @db.Decimal(12, 2)
-  shippingAmount       Decimal          @default(0) @db.Decimal(12, 2)
-  discountAmount       Decimal          @default(0) @db.Decimal(12, 2)
-  taxAmount            Decimal          @default(0) @db.Decimal(12, 2)
-  marketplaceFeeAmount Decimal          @default(0) @db.Decimal(12, 2)
-  sellerNetAmount      Decimal          @default(0) @db.Decimal(12, 2)
-  paymentFeeAmount     Decimal          @default(0) @db.Decimal(12, 2)
-  currency             String           @default("PHP")
-  version              Int              @default(0)
-  type                 FULLFILLMENTTYPE @default(PICKUP)
-  status               ORDERSTATUS      @default(PENDING)
-  pickupAt             DateTime?
-  completedAt          DateTime?
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
+  id                    String           @id @default(cuid())
+  buyerId               String
+  storeId               String
+  storeName             String?
+  sellerName            String?
+  storeAddressSnapshot  String?
+  sellerPhoneSnapshot   String?
+  storeEmailSnapshot    String?
+  totalAmount           Decimal          @db.Decimal(12, 2)
+  subtotalAmount        Decimal          @default(0) @db.Decimal(12, 2)
+  shippingAmount        Decimal          @default(0) @db.Decimal(12, 2)
+  discountAmount        Decimal          @default(0) @db.Decimal(12, 2)
+  taxAmount             Decimal          @default(0) @db.Decimal(12, 2)
+  marketplaceFeeAmount  Decimal          @default(0) @db.Decimal(12, 2)
+  sellerNetAmount       Decimal          @default(0) @db.Decimal(12, 2)
+  paymentFeeAmount      Decimal          @default(0) @db.Decimal(12, 2)
+  currency              String           @default("PHP")
+  version               Int              @default(0)
+  type                  FULLFILLMENTTYPE @default(PICKUP)
+  status                ORDERSTATUS      @default(PENDING)
+  pickupAt              DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  deletedAt             DateTime?
 
   buyer          Buyers           @relation(fields: [buyerId], references: [id])
   store          Stores           @relation(fields: [storeId], references: [id])
@@ -546,22 +581,26 @@ model ProductImages {
   variant ProductVariants? @relation(fields: [variantId], references: [id], onDelete: Cascade)
   file    Files            @relation(fields: [fileId], references: [id])
 
+  @@unique([productId, variantId, isPrimary])
   @@index([productId])
   @@index([variantId])
 }
 
+// Rule: simple product → variantId NULL, productId required.
+// Variant product → variantId required, productId must match variant.productId (enforced by app).
 model Inventory {
-  id               String   @id @default(cuid())
-  productId        String
+  id               String    @id @default(cuid())
+  productId        String?
   variantId        String?
   storeId          String
-  quantityOnHand   Int      @default(0)
-  quantityReserved Int      @default(0)
-  version          Int      @default(0)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  quantityOnHand   Int       @default(0)
+  quantityReserved Int       @default(0)
+  version          Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
 
-  product   Products             @relation(fields: [productId], references: [id])
+  product   Products?            @relation(fields: [productId], references: [id])
   variant   ProductVariants?     @relation(fields: [variantId], references: [id], onDelete: Cascade)
   store     Stores               @relation(fields: [storeId], references: [id])
   movements InventoryMovements[]
@@ -591,6 +630,7 @@ model Payments {
   paidAt           DateTime?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
+  deletedAt        DateTime?
 
   order Orders @relation(fields: [orderId], references: [id])
 
@@ -605,9 +645,14 @@ enum PAYMENTMETHOD {
 
 enum PAYMENTSTATUS {
   PENDING
+  AUTHORIZED
+  CAPTURED
+  VOIDED
   COMPLETED
   FAILED
   REFUNDED
+  PARTIALLY_REFUNDED
+  REFUND_PENDING
 }
 
 model CommissionRules {
@@ -623,18 +668,18 @@ model CommissionRules {
 }
 
 model Settlements {
-  id                  String           @id @default(cuid())
-  orderId             String           @unique
-  sellerId            String
-  subtotalAmount      Decimal          @db.Decimal(12, 2)
-  commissionAmount    Decimal          @db.Decimal(12, 2)
-  paymentFeeAmount    Decimal          @db.Decimal(12, 2)
-  sellerNetAmount     Decimal          @db.Decimal(12, 2)
-  status              SETTLEMENTSTATUS @default(PENDING)
-  releaseEligibleAt   DateTime
-  settledAt           DateTime?
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
+  id                String           @id @default(cuid())
+  orderId           String           @unique
+  sellerId          String
+  subtotalAmount    Decimal          @db.Decimal(12, 2)
+  commissionAmount  Decimal          @db.Decimal(12, 2)
+  paymentFeeAmount  Decimal          @db.Decimal(12, 2)
+  sellerNetAmount   Decimal          @db.Decimal(12, 2)
+  status            SETTLEMENTSTATUS @default(PENDING)
+  releaseEligibleAt DateTime
+  settledAt         DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   order      Orders             @relation(fields: [orderId], references: [id])
   seller     Sellers            @relation(fields: [sellerId], references: [id])
@@ -652,16 +697,16 @@ enum SETTLEMENTSTATUS {
 }
 
 model SellerPayouts {
-  id           String              @id @default(cuid())
+  id           String       @id @default(cuid())
   sellerId     String
-  payoutNumber String              @unique
-  totalAmount  Decimal             @db.Decimal(12, 2)
-  status       PAYOUTSTATUS        @default(PENDING)
+  payoutNumber String       @unique
+  totalAmount  Decimal      @db.Decimal(12, 2)
+  status       PAYOUTSTATUS @default(PENDING)
   payoutMethod String
   referenceNo  String?
   processedAt  DateTime?
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   seller Sellers             @relation(fields: [sellerId], references: [id])
   items  SellerPayoutItems[]
@@ -696,11 +741,13 @@ model BuyerAddresses {
   addressType   ADDRESSTYPE @default(SHIPPING)
   recipientName String
   phoneNumber   String
-  streetAddress String
+  addressLine1  String
+  addressLine2  String?
+  barangay      String?
   city          String
   province      String
   zipCode       String
-  country       String      @default("Philippines")
+  country       String
   isDefault     Boolean     @default(false)
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
@@ -730,18 +777,19 @@ model ProductReviews {
   product Products @relation(fields: [productId], references: [id], onDelete: Cascade)
   buyer   Buyers   @relation(fields: [buyerId], references: [id])
 
+  @@unique([productId, buyerId, orderId])
   @@index([productId])
   @@index([buyerId])
 }
 
 model Carts {
-  id        String      @id @default(cuid())
-  buyerId   String      @unique
+  id        String    @id @default(cuid())
+  buyerId   String    @unique
   expiresAt DateTime?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  buyer Buyers     @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  buyer Buyers      @relation(fields: [buyerId], references: [id], onDelete: Cascade)
   items CartItems[]
 }
 
@@ -765,10 +813,10 @@ model CartItems {
 }
 
 model Wishlists {
-  id        String          @id @default(cuid())
-  buyerId   String          @unique
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
+  id        String   @id @default(cuid())
+  buyerId   String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   buyer Buyers          @relation(fields: [buyerId], references: [id], onDelete: Cascade)
   items WishlistItems[]
@@ -797,10 +845,18 @@ enum INVENTORYMOVEMENTTYPE {
   ADJUSTMENT
 }
 
+enum INVENTORYREFERENCETYPE {
+  ORDER
+  RETURN
+  TRANSFER
+  RESTOCK
+  MANUAL_ADJUSTMENT
+}
+
 model InventoryMovements {
-  id             String                @id @default(cuid())
+  id             String                   @id @default(cuid())
   inventoryId    String
-  productId      String
+  productId      String?
   variantId      String?
   storeId        String
   movementType   INVENTORYMOVEMENTTYPE
@@ -808,12 +864,13 @@ model InventoryMovements {
   previousOnHand Int
   newOnHand      Int
   referenceId    String?
+  referenceType  INVENTORYREFERENCETYPE?
   note           String?
   createdById    String?
-  createdAt      DateTime              @default(now())
+  createdAt      DateTime                 @default(now())
 
   inventory Inventory        @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
-  product   Products         @relation(fields: [productId], references: [id])
+  product   Products?        @relation(fields: [productId], references: [id])
   variant   ProductVariants? @relation(fields: [variantId], references: [id])
   store     Stores           @relation(fields: [storeId], references: [id])
 
@@ -867,6 +924,11 @@ model ReturnRequests {
   reason       String
   status       RETURNSTATUS @default(PENDING)
   refundAmount Decimal      @db.Decimal(12, 2)
+  requestedAt  DateTime     @default(now())
+  approvedAt   DateTime?
+  receivedAt   DateTime?
+  refundedAt   DateTime?
+  closedAt     DateTime?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
@@ -880,30 +942,33 @@ model ReturnRequests {
 }
 
 model AuditLogs {
-  id         String   @id @default(cuid())
-  userId     String?
-  action     String
-  entityType String
-  entityId   String
-  metadata   Json?
-  ipAddress  String?
-  createdAt  DateTime @default(now())
+  id              String   @id @default(cuid())
+  performedById   String?
+  action          String
+  entityType      String
+  entityId        String
+  metadata        Json?
+  ipAddress       String?
+  userAgent       String?
+  requestId       String?
+  createdAt       DateTime @default(now())
 
-  @@index([userId])
+  @@index([performedById])
   @@index([entityType, entityId])
+  @@index([requestId])
 }
 
 model Notifications {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
   title     String
   body      String
   metadata  Json?
-  isRead    Boolean  @default(false)
-  createdAt DateTime @default(now())
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
 
   user Users @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@index([isRead])
+  @@index([readAt])
 }

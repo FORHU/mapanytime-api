@@ -74,9 +74,12 @@ export default class StoreService {
       for (const file of uploadedFiles) {
         const savedFile = await tx.files.create({
           data: {
-            userId: sellerId,
-            fileName: file.fileName,
-            fileUrl: file.fileUrl,
+            uploadedById: sellerId,
+            filename: file.fileName,
+            originalName: file.fileName,
+            mimeType: 'application/octet-stream',
+            size: 0,
+            path: file.fileUrl,
           },
         });
 

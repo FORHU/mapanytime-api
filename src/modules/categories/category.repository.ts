@@ -13,7 +13,7 @@ export default class CategoryRepository {
 
   static async getRootCategories() {
     return prisma.categories.findMany({
-      where: { parentId: null },
+      where: { parentId: null, deletedAt: null },
       select: {
         id: true,
         name: true,
@@ -23,14 +23,14 @@ export default class CategoryRepository {
 
   static async getSubCategoriesByParentId(parentId: string) {
     return prisma.categories.findMany({
-      where: { parentId: parentId },
-      include: { parent: true, children: true },
+      where: { parentId, deletedAt: null },
+      include: { parent: true, subCategories: true },
     });
   }
 
   static async getBranchCategories() {
     return prisma.categories.findMany({
-      where: { parentId: { not: null } },
+      where: { parentId: { not: null }, deletedAt: null },
       select: {
         id: true,
         name: true,
@@ -41,15 +41,17 @@ export default class CategoryRepository {
 
   static async getAllCategoryTrees() {
     return prisma.categories.findMany({
-      where: { parentId: null },
+      where: { parentId: null, deletedAt: null },
       select: {
         id: true,
         name: true,
-        children: {
+        subCategories: {
+          where: { deletedAt: null },
           select: {
             id: true,
             name: true,
-            children: {
+            subCategories: {
+              where: { deletedAt: null },
               select: { id: true, name: true },
             },
           },
@@ -66,6 +68,7 @@ export default class CategoryRepository {
     return prisma.categories.findFirst({
       where: {
         OR: [{ id: identifier }, { name: identifier }],
+        deletedAt: null,
       },
     });
   }
@@ -76,7 +79,7 @@ export default class CategoryRepository {
 
     while (queue.length > 0) {
       const children = await prisma.categories.findMany({
-        where: { parentId: { in: queue } },
+        where: { parentId: { in: queue }, deletedAt: null },
         select: { id: true },
       });
 
@@ -90,10 +93,7 @@ export default class CategoryRepository {
     return ids;
   }
 
-  static async updateCategory(
-    id: string,
-    data: { name?: string; description?: string; isActive?: boolean },
-  ) {
+  static async updateCategory(id: string, data: { name?: string; description?: string }) {
     return prisma.categories.update({
       where: { id },
       data,
@@ -103,7 +103,7 @@ export default class CategoryRepository {
   static async softDeleteCategory(id: string) {
     return prisma.categories.update({
       where: { id },
-      data: { isActive: false },
+      data: { deletedAt: new Date() },
     });
   }
 

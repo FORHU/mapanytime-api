@@ -72,7 +72,14 @@ export default class AuthSvc {
 
         const attachDoc = async (fileName: string, fileUrl: string, type: DOCUMENTTYPES) => {
           const file = await tx.files.create({
-            data: { userId: user.id, fileName, fileUrl },
+            data: {
+              uploadedById: user.id,
+              filename: fileName,
+              originalName: fileName,
+              mimeType: 'application/octet-stream',
+              size: 0,
+              path: fileUrl,
+            },
           });
           await tx.documents.create({
             data: {
@@ -118,7 +125,14 @@ export default class AuthSvc {
         if (data.sellerDocuments) {
           const attachDoc = async (fileName: string, fileUrl: string, type: DOCUMENTTYPES) => {
             const file = await tx.files.create({
-              data: { userId: user.id, fileName, fileUrl },
+              data: {
+                uploadedById: user.id,
+                filename: fileName,
+                originalName: fileName,
+                mimeType: 'application/octet-stream',
+                size: 0,
+                path: fileUrl,
+              },
             });
             await tx.documents.create({
               data: {

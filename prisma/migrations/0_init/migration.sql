@@ -32,7 +32,7 @@ CREATE TYPE "ORDERSTATUS" AS ENUM ('PENDING', 'PROCESSING', 'READY_FOR_PICKUP', 
 CREATE TYPE "PAYMENTMETHOD" AS ENUM ('BANK', 'E_WALLET', 'CASH_ON_DELIVERY');
 
 -- CreateEnum
-CREATE TYPE "PAYMENTSTATUS" AS ENUM ('PENDING', 'COMPLETED', 'FAILED', 'REFUNDED');
+CREATE TYPE "PAYMENTSTATUS" AS ENUM ('PENDING', 'AUTHORIZED', 'CAPTURED', 'VOIDED', 'COMPLETED', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED', 'REFUND_PENDING');
 
 -- CreateEnum
 CREATE TYPE "SETTLEMENTSTATUS" AS ENUM ('PENDING', 'HELD', 'RELEASED', 'REFUNDED');
@@ -124,10 +124,15 @@ CREATE TABLE "Session" (
 -- CreateTable
 CREATE TABLE "Files" (
     "id" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "fileName" TEXT NOT NULL,
-    "fileUrl" TEXT NOT NULL,
-    "metaData" JSONB,
+    "filename" TEXT NOT NULL,
+    "originalName" TEXT NOT NULL,
+    "mimeType" TEXT NOT NULL,
+    "size" INTEGER NOT NULL,
+    "storageProvider" TEXT NOT NULL DEFAULT 'S3',
+    "bucket" TEXT,
+    "path" TEXT NOT NULL,
+    "checksum" TEXT,
+    "uploadedById" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -203,15 +208,16 @@ CREATE TABLE "Stores" (
     "sellerId" TEXT NOT NULL,
     "storeName" TEXT NOT NULL,
     "description" TEXT,
-    "logo" TEXT,
-    "banner" TEXT,
+    "logoId" TEXT,
+    "bannerId" TEXT,
     "slug" TEXT,
     "phone" TEXT,
     "email" TEXT,
     "returnPolicy" TEXT,
     "shippingPolicy" TEXT,
     "socialLinks" JSONB,
-    "rating" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "ratingAverage" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "ratingCount" INTEGER NOT NULL DEFAULT 0,
     "followersCount" INTEGER NOT NULL DEFAULT 0,
     "vacationMode" BOOLEAN NOT NULL DEFAULT false,
     "isActive" BOOLEAN NOT NULL DEFAULT false,
@@ -271,12 +277,13 @@ CREATE TABLE "StoreReviews" (
 CREATE TABLE "Products" (
     "id" TEXT NOT NULL,
     "storeId" TEXT NOT NULL,
-    "productFileId" TEXT,
     "categoryId" TEXT,
     "name" TEXT NOT NULL,
     "brand" TEXT,
     "description" TEXT,
     "price" DECIMAL(12,2) NOT NULL,
+    "ratingAverage" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "ratingCount" INTEGER NOT NULL DEFAULT 0,
     "isActive" BOOLEAN NOT NULL DEFAULT false,
     "status" "PRODUCTSTATUS" NOT NULL DEFAULT 'APPROVED',
     "totalSold" INTEGER NOT NULL DEFAULT 0,
@@ -354,12 +361,13 @@ CREATE TABLE "SupplierProducts" (
 -- CreateTable
 CREATE TABLE "Categories" (
     "id" TEXT NOT NULL,
+    "parentId" TEXT,
     "name" TEXT NOT NULL,
     "description" TEXT,
+    "status" "CategoryStatus" NOT NULL DEFAULT 'APPROVED',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
-    "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "parentId" TEXT,
+    "deletedAt" TIMESTAMP(3),
 
     CONSTRAINT "Categories_pkey" PRIMARY KEY ("id")
 );
@@ -367,12 +375,18 @@ CREATE TABLE "Categories" (
 -- CreateTable
 CREATE TABLE "Tags" (
     "id" TEXT NOT NULL,
-    "productId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Tags_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ProductTags" (
+    "productId" TEXT NOT NULL,
+    "tagId" TEXT NOT NULL,
+
+    CONSTRAINT "ProductTags_pkey" PRIMARY KEY ("productId","tagId")
 );
 
 -- CreateTable
@@ -380,6 +394,8 @@ CREATE TABLE "Orders" (
     "id" TEXT NOT NULL,
     "buyerId" TEXT NOT NULL,
     "storeId" TEXT NOT NULL,
+    "storeName" TEXT,
+    "sellerName" TEXT,
     "totalAmount" DECIMAL(12,2) NOT NULL,
     "subtotalAmount" DECIMAL(12,2) NOT NULL DEFAULT 0,
     "shippingAmount" DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -396,6 +412,7 @@ CREATE TABLE "Orders" (
     "completedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "deletedAt" TIMESTAMP(3),
 
     CONSTRAINT "Orders_pkey" PRIMARY KEY ("id")
 );
@@ -444,6 +461,7 @@ CREATE TABLE "Inventory" (
     "version" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "deletedAt" TIMESTAMP(3),
 
     CONSTRAINT "Inventory_pkey" PRIMARY KEY ("id")
 );
@@ -465,6 +483,7 @@ CREATE TABLE "Payments" (
     "paidAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "deletedAt" TIMESTAMP(3),
 
     CONSTRAINT "Payments_pkey" PRIMARY KEY ("id")
 );
@@ -534,11 +553,13 @@ CREATE TABLE "BuyerAddresses" (
     "addressType" "ADDRESSTYPE" NOT NULL DEFAULT 'SHIPPING',
     "recipientName" TEXT NOT NULL,
     "phoneNumber" TEXT NOT NULL,
-    "streetAddress" TEXT NOT NULL,
+    "addressLine1" TEXT NOT NULL,
+    "addressLine2" TEXT,
+    "barangay" TEXT,
     "city" TEXT NOT NULL,
     "province" TEXT NOT NULL,
     "zipCode" TEXT NOT NULL,
-    "country" TEXT NOT NULL DEFAULT 'Philippines',
+    "country" TEXT NOT NULL,
     "isDefault" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -651,6 +672,11 @@ CREATE TABLE "ReturnRequests" (
     "reason" TEXT NOT NULL,
     "status" "RETURNSTATUS" NOT NULL DEFAULT 'PENDING',
     "refundAmount" DECIMAL(12,2) NOT NULL,
+    "requestedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "approvedAt" TIMESTAMP(3),
+    "receivedAt" TIMESTAMP(3),
+    "refundedAt" TIMESTAMP(3),
+    "closedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -679,6 +705,7 @@ CREATE TABLE "Notifications" (
     "body" TEXT NOT NULL,
     "metadata" JSONB,
     "isRead" BOOLEAN NOT NULL DEFAULT false,
+    "readAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Notifications_pkey" PRIMARY KEY ("id")
@@ -752,6 +779,15 @@ CREATE UNIQUE INDEX "StoreLocations_storeId_key" ON "StoreLocations"("storeId");
 CREATE INDEX "StoreLocations_latitude_longitude_idx" ON "StoreLocations"("latitude", "longitude");
 
 -- CreateIndex
+CREATE INDEX "StoreReviews_storeId_idx" ON "StoreReviews"("storeId");
+
+-- CreateIndex
+CREATE INDEX "StoreReviews_buyerId_idx" ON "StoreReviews"("buyerId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "StoreReviews_storeId_buyerId_key" ON "StoreReviews"("storeId", "buyerId");
+
+-- CreateIndex
 CREATE INDEX "Products_storeId_idx" ON "Products"("storeId");
 
 -- CreateIndex
@@ -794,13 +830,16 @@ CREATE INDEX "SupplierProducts_sellerId_idx" ON "SupplierProducts"("sellerId");
 CREATE INDEX "SupplierProducts_productId_idx" ON "SupplierProducts"("productId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Categories_name_key" ON "Categories"("name");
-
--- CreateIndex
 CREATE INDEX "Categories_parentId_idx" ON "Categories"("parentId");
 
 -- CreateIndex
-CREATE INDEX "Categories_name_idx" ON "Categories"("name");
+CREATE INDEX "Categories_status_idx" ON "Categories"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Tags_name_key" ON "Tags"("name");
+
+-- CreateIndex
+CREATE INDEX "ProductTags_tagId_idx" ON "ProductTags"("tagId");
 
 -- CreateIndex
 CREATE INDEX "Orders_buyerId_idx" ON "Orders"("buyerId");
@@ -885,6 +924,9 @@ CREATE INDEX "ProductReviews_productId_idx" ON "ProductReviews"("productId");
 
 -- CreateIndex
 CREATE INDEX "ProductReviews_buyerId_idx" ON "ProductReviews"("buyerId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ProductReviews_productId_buyerId_orderId_key" ON "ProductReviews"("productId", "buyerId", "orderId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Carts_buyerId_key" ON "Carts"("buyerId");
@@ -989,6 +1031,12 @@ ALTER TABLE "Documents" ADD CONSTRAINT "Documents_fileId_fkey" FOREIGN KEY ("fil
 ALTER TABLE "AdminInvites" ADD CONSTRAINT "AdminInvites_inviterId_fkey" FOREIGN KEY ("inviterId") REFERENCES "Users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Stores" ADD CONSTRAINT "Stores_logoId_fkey" FOREIGN KEY ("logoId") REFERENCES "Files"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Stores" ADD CONSTRAINT "Stores_bannerId_fkey" FOREIGN KEY ("bannerId") REFERENCES "Files"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Stores" ADD CONSTRAINT "Stores_sellerId_fkey" FOREIGN KEY ("sellerId") REFERENCES "Sellers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -1005,9 +1053,6 @@ ALTER TABLE "StoreReviews" ADD CONSTRAINT "StoreReviews_buyerId_fkey" FOREIGN KE
 
 -- AddForeignKey
 ALTER TABLE "Products" ADD CONSTRAINT "Products_storeId_fkey" FOREIGN KEY ("storeId") REFERENCES "Stores"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Products" ADD CONSTRAINT "Products_productFileId_fkey" FOREIGN KEY ("productFileId") REFERENCES "Files"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Products" ADD CONSTRAINT "Products_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "Categories"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1037,7 +1082,10 @@ ALTER TABLE "SupplierProducts" ADD CONSTRAINT "SupplierProducts_productId_fkey" 
 ALTER TABLE "Categories" ADD CONSTRAINT "Categories_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "Categories"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Tags" ADD CONSTRAINT "Tags_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Products"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ProductTags" ADD CONSTRAINT "ProductTags_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Products"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductTags" ADD CONSTRAINT "ProductTags_tagId_fkey" FOREIGN KEY ("tagId") REFERENCES "Tags"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Orders" ADD CONSTRAINT "Orders_buyerId_fkey" FOREIGN KEY ("buyerId") REFERENCES "Buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

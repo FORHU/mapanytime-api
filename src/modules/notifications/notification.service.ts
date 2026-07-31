@@ -44,7 +44,7 @@ export default class NotificationService {
   static async markAsRead(id: string, userId: string) {
     return prisma.notifications.updateMany({
       where: { id, userId },
-      data: { isRead: true },
+      data: { readAt: new Date() },
     });
   }
 }

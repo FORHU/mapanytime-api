@@ -1,6 +1,14 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 
+const userInclude = {
+  avatarFile: true,
+  roles: true,
+  seller: {
+    include: { stores: true },
+  },
+} satisfies Prisma.UsersInclude;
+
 export default class AuthRepo {
   static async createUser(data: Prisma.UsersCreateInput) {
     return prisma.users.create({
@@ -9,13 +17,7 @@ export default class AuthRepo {
         isEmailVerified: true,
         accountStatus: 'ACTIVE',
       },
-      include: {
-        avatar: true,
-        roles: true,
-        seller: {
-          include: { stores: true }, // Fetches the stores array
-        },
-      },
+      include: userInclude,
     });
   }
 
@@ -37,13 +39,7 @@ export default class AuthRepo {
   static async findUserByEmail(email: string) {
     return prisma.users.findFirst({
       where: { email: email, accountStatus: 'ACTIVE' },
-      include: {
-        avatar: true,
-        roles: true,
-        seller: {
-          include: { stores: true },
-        },
-      },
+      include: userInclude,
     });
   }
 
@@ -51,26 +47,14 @@ export default class AuthRepo {
     return prisma.users.update({
       where: { id: userId },
       data: { lastLoginAt: new Date(), updatedAt: new Date() },
-      include: {
-        avatar: true,
-        roles: true,
-        seller: {
-          include: { stores: true },
-        },
-      },
+      include: userInclude,
     });
   }
 
   static async findUserById(userId: string) {
     return prisma.users.findFirst({
       where: { id: userId, accountStatus: 'ACTIVE' },
-      include: {
-        avatar: true,
-        roles: true, // Added roles for consistency
-        seller: {
-          include: { stores: true },
-        },
-      },
+      include: userInclude,
     });
   }
 

@@ -95,9 +95,13 @@ export default class ProductRepository {
         where,
         include: {
           category: true,
-          tags: true,
+          tags: { include: { tag: true } },
           store: { select: { id: true, storeName: true } },
-          productFile: { select: { fileUrl: true } },
+          productImages: {
+            where: { isPrimary: true },
+            select: { file: { select: { path: true } } },
+            take: 1,
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip,
