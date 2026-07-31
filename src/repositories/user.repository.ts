@@ -55,7 +55,7 @@ export default class UserRepository {
       where: { id: userId },
       data: {
         roles: {
-          connect: { roleName: roleName }, 
+          connect: { roleName: roleName },
         },
       },
     });
