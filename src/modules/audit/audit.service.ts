@@ -1,4 +1,5 @@
 import { prisma } from '../../utils/prisma';
+import { Prisma } from '@prisma/client';
 
 export default class AuditService {
   static async logAction(payload: {
@@ -6,7 +7,7 @@ export default class AuditService {
     action: string;
     entityType: string;
     entityId: string;
-    metadata?: any;
+    metadata?: Record<string, unknown>;
     ipAddress?: string;
   }) {
     return prisma.auditLogs.create({
@@ -15,7 +16,7 @@ export default class AuditService {
         action: payload.action,
         entityType: payload.entityType,
         entityId: payload.entityId,
-        metadata: payload.metadata ?? undefined,
+        metadata: payload.metadata ? (payload.metadata as Prisma.InputJsonObject) : undefined,
         ipAddress: payload.ipAddress ?? null,
       },
     });

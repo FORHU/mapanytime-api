@@ -1,19 +1,20 @@
 import { prisma } from '../../utils/prisma';
 import { emitNotificationToUser } from '../../infrastructure/socket';
+import { Prisma } from '@prisma/client';
 
 export default class NotificationService {
   static async sendNotification(payload: {
     userId: string;
     title: string;
     body: string;
-    metadata?: any;
+    metadata?: Record<string, unknown>;
   }) {
     const notification = await prisma.notifications.create({
       data: {
         userId: payload.userId,
         title: payload.title,
         body: payload.body,
-        metadata: payload.metadata ?? undefined,
+        metadata: payload.metadata ? (payload.metadata as Prisma.InputJsonObject) : undefined,
       },
     });
 

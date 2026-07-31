@@ -3,11 +3,7 @@ import { RETURNSTATUS } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 
 export default class ReturnService {
-  static async createReturnRequest(payload: {
-    orderId: string;
-    buyerId: string;
-    reason: string;
-  }) {
+  static async createReturnRequest(payload: { orderId: string; buyerId: string; reason: string }) {
     const order = await prisma.orders.findUnique({
       where: { id: payload.orderId },
       include: { store: true },

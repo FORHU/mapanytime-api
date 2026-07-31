@@ -32,10 +32,7 @@ export default class PayoutService {
         throw new Error('No eligible released settlements found for payout.');
       }
 
-      const totalAmount = settlements.reduce(
-        (sum, s) => sum + Number(s.sellerNetAmount),
-        0,
-      );
+      const totalAmount = settlements.reduce((sum, s) => sum + Number(s.sellerNetAmount), 0);
 
       const payoutNumber = `PO-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
