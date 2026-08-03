@@ -17,7 +17,7 @@ describe('StoreService', () => {
           province: 'Benguet',
           country: 'Philippines',
         },
-        storeHours: [{ dayOfWeek: 1, openTime: '08:00', closeTime: '18:00', isClosed: false }],
+        storeHours: [{ dayOfWeek: 1, openMinutes: 480, closeMinutes: 1080, isClosed: false }],
         categories: [{ id: 'cat-1', name: 'Groceries' }],
       };
 

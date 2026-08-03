@@ -638,6 +638,7 @@ export async function seedStores(prisma: PrismaClient) {
           variantId: defaultVariant?.id,
           storeId: store.id,
           movementType: 'RESTOCK',
+          referenceType: 'RESTOCK',
           quantityDelta: p.stock,
           previousOnHand: 0,
           newOnHand: p.stock,

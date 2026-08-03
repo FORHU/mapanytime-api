@@ -1,5 +1,6 @@
 import OrderRepository from './order.repository';
 import ProductRepository from '../products/product.repository';
+import TaxationService from '../../services/taxation.service';
 import { prisma } from '../../utils/prisma';
 import { emitNotificationToUser } from '../../infrastructure/socket';
 import { PAYMENTMETHOD, FULLFILLMENTTYPE, ORDERSTATUS } from '@prisma/client';
@@ -16,6 +17,10 @@ export default class OrderService {
     const order = await prisma.$transaction(async (tx) => {
       const store = await tx.stores.findUnique({
         where: { id: payload.storeId },
+        include: {
+          storeLocations: true,
+          seller: { include: { users: true } },
+        },
       });
 
       if (!store) {
@@ -28,8 +33,17 @@ export default class OrderService {
         };
       }
 
-      let totalAmount = 0;
+      // Snapshot merchant info at order time so receipts are immutable
+      const loc = store.storeLocations;
+      const storeAddressSnapshot = loc
+        ? [loc.currentAddress, loc.city, loc.province, loc.country].filter(Boolean).join(', ')
+        : null;
+      const sellerPhoneSnapshot = store.phone ?? store.seller?.users?.phoneNumber ?? null;
+      const storeEmailSnapshot = store.email ?? store.seller?.users?.email ?? null;
+
+      let subtotalAmount = 0;
       const orderItemsData = [];
+      let primaryCategoryId: string | undefined;
 
       for (const item of payload.items) {
         const product = await tx.products.findUnique({
@@ -43,6 +57,10 @@ export default class OrderService {
         if (product.storeId !== payload.storeId)
           throw new Error(`Product ${product.name} does not belong to the selected store.`);
 
+        if (!primaryCategoryId && product.categoryId) {
+          primaryCategoryId = product.categoryId;
+        }
+
         const inventory = product.inventory[0];
         if (!inventory) throw new Error(`Inventory record missing for ${product.name}.`);
 
@@ -53,7 +71,7 @@ export default class OrderService {
 
         const numericPrice = Number(product.price);
         const itemTotal = numericPrice * item.quantity;
-        totalAmount += itemTotal;
+        subtotalAmount += itemTotal;
 
         orderItemsData.push({
           productId: product.id,
@@ -68,12 +86,36 @@ export default class OrderService {
             quantityReserved: { increment: item.quantity },
           },
         });
+
+        await tx.inventoryReservations.create({
+          data: {
+            inventoryId: inventory.id,
+            buyerId: payload.buyerId,
+            quantity: item.quantity,
+            status: 'RESERVED',
+            expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15-minute TTL
+          },
+        });
       }
+
+      // Calculate taxation, commission, and financial breakdown
+      const financials = await TaxationService.calculateOrderFinancials({
+        subtotalAmount,
+        categoryId: primaryCategoryId,
+      });
 
       const orderData = {
         buyerId: payload.buyerId,
         storeId: payload.storeId,
-        totalAmount,
+        storeName: store.storeName,
+        storeAddressSnapshot,
+        sellerPhoneSnapshot,
+        storeEmailSnapshot,
+        totalAmount: financials.totalAmount,
+        subtotalAmount: financials.subtotalAmount,
+        taxAmount: financials.taxAmount,
+        marketplaceFeeAmount: financials.marketplaceFeeAmount,
+        sellerNetAmount: financials.sellerNetAmount,
         type: payload.type,
         pickupAt: payload.pickupAt ?? null,
         status: 'PENDING' as const,
@@ -82,14 +124,28 @@ export default class OrderService {
         },
         payment: {
           create: {
-            amount: totalAmount,
+            amount: financials.totalAmount,
             paymentMethod: payload.paymentMethod,
             status: 'PENDING' as const,
           },
         },
       };
 
-      return OrderRepository.insertOrder(orderData, tx);
+      const createdOrder = await OrderRepository.insertOrder(orderData, tx);
+
+      // Link newly created reservations to the order
+      await tx.inventoryReservations.updateMany({
+        where: {
+          buyerId: payload.buyerId,
+          orderId: null,
+          status: 'RESERVED',
+        },
+        data: {
+          orderId: createdOrder.id,
+        },
+      });
+
+      return createdOrder;
     });
 
     try {
@@ -191,6 +247,11 @@ export default class OrderService {
         });
       }
 
+      await tx.inventoryReservations.updateMany({
+        where: { orderId: orderId, status: 'RESERVED' },
+        data: { status: 'CONSUMED' },
+      });
+
       return OrderRepository.updateOrderStatus(orderId, 'COMPLETED', 'COMPLETED', tx);
     });
   }
@@ -228,6 +289,11 @@ export default class OrderService {
             },
           });
         }
+
+        await tx.inventoryReservations.updateMany({
+          where: { orderId: orderId, status: 'RESERVED' },
+          data: { status: 'RELEASED' },
+        });
 
         return OrderRepository.updateOrderStatus(orderId, 'CANCELLED', 'FAILED', tx);
       });
