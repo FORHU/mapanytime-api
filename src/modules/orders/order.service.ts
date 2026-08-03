@@ -203,7 +203,7 @@ export default class OrderService {
 
       if (!order) throw new Error('Order not found.');
       if (order.storeId !== storeId) throw new Error('Unauthorized store fulfillment.');
-      
+
       validateOrderTransition(order.status, 'COMPLETED');
 
       const payment = await tx.payments.findFirst({
@@ -270,7 +270,7 @@ export default class OrderService {
 
         if (!order) throw new Error('Order not found.');
         if (order.buyerId !== buyer.id) throw new Error('Unauthorized. You do not own this order.');
-        
+
         validateOrderTransition(order.status, 'CANCELLED');
 
         for (const item of order.orderitems) {

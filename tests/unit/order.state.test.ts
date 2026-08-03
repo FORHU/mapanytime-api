@@ -29,7 +29,9 @@ describe('Order State Machine (order.state.ts)', () => {
       expect(() => validateOrderTransition('PENDING', 'COMPLETED')).toThrow(
         expect.objectContaining({
           status: 400,
-          message: expect.stringContaining("Invalid order status transition from 'PENDING' to 'COMPLETED'"),
+          message: expect.stringContaining(
+            "Invalid order status transition from 'PENDING' to 'COMPLETED'",
+          ),
         }),
       );
     });
@@ -38,7 +40,9 @@ describe('Order State Machine (order.state.ts)', () => {
       expect(() => validateOrderTransition('COMPLETED', 'CANCELLED')).toThrow(
         expect.objectContaining({
           status: 400,
-          message: expect.stringContaining("Cannot change status of an order that is already in terminal state 'COMPLETED'"),
+          message: expect.stringContaining(
+            "Cannot change status of an order that is already in terminal state 'COMPLETED'",
+          ),
         }),
       );
     });
@@ -47,7 +51,9 @@ describe('Order State Machine (order.state.ts)', () => {
       expect(() => validateOrderTransition('CANCELLED', 'COMPLETED')).toThrow(
         expect.objectContaining({
           status: 400,
-          message: expect.stringContaining("Cannot change status of an order that is already in terminal state 'CANCELLED'"),
+          message: expect.stringContaining(
+            "Cannot change status of an order that is already in terminal state 'CANCELLED'",
+          ),
         }),
       );
     });
@@ -56,7 +62,9 @@ describe('Order State Machine (order.state.ts)', () => {
       expect(() => validateOrderTransition('FAILED', 'PROCESSING')).toThrow(
         expect.objectContaining({
           status: 400,
-          message: expect.stringContaining("Cannot change status of an order that is already in terminal state 'FAILED'"),
+          message: expect.stringContaining(
+            "Cannot change status of an order that is already in terminal state 'FAILED'",
+          ),
         }),
       );
     });
