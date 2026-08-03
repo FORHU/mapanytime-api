@@ -7,6 +7,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// =========================================================================
+// 👤 FEATURE DOMAIN: USERS, AUTH & PROFILES
+// =========================================================================
+
 model Users {
   id              String            @id @default(cuid())
   email           String            @unique
@@ -14,7 +18,7 @@ model Users {
   firstName       String?
   lastName        String?
   phoneNumber     String?
-  avatarId        String?           @unique
+  avatarFileId    String?           @unique
   accountStatus   USERACCOUNTSTATUS @default(ACTIVE)
   isEmailVerified Boolean           @default(false)
   isOnBoarding    Boolean           @default(false)
@@ -24,12 +28,13 @@ model Users {
   updatedAt       DateTime          @updatedAt
 
   roles             Roles[]                 @relation("UserRoles")
-  avatar            Files?                  @relation(fields: [avatarId], references: [id])
+  avatarFile        Files?                  @relation("UserAvatar", fields: [avatarFileId], references: [id])
   session           Session[]
   seller            Sellers?
   buyer             Buyers?
   verifiedDocuments DocumentVerifications[]
   sentAdminInvites  AdminInvites[]
+  notifications     Notifications[]
 
   @@index([email])
   @@index([accountStatus])
@@ -89,16 +94,25 @@ model Session {
 }
 
 model Files {
-  id        String      @id @default(cuid())
-  userId    String
-  fileName  String
-  fileUrl   String
-  metaData  Json?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-  documents Documents[]
-  products  Products[]
-  users     Users?
+  id              String    @id @default(cuid())
+  filename        String
+  originalName    String
+  mimeType        String
+  size            Int
+  storageProvider String    @default("S3")
+  bucket          String?
+  path            String
+  checksum        String?
+  uploadedById    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  avatarUser    Users?          @relation("UserAvatar")
+  documents     Documents[]
+  productImages ProductImages[]
+  logoStores    Stores[]        @relation("StoreLogo")
+  bannerStores  Stores[]        @relation("StoreBanner")
 }
 
 model Sellers {
@@ -106,22 +120,34 @@ model Sellers {
   userId                String                  @unique
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
+  deletedAt             DateTime?
   applicationStatus     ApplicationStatus       @default(PENDING)
   documentVerifications DocumentVerifications[]
   users                 Users                   @relation(fields: [userId], references: [id])
   stores                Stores[]
+  supplierProducts      SupplierProducts[]
+  settlements           Settlements[]
+  payouts               SellerPayouts[]
+  returnRequests        ReturnRequests[]
 }
 
 model Buyers {
-  id          String   @id @default(cuid())
-  userId      String   @unique
-  createdAt   DateTime @default(now())
+  id          String    @id @default(cuid())
+  userId      String    @unique
+  createdAt   DateTime  @default(now())
   displayName String
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
 
-  users  Users          @relation(fields: [userId], references: [id])
-  review StoreReviews[]
-  orders Orders[]
+  users          Users                   @relation(fields: [userId], references: [id])
+  review         StoreReviews[]
+  orders         Orders[]
+  addresses      BuyerAddresses[]
+  reviews        ProductReviews[]
+  cart           Carts?
+  wishlist       Wishlists?
+  returnRequests ReturnRequests[]
+  reservations   InventoryReservations[]
 }
 
 model DocumentVerifications {
@@ -177,14 +203,34 @@ enum INVITESTATUS {
   EXPIRED
 }
 
+// =========================================================================
+// 🏪 FEATURE DOMAIN: STORES & SELLERS
+// =========================================================================
+
 model Stores {
-  id                    String                  @id @default(cuid())
-  sellerId              String
-  storeName             String
-  description           String?
-  isActive              Boolean                 @default(false)
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
+  id             String    @id @default(cuid())
+  sellerId       String
+  storeName      String
+  description    String?
+  logoId         String?
+  bannerId       String?
+  slug           String?   @unique
+  phone          String?
+  email          String?
+  returnPolicy   String?
+  shippingPolicy String?
+  socialLinks    Json?
+  ratingAverage  Float     @default(0)
+  ratingCount    Int       @default(0)
+  followersCount Int       @default(0)
+  vacationMode   Boolean   @default(false)
+  isActive       Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  logoFile              Files?                  @relation("StoreLogo", fields: [logoId], references: [id])
+  bannerFile            Files?                  @relation("StoreBanner", fields: [bannerId], references: [id])
   documentVerifications DocumentVerifications[]
   products              Products[]
   storeHours            StoreHours[]
@@ -194,21 +240,24 @@ model Stores {
   categories            Categories[]            @relation("CategoriesToStores")
   orders                Orders[]
   inventory             Inventory[]
+  inventoryMovements    InventoryMovements[]
 
   @@index([sellerId])
   @@index([isActive])
 }
 
 model StoreHours {
-  id        String   @id @default(cuid())
-  storeId   String
-  dayOfWeek Int
-  openTime  String
-  closeTime String
-  isClosed  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  store     Stores   @relation(fields: [storeId], references: [id])
+  id           String   @id @default(cuid())
+  storeId      String
+  dayOfWeek    Int
+  openMinutes  Int // minutes since midnight, e.g. 480 = 08:00
+  closeMinutes Int // minutes since midnight, e.g. 1020 = 17:00
+  isClosed     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  store        Stores   @relation(fields: [storeId], references: [id])
+
+  @@unique([storeId, dayOfWeek])
 }
 
 model StoreLocations {
@@ -239,58 +288,181 @@ model StoreReviews {
   updatedAt DateTime @updatedAt
   store     Stores   @relation(fields: [storeId], references: [id])
   buyer     Buyers   @relation(fields: [buyerId], references: [id])
+
+  @@unique([storeId, buyerId])
+  @@index([storeId])
+  @@index([buyerId])
+}
+
+// =========================================================================
+// 📦 FEATURE DOMAIN: PRODUCTS & CATALOG MANAGEMENT
+// =========================================================================
+
+enum PRODUCTSTATUS {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  ARCHIVED
+  HIDDEN
 }
 
 model Products {
-  id            String    @id @default(cuid())
+  id            String        @id @default(cuid())
   storeId       String
-  productFileId String?
   categoryId    String?
   name          String
   brand         String?
   description   String?
-  price         Float
-  isActive      Boolean   @default(false)
-  totalSold     Int       @default(0)
+  price         Decimal       @db.Decimal(12, 2)
+  ratingAverage Float         @default(0)
+  ratingCount   Int           @default(0)
+  isActive      Boolean       @default(false)
+  status        PRODUCTSTATUS @default(APPROVED)
+  totalSold     Int           @default(0)
   listedAt      DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?
 
-  store       Stores      @relation(fields: [storeId], references: [id])
-  productFile Files?      @relation(fields: [productFileId], references: [id])
-  category    Categories? @relation(fields: [categoryId], references: [id])
-  tags        Tags[]
-  inventory   Inventory[]
+  store              Stores               @relation(fields: [storeId], references: [id])
+  category           Categories?          @relation(fields: [categoryId], references: [id])
+  tags               ProductTags[]
+  inventory          Inventory[]
+  orderitems         OrderItems[]
+  productImages      ProductImages[]
+  supplierProducts   SupplierProducts[]
+  variants           ProductVariants[]
+  options            ProductOptions[]
+  reviews            ProductReviews[]
+  cartItems          CartItems[]
+  wishlistItems      WishlistItems[]
+  inventoryMovements InventoryMovements[]
 
   @@index([storeId])
   @@index([categoryId])
   @@index([isActive])
+  @@index([status])
+  @@index([storeId, status, isActive])
+  @@index([categoryId, status, isActive])
 }
 
-model Categories {
-  id          String       @id @default(cuid())
-  name        String       @unique
-  description String?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  isActive    Boolean      @default(true)
-  parentId    String?
-  parent      Categories?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
-  children    Categories[] @relation("CategoryHierarchy")
-  products    Products[]
-  stores      Stores[]     @relation("CategoriesToStores")
+model ProductVariants {
+  id          String    @id @default(cuid())
+  productId   String
+  sku         String?   @unique
+  variantName String
+  price       Decimal   @db.Decimal(12, 2)
+  costPrice   Decimal?  @db.Decimal(12, 2)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
 
-  @@index([parentId])
-  @@index([name])
+  product            Products                      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  optionValues       ProductVariantToOptionValue[]
+  inventory          Inventory[]
+  orderitems         OrderItems[]
+  productImages      ProductImages[]
+  cartItems          CartItems[]
+  wishlistItems      WishlistItems[]
+  inventoryMovements InventoryMovements[]
+
+  @@index([productId])
+  @@index([sku])
 }
 
-model Tags {
+model ProductOptions {
   id        String   @id @default(cuid())
   productId String
   name      String
+  position  Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  product   Products @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  product Products              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  values  ProductOptionValues[]
+
+  @@index([productId])
+}
+
+model ProductOptionValues {
+  id        String   @id @default(cuid())
+  optionId  String
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  option   ProductOptions                @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  variants ProductVariantToOptionValue[]
+
+  @@index([optionId])
+}
+
+model ProductVariantToOptionValue {
+  variantId     String
+  optionValueId String
+  variant       ProductVariants     @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  optionValue   ProductOptionValues @relation(fields: [optionValueId], references: [id], onDelete: Cascade)
+
+  @@id([variantId, optionValueId])
+}
+
+model SupplierProducts {
+  id              String   @id @default(cuid())
+  sellerId        String
+  productId       String
+  supplierSku     String?  @unique
+  costPrice       Decimal? @db.Decimal(12, 2)
+  minimumOrderQty Int      @default(1)
+  supplyLeadDays  Int      @default(1)
+  isAvailable     Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  seller  Sellers  @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  product Products @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([sellerId])
+  @@index([productId])
+}
+
+model Categories {
+  id              String           @id @default(cuid())
+  parentId        String?
+  name            String
+  description     String?
+  status          CategoryStatus   @default(APPROVED)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+  parent          Categories?      @relation("CategoryToParent", fields: [parentId], references: [id])
+  subCategories   Categories[]     @relation("CategoryToParent")
+  products        Products[]
+  stores          Stores[]         @relation("CategoriesToStores")
+  commissionRules CommissionRules?
+
+  @@unique([parentId, name])
+  @@index([parentId])
+  @@index([status])
+}
+
+model Tags {
+  id          String        @id @default(cuid())
+  name        String        @unique
+  createdAt   DateTime      @default(now())
+  productTags ProductTags[]
+}
+
+model ProductTags {
+  productId String
+  tagId     String
+
+  product Products @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tag     Tags     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([productId, tagId])
+  @@index([tagId])
 }
 
 enum ApplicationStatus {
@@ -311,22 +483,52 @@ enum CategoryStatus {
   REJECTED
 }
 
-model Orders {
-  id          String           @id @default(cuid())
-  buyerId     String
-  storeId     String
-  totalAmount Float
-  type        FULLFILLMENTTYPE @default(PICKUP)
-  status      ORDERSTATUS      @default(PENDING)
-  pickupAt    DateTime?
-  completedAt DateTime?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+// =========================================================================
+// 🛒 FEATURE DOMAIN: ORDERS, CHECKOUT & INVENTORY
+// =========================================================================
 
-  buyer      Buyers       @relation(fields: [buyerId], references: [id])
-  store      Stores       @relation(fields: [storeId], references: [id])
-  orderitems OrderItems[]
-  payment    Payments[]
+model Orders {
+  id                   String           @id @default(cuid())
+  buyerId              String
+  storeId              String
+  storeName            String?
+  sellerName           String?
+  storeAddressSnapshot String?
+  sellerPhoneSnapshot  String?
+  storeEmailSnapshot   String?
+  totalAmount          Decimal          @db.Decimal(12, 2)
+  subtotalAmount       Decimal          @default(0) @db.Decimal(12, 2)
+  shippingAmount       Decimal          @default(0) @db.Decimal(12, 2)
+  discountAmount       Decimal          @default(0) @db.Decimal(12, 2)
+  taxAmount            Decimal          @default(0) @db.Decimal(12, 2)
+  marketplaceFeeAmount Decimal          @default(0) @db.Decimal(12, 2)
+  sellerNetAmount      Decimal          @default(0) @db.Decimal(12, 2)
+  paymentFeeAmount     Decimal          @default(0) @db.Decimal(12, 2)
+  currency             String           @default("PHP")
+  version              Int              @default(0)
+  type                 FULLFILLMENTTYPE @default(PICKUP)
+  status               ORDERSTATUS      @default(PENDING)
+  pickupAt             DateTime?
+  completedAt          DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  deletedAt            DateTime?
+
+  buyer          Buyers                  @relation(fields: [buyerId], references: [id])
+  store          Stores                  @relation(fields: [storeId], references: [id])
+  orderitems     OrderItems[]
+  payment        Payments[]
+  settlement     Settlements?
+  shipment       Shipments?
+  returnRequests ReturnRequests[]
+  reservations   InventoryReservations[]
+
+  @@index([buyerId])
+  @@index([storeId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([buyerId, status])
+  @@index([storeId, status])
 }
 
 enum FULLFILLMENTTYPE {
@@ -344,42 +546,129 @@ enum ORDERSTATUS {
 }
 
 model OrderItems {
-  id        String   @id @default(cuid())
-  orderId   String
-  productId String
-  quantity  Int
-  unitPrice Float
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  orderId      String
+  productId    String
+  variantId    String?
+  productName  String?
+  variantName  String?
+  productSku   String?
+  productBrand String?
+  productImage String?
+  categoryName String?
+  quantity     Int
+  unitPrice    Decimal  @db.Decimal(12, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  order Orders @relation(fields: [orderId], references: [id])
+  order   Orders           @relation(fields: [orderId], references: [id])
+  product Products         @relation(fields: [productId], references: [id])
+  variant ProductVariants? @relation(fields: [variantId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([variantId])
 }
 
+model ProductImages {
+  id           String   @id @default(cuid())
+  productId    String
+  variantId    String?
+  fileId       String
+  isPrimary    Boolean  @default(false)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  product Products         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariants? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  file    Files            @relation(fields: [fileId], references: [id])
+
+  @@unique([productId, variantId, isPrimary])
+  @@index([productId])
+  @@index([variantId])
+}
+
+// Rule: simple product → variantId NULL, productId required.
+// Variant product → variantId required, productId must match variant.productId (enforced by app).
 model Inventory {
-  id               String   @id @default(cuid())
-  productId        String   @unique
+  id               String    @id @default(cuid())
+  productId        String?
+  variantId        String?
   storeId          String
-  quantityOnHand   Int      @default(0)
-  quantityReserved Int      @default(0)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  quantityOnHand   Int       @default(0)
+  quantityReserved Int       @default(0)
+  version          Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
 
-  product Products @relation(fields: [productId], references: [id])
-  store   Stores   @relation(fields: [storeId], references: [id])
+  product      Products?               @relation(fields: [productId], references: [id])
+  variant      ProductVariants?        @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  store        Stores                  @relation(fields: [storeId], references: [id])
+  movements    InventoryMovements[]
+  reservations InventoryReservations[]
+
+  @@unique([storeId, productId, variantId])
+  @@index([productId])
+  @@index([storeId])
 }
+
+enum RESERVATIONSTATUS {
+  RESERVED
+  CONSUMED
+  EXPIRED
+  RELEASED
+}
+
+model InventoryReservations {
+  id          String            @id @default(cuid())
+  inventoryId String
+  buyerId     String
+  cartId      String?
+  orderId     String?
+  quantity    Int
+  status      RESERVATIONSTATUS @default(RESERVED)
+  expiresAt   DateTime
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  inventory Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  buyer     Buyers    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  cart      Carts?    @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  order     Orders?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([inventoryId, status])
+  @@index([expiresAt, status])
+  @@index([buyerId, status])
+  @@index([orderId])
+  @@index([cartId])
+}
+
+// =========================================================================
+// 💳 FEATURE DOMAIN: PAYMENTS, SETTLEMENTS & FINANCIAL LEDGER
+// =========================================================================
 
 model Payments {
-  id              String        @id @default(cuid())
-  orderId         String
-  amount          Float
-  paymentMethod   PAYMENTMETHOD
-  status          PAYMENTSTATUS @default(PENDING)
-  referenceNumber String?       @unique
-  paidAt          DateTime?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id               String        @id @default(cuid())
+  orderId          String
+  amount           Decimal       @db.Decimal(12, 2)
+  paymentMethod    PAYMENTMETHOD
+  status           PAYMENTSTATUS @default(PENDING)
+  referenceNumber  String?       @unique
+  gateway          String?
+  gatewayReference String?
+  gatewayFee       Decimal       @default(0) @db.Decimal(12, 2)
+  currency         String        @default("PHP")
+  rawResponse      Json?
+  failureReason    String?
+  paidAt           DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  deletedAt        DateTime?
 
   order Orders @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
 }
 
 enum PAYMENTMETHOD {
@@ -390,7 +679,331 @@ enum PAYMENTMETHOD {
 
 enum PAYMENTSTATUS {
   PENDING
+  AUTHORIZED
+  CAPTURED
+  VOIDED
   COMPLETED
   FAILED
   REFUNDED
+  PARTIALLY_REFUNDED
+  REFUND_PENDING
+}
+
+model CommissionRules {
+  id             String   @id @default(cuid())
+  categoryId     String?  @unique
+  commissionRate Decimal  @default(0.05) @db.Decimal(5, 4)
+  fixedFee       Decimal  @default(0) @db.Decimal(12, 2)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  category Categories? @relation(fields: [categoryId], references: [id])
+}
+
+model Settlements {
+  id                String           @id @default(cuid())
+  orderId           String           @unique
+  sellerId          String
+  subtotalAmount    Decimal          @db.Decimal(12, 2)
+  commissionAmount  Decimal          @db.Decimal(12, 2)
+  paymentFeeAmount  Decimal          @db.Decimal(12, 2)
+  sellerNetAmount   Decimal          @db.Decimal(12, 2)
+  status            SETTLEMENTSTATUS @default(PENDING)
+  releaseEligibleAt DateTime
+  settledAt         DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  order      Orders             @relation(fields: [orderId], references: [id])
+  seller     Sellers            @relation(fields: [sellerId], references: [id])
+  payoutItem SellerPayoutItems?
+
+  @@index([sellerId])
+  @@index([status])
+}
+
+enum SETTLEMENTSTATUS {
+  PENDING
+  HELD
+  RELEASED
+  REFUNDED
+}
+
+model SellerPayouts {
+  id           String       @id @default(cuid())
+  sellerId     String
+  payoutNumber String       @unique
+  totalAmount  Decimal      @db.Decimal(12, 2)
+  status       PAYOUTSTATUS @default(PENDING)
+  payoutMethod String
+  referenceNo  String?
+  processedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  seller Sellers             @relation(fields: [sellerId], references: [id])
+  items  SellerPayoutItems[]
+
+  @@index([sellerId])
+  @@index([status])
+}
+
+model SellerPayoutItems {
+  id           String   @id @default(cuid())
+  payoutId     String
+  settlementId String   @unique
+  amount       Decimal  @db.Decimal(12, 2)
+  createdAt    DateTime @default(now())
+
+  payout     SellerPayouts @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+  settlement Settlements   @relation(fields: [settlementId], references: [id])
+
+  @@index([payoutId])
+}
+
+enum PAYOUTSTATUS {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model BuyerAddresses {
+  id            String      @id @default(cuid())
+  buyerId       String
+  addressType   ADDRESSTYPE @default(SHIPPING)
+  recipientName String
+  phoneNumber   String
+  addressLine1  String
+  addressLine2  String?
+  barangay      String?
+  city          String
+  province      String
+  zipCode       String
+  country       String
+  isDefault     Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  buyer Buyers @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+
+  @@index([buyerId])
+}
+
+enum ADDRESSTYPE {
+  SHIPPING
+  BILLING
+  HOME
+  OFFICE
+}
+
+model ProductReviews {
+  id        String   @id @default(cuid())
+  productId String
+  buyerId   String
+  orderId   String?
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Products @relation(fields: [productId], references: [id], onDelete: Cascade)
+  buyer   Buyers   @relation(fields: [buyerId], references: [id])
+
+  @@unique([productId, buyerId, orderId])
+  @@index([productId])
+  @@index([buyerId])
+}
+
+model Carts {
+  id        String    @id @default(cuid())
+  buyerId   String    @unique
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  buyer        Buyers                  @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  items        CartItems[]
+  reservations InventoryReservations[]
+}
+
+model CartItems {
+  id            String   @id @default(cuid())
+  cartId        String
+  productId     String
+  variantId     String?
+  quantity      Int
+  priceSnapshot Decimal  @db.Decimal(12, 2)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  cart    Carts            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Products         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant ProductVariants? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId, variantId])
+  @@index([cartId])
+  @@index([productId])
+}
+
+model Wishlists {
+  id        String   @id @default(cuid())
+  buyerId   String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  buyer Buyers          @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  items WishlistItems[]
+}
+
+model WishlistItems {
+  id         String   @id @default(cuid())
+  wishlistId String
+  productId  String
+  variantId  String?
+  createdAt  DateTime @default(now())
+
+  wishlist Wishlists        @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  product  Products         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant  ProductVariants? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([wishlistId, productId, variantId])
+  @@index([wishlistId])
+}
+
+enum INVENTORYMOVEMENTTYPE {
+  RESTOCK
+  SALE
+  RETURN
+  TRANSFER
+  ADJUSTMENT
+}
+
+enum INVENTORYREFERENCETYPE {
+  ORDER
+  RETURN
+  TRANSFER
+  RESTOCK
+  MANUAL_ADJUSTMENT
+}
+
+model InventoryMovements {
+  id             String                  @id @default(cuid())
+  inventoryId    String
+  productId      String?
+  variantId      String?
+  storeId        String
+  movementType   INVENTORYMOVEMENTTYPE
+  quantityDelta  Int
+  previousOnHand Int
+  newOnHand      Int
+  referenceId    String?
+  referenceType  INVENTORYREFERENCETYPE?
+  note           String?
+  createdById    String?
+  createdAt      DateTime                @default(now())
+
+  inventory Inventory        @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  product   Products?        @relation(fields: [productId], references: [id])
+  variant   ProductVariants? @relation(fields: [variantId], references: [id])
+  store     Stores           @relation(fields: [storeId], references: [id])
+
+  @@index([inventoryId])
+  @@index([productId])
+  @@index([storeId])
+}
+
+enum SHIPMENTSTATUS {
+  PENDING
+  LABEL_CREATED
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+  RETURNED
+}
+
+model Shipments {
+  id             String         @id @default(cuid())
+  orderId        String         @unique
+  courier        String
+  trackingNumber String?        @unique
+  shippingFee    Decimal        @default(0) @db.Decimal(12, 2)
+  labelUrl       String?
+  status         SHIPMENTSTATUS @default(PENDING)
+  shippedAt      DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  order Orders @relation(fields: [orderId], references: [id])
+
+  @@index([status])
+}
+
+enum RETURNSTATUS {
+  PENDING
+  APPROVED
+  REJECTED
+  ITEM_RECEIVED
+  REFUNDED
+}
+
+model ReturnRequests {
+  id           String       @id @default(cuid())
+  orderId      String
+  buyerId      String
+  sellerId     String
+  reason       String
+  status       RETURNSTATUS @default(PENDING)
+  refundAmount Decimal      @db.Decimal(12, 2)
+  requestedAt  DateTime     @default(now())
+  approvedAt   DateTime?
+  receivedAt   DateTime?
+  refundedAt   DateTime?
+  closedAt     DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  order  Orders  @relation(fields: [orderId], references: [id])
+  buyer  Buyers  @relation(fields: [buyerId], references: [id])
+  seller Sellers @relation(fields: [sellerId], references: [id])
+
+  @@index([orderId])
+  @@index([buyerId])
+  @@index([sellerId])
+}
+
+model AuditLogs {
+  id            String   @id @default(cuid())
+  performedById String?
+  action        String
+  entityType    String
+  entityId      String
+  metadata      Json?
+  ipAddress     String?
+  userAgent     String?
+  requestId     String?
+  createdAt     DateTime @default(now())
+
+  @@index([performedById])
+  @@index([entityType, entityId])
+  @@index([requestId])
+}
+
+model Notifications {
+  id        String    @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  metadata  Json?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user Users @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([readAt])
 }

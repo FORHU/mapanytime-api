@@ -1,17 +1,2 @@
-import express from 'express';
-import ProductController from '../controllers/product.controller';
-import { authenticate } from '../middleware/auth.middleware';
-
-const router = express.Router();
-
-// Public buyer catalog
-router.get('/all', ProductController.getAllProducts);
-
-// Authenticated routes
-router.use(authenticate);
-router.post('/', ProductController.create);
-router.get('/', ProductController.index);
-router.put('/:id', ProductController.update);
-router.delete('/:id', ProductController.delete);
-
-export default router;
+import productRoute from '../modules/products/product.route';
+export default productRoute;
