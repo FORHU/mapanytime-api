@@ -1,6 +1,7 @@
 import OrderRepository from './order.repository';
 import ProductRepository from '../products/product.repository';
 import TaxationService from '../../services/taxation.service';
+import { validateOrderTransition } from './order.state';
 import { prisma } from '../../utils/prisma';
 import { emitNotificationToUser } from '../../infrastructure/socket';
 import { PAYMENTMETHOD, FULLFILLMENTTYPE, ORDERSTATUS } from '@prisma/client';
@@ -202,10 +203,8 @@ export default class OrderService {
 
       if (!order) throw new Error('Order not found.');
       if (order.storeId !== storeId) throw new Error('Unauthorized store fulfillment.');
-      if (order.status === 'COMPLETED') throw new Error('Order is already completed.');
-      if (order.status === 'CANCELLED' || order.status === 'FAILED') {
-        throw new Error(`Cannot complete a ${order.status.toLowerCase()} order.`);
-      }
+
+      validateOrderTransition(order.status, 'COMPLETED');
 
       const payment = await tx.payments.findFirst({
         where: { orderId: orderId },
@@ -271,8 +270,8 @@ export default class OrderService {
 
         if (!order) throw new Error('Order not found.');
         if (order.buyerId !== buyer.id) throw new Error('Unauthorized. You do not own this order.');
-        if (order.status !== 'PENDING')
-          throw new Error(`Cannot cancel an order with status: ${order.status}.`);
+
+        validateOrderTransition(order.status, 'CANCELLED');
 
         for (const item of order.orderitems) {
           const inventory = await tx.inventory.findFirst({
@@ -366,6 +365,8 @@ export default class OrderService {
       include: { buyer: true },
     });
     if (!order) throw { status: 404, message: 'Order not found.' };
+
+    validateOrderTransition(order.status, normalizedStatus);
 
     if (normalizedStatus === 'COMPLETED') {
       return this.completeOrder(userId, orderId, order.storeId);
