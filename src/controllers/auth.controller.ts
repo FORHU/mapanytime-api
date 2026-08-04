@@ -9,7 +9,7 @@ export default class AuthController {
   // Register a new user
   static async register(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
-      email: Joi.string().email().required(),
+      email: Joi.string().email({ tlds: { allow: false } }).required(),
       password: Joi.string().min(6).required(),
       firstName: Joi.string().optional(),
       lastName: Joi.string().optional(),
@@ -45,7 +45,7 @@ export default class AuthController {
    */
   static async login(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
-      email: Joi.string().email().required(),
+      email: Joi.string().email({ tlds: { allow: false } }).required(),
       password: Joi.string().required(),
       roleName: Joi.string().required(),
     });
