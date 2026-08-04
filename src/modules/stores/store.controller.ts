@@ -67,6 +67,7 @@ export default class StoreController {
         value.locationData,
         value.hoursData,
         value.documents,
+        { completeOnboarding: true },
       );
 
       return responseSuccess(res, 201, newStore, 'Store created successfully.');

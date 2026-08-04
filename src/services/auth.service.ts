@@ -239,6 +239,14 @@ export default class AuthSvc {
     }
 
     const stores = (user as Users & { seller?: { stores: unknown[] } }).seller?.stores || [];
+    const seller = (user as Users & {
+      seller?: {
+        id: string;
+        isOnboarded: boolean;
+        onboardingStep: number;
+        stores: unknown[];
+      };
+    }).seller;
 
     const { passwordHash: _passwordHash, ...safeUser } = user as Users & {
       passwordHash?: string;
@@ -249,6 +257,14 @@ export default class AuthSvc {
       refreshToken,
       user: safeUser,
       stores,
+      seller: seller
+        ? {
+            id: seller.id,
+            isOnboarded: seller.isOnboarded,
+            onboardingStep: seller.onboardingStep,
+            hasStores: seller.stores.length > 0,
+          }
+        : null,
       location: { country: user.countryCode },
     };
   }
