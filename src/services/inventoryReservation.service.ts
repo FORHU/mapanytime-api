@@ -1,11 +1,25 @@
 import InventoryReservationRepository from '../repositories/inventoryReservation.repository';
+import { prisma } from '../utils/prisma';
 
 export default class InventoryReservationService {
+  /**
+   * `InventoryReservations.buyerId` is a `Buyers` id, but callers authenticate
+   * as a `Users` row — passing the user id straight through violates the
+   * foreign key. Resolve the buyer profile first, as OrderService does.
+   */
+  private static async resolveBuyerId(userId: string) {
+    const buyer = await prisma.buyers.findUnique({ where: { userId } });
+    if (!buyer) {
+      throw { status: 403, message: 'Only registered buyers can reserve stock.' };
+    }
+    return buyer.id;
+  }
+
   /**
    * Reserve stock for a specified TTL (default 15 minutes).
    */
   static async reserveStock(
-    buyerId: string,
+    userId: string,
     inventoryId: string,
     quantity: number,
     ttlMinutes: number = 15,
@@ -16,6 +30,7 @@ export default class InventoryReservationService {
       throw { status: 400, message: 'Quantity to reserve must be greater than zero.' };
     }
 
+    const buyerId = await this.resolveBuyerId(userId);
     const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
     try {
@@ -65,9 +80,11 @@ export default class InventoryReservationService {
   }
 
   /**
-   * Get active non-expired reservations for a buyer.
+   * Get active non-expired reservations for the authenticated user's buyer
+   * profile.
    */
-  static async getActiveReservations(buyerId: string) {
+  static async getActiveReservations(userId: string) {
+    const buyerId = await this.resolveBuyerId(userId);
     return InventoryReservationRepository.findActiveReservationsByBuyer(buyerId);
   }
 }

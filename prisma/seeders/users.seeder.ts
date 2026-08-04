@@ -1,10 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
+import { SYSTEM_ROLES } from '../../src/constants/roles.constant';
 
 export async function seedUsers(prisma: PrismaClient) {
   console.log('🌱 Seeding base users...');
 
-  const defaultRoles = ['ADMIN', 'SELLER', 'BUYER', 'SUPPORT_AGENT'];
+  const defaultRoles = Object.values(SYSTEM_ROLES);
   for (const roleName of defaultRoles) {
     await prisma.roles.upsert({
       where: { roleName },
@@ -19,10 +20,28 @@ export async function seedUsers(prisma: PrismaClient) {
 
   const usersToCreate = [
     {
+      email: 'superadmin@example.com',
+      firstName: 'Super',
+      lastName: 'Admin',
+      roles: [SYSTEM_ROLES.SUPER_ADMIN],
+      passwordRaw: 'Super123',
+      isEmailVerified: true,
+      countryCode: 'PH',
+    },
+    {
+      email: 'dev@example.com',
+      firstName: 'Lead',
+      lastName: 'Developer',
+      roles: [SYSTEM_ROLES.DEVELOPER],
+      passwordRaw: 'Dev123',
+      isEmailVerified: true,
+      countryCode: 'PH',
+    },
+    {
       email: 'admin@example.com',
       firstName: 'System',
       lastName: 'Admin',
-      roles: ['ADMIN'],
+      roles: [SYSTEM_ROLES.ADMIN],
       passwordRaw: 'Password123',
       isEmailVerified: true,
       countryCode: 'PH',

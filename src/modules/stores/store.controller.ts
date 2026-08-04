@@ -25,12 +25,14 @@ export default class StoreController {
           longitude: Joi.number().required(),
         }).required(),
 
+        // StoreHours stores minutes since midnight (480 = 08:00), so the
+        // payload is validated in the same unit it is persisted in.
         hoursData: Joi.array()
           .items(
             Joi.object({
               dayOfWeek: Joi.number().min(0).max(6).required(),
-              openTime: Joi.string().required(),
-              closeTime: Joi.string().required(),
+              openMinutes: Joi.number().integer().min(0).max(1440).required(),
+              closeMinutes: Joi.number().integer().min(0).max(1440).required(),
               isClosed: Joi.boolean().default(false),
             }),
           )

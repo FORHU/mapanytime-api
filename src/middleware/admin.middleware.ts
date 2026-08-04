@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
+import { ADMIN_ROLES, SystemRole } from '../constants/roles.constant';
 
 export const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -11,7 +12,7 @@ export const requireAdmin = async (req: Request, res: Response, next: NextFuncti
       include: { roles: true },
     });
 
-    const isAdmin = user?.roles.some((role) => role.roleName === 'ADMIN');
+    const isAdmin = user?.roles.some((role) => ADMIN_ROLES.includes(role.roleName as SystemRole));
     if (!isAdmin) {
       return res.status(403).json({ message: 'Forbidden: Administrator privileges required.' });
     }

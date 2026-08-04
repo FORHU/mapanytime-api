@@ -3,7 +3,21 @@ import { RETURNSTATUS } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 
 export default class ReturnService {
-  static async createReturnRequest(payload: { orderId: string; buyerId: string; reason: string }) {
+  /**
+   * Resolves the `Buyers` row for an authenticated `Users` id. `Orders.buyerId`
+   * and `ReturnRequests.buyerId` both reference `Buyers`, never `Users`.
+   */
+  private static async resolveBuyerId(userId: string) {
+    const buyer = await prisma.buyers.findUnique({ where: { userId } });
+    if (!buyer) {
+      throw { status: 403, message: 'Only registered buyers can request a return.' };
+    }
+    return buyer.id;
+  }
+
+  static async createReturnRequest(payload: { orderId: string; userId: string; reason: string }) {
+    const buyerId = await this.resolveBuyerId(payload.userId);
+
     const order = await prisma.orders.findUnique({
       where: { id: payload.orderId },
       include: { store: true },
@@ -12,20 +26,22 @@ export default class ReturnService {
     if (!order) {
       throw { status: 404, message: 'Order not found.' };
     }
-    if (order.buyerId !== payload.buyerId) {
+    if (order.buyerId !== buyerId) {
       throw { status: 403, message: 'You are not authorized to initiate a return for this order.' };
     }
 
     return ReturnRepository.createReturnRequest({
       orderId: payload.orderId,
-      buyerId: payload.buyerId,
+      buyerId,
       sellerId: order.store.sellerId,
       reason: payload.reason,
       refundAmount: Number(order.totalAmount),
     });
   }
 
-  static async getReturnsByBuyer(buyerId: string) {
+  /** [userId] is the authenticated `Users` id, resolved to its buyer profile. */
+  static async getReturnsByBuyer(userId: string) {
+    const buyerId = await this.resolveBuyerId(userId);
     return ReturnRepository.findByBuyerId(buyerId);
   }
 
