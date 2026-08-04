@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../utils/prisma';
+import { ADMIN_ROLES, SystemRole } from '../constants/roles.constant';
 
 export const requirePermission = (permissionCode: string) => {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -28,8 +29,8 @@ export const requirePermission = (permissionCode: string) => {
         return res.status(401).json({ status: 'error', message: 'User profile not found' });
       }
 
-      // Check if user has ADMIN role (implicit full access) or possesses the requested permission code
-      const isAdmin = user.roles.some((r) => r.roleName === 'ADMIN');
+      // Check if user has administrative role (implicit full access) or possesses requested permission code
+      const isAdmin = user.roles.some((r) => ADMIN_ROLES.includes(r.roleName as SystemRole));
       const hasPermission =
         isAdmin ||
         user.roles.some((r) =>

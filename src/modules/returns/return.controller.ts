@@ -6,8 +6,9 @@ export default class ReturnController {
   static async createReturn(req: Request, res: Response, next: NextFunction) {
     try {
       const returnReq = await ReturnService.createReturnRequest({
-        ...req.body,
-        buyerId: req.user?.id || req.body.buyerId,
+        orderId: req.body.orderId,
+        reason: req.body.reason,
+        userId: req.user?.id,
       });
       return responseSuccess(res, 201, returnReq, 'Return request submitted successfully.');
     } catch (error) {
@@ -17,8 +18,9 @@ export default class ReturnController {
 
   static async getBuyerReturns(req: Request, res: Response, next: NextFunction) {
     try {
-      const buyerId = req.params.buyerId || req.user?.id;
-      const returns = await ReturnService.getReturnsByBuyer(buyerId);
+      // Always scope to the caller. Honouring `:buyerId` from the path would
+      // let any authenticated buyer read another buyer's returns.
+      const returns = await ReturnService.getReturnsByBuyer(req.user?.id);
       return responseSuccess(res, 200, returns, 'Buyer return requests fetched successfully.');
     } catch (error) {
       next(error);

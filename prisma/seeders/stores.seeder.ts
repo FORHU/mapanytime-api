@@ -461,13 +461,35 @@ export async function seedStores(prisma: PrismaClient) {
 
   // Clean slate for the marketplace data, in FK-safe order. Keeps users/roles
   // so existing test logins survive; seller profiles are re-approved below.
+  await prisma.sellerPayoutItems.deleteMany();
+  await prisma.sellerPayouts.deleteMany();
+  await prisma.settlements.deleteMany();
+  await prisma.shipments.deleteMany();
+  await prisma.returnRequests.deleteMany();
+  await prisma.inventoryReservations.deleteMany();
   await prisma.payments.deleteMany();
   await prisma.orderItems.deleteMany();
   await prisma.orders.deleteMany();
-  await prisma.tags.deleteMany();
+  await prisma.cartItems.deleteMany();
+  await prisma.carts.deleteMany();
+  await prisma.wishlistItems.deleteMany();
+  await prisma.wishlists.deleteMany();
+  await prisma.productReviews.deleteMany();
+  await prisma.storeReviews.deleteMany();
+  await prisma.supplierProducts.deleteMany();
+  await prisma.productVariantToOptionValue.deleteMany();
+  await prisma.productVariants.deleteMany();
+  await prisma.productOptionValues.deleteMany();
+  await prisma.productOptions.deleteMany();
+  await prisma.inventoryMovements.deleteMany();
   await prisma.inventory.deleteMany();
+  await prisma.productTags.deleteMany();
+  await prisma.productImages.deleteMany();
+  await prisma.tags.deleteMany();
   await prisma.products.deleteMany();
+  await prisma.storeHours.deleteMany();
   await prisma.storeLocations.deleteMany();
+  await prisma.documents.deleteMany();
   await prisma.documentVerifications.deleteMany();
   await prisma.stores.deleteMany();
 

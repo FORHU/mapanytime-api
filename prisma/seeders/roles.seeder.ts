@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { SYSTEM_ROLES, ADMIN_ROLES, SystemRole } from '../../src/constants/roles.constant';
 
 interface PermissionSeederRecord {
   id: string;
@@ -69,14 +70,30 @@ export async function seedRoles(prisma: PrismaClient) {
   }
 
   const roles = [
-    { roleName: 'BUYER', description: 'Buyer account for map discovery and local checkout' },
     {
-      roleName: 'SELLER',
+      roleName: SYSTEM_ROLES.SUPER_ADMIN,
+      description:
+        'Platform super administrator with unrestricted system control and invite privileges',
+    },
+    {
+      roleName: SYSTEM_ROLES.DEVELOPER,
+      description:
+        'Platform software engineer with access to system API logs, webhooks, and developer tools',
+    },
+    {
+      roleName: SYSTEM_ROLES.BUYER,
+      description: 'Buyer account for map discovery and local checkout',
+    },
+    {
+      roleName: SYSTEM_ROLES.SELLER,
       description: 'Merchant seller account for managing storefronts and catalog',
     },
-    { roleName: 'ADMIN', description: 'Platform super administrator with full system permissions' },
     {
-      roleName: 'SUPPORT_AGENT',
+      roleName: SYSTEM_ROLES.ADMIN,
+      description: 'Platform administrator with system management permissions',
+    },
+    {
+      roleName: SYSTEM_ROLES.SUPPORT_AGENT,
       description: 'Customer support agent for reviewing orders and store inquiries',
     },
   ];
@@ -90,11 +107,11 @@ export async function seedRoles(prisma: PrismaClient) {
 
     // Assign default permissions to roles
     let assignedCodes: string[] = [];
-    if (roleData.roleName === 'ADMIN') {
+    if (ADMIN_ROLES.includes(roleData.roleName as SystemRole)) {
       assignedCodes = Object.keys(seededPermissions);
-    } else if (roleData.roleName === 'SELLER') {
+    } else if (roleData.roleName === SYSTEM_ROLES.SELLER) {
       assignedCodes = ['stores.manage', 'orders.view', 'analytics.view'];
-    } else if (roleData.roleName === 'SUPPORT_AGENT') {
+    } else if (roleData.roleName === SYSTEM_ROLES.SUPPORT_AGENT) {
       assignedCodes = ['orders.view', 'stores.manage'];
     }
 

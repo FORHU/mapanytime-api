@@ -1,11 +1,20 @@
 import InventoryReservationService from '../../src/services/inventoryReservation.service';
 import InventoryReservationRepository from '../../src/repositories/inventoryReservation.repository';
+import { prisma } from '../../src/utils/prisma';
 
 jest.mock('../../src/repositories/inventoryReservation.repository');
+jest.mock('../../src/utils/prisma', () => ({
+  prisma: {
+    buyers: {
+      findUnique: jest.fn(),
+    },
+  },
+}));
 
 describe('InventoryReservationService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    (prisma.buyers.findUnique as jest.Mock).mockResolvedValue({ id: 'buyer-1', userId: 'buyer-1' });
   });
 
   describe('reserveStock', () => {

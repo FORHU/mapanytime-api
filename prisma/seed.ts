@@ -3,6 +3,7 @@ import { seedUsers } from './seeders/users.seeder';
 import { seedStores } from './seeders/stores.seeder';
 import { seedRoles } from './seeders/roles.seeder';
 import { seedCategories } from './seeders/categories.seeder';
+import { seedMarketplaceData } from './seeders/marketplace_data.seeder';
 
 const prisma = new PrismaClient();
 
@@ -15,6 +16,7 @@ async function main() {
     await seedUsers(prisma);
     await seedCategories(prisma);
     await seedStores(prisma);
+    await seedMarketplaceData(prisma);
 
     console.log('🎉 All seeder modules executed successfully!');
   } catch (error) {
