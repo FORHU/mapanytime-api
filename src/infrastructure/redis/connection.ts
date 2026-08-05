@@ -55,7 +55,9 @@ class RedisConnection {
       logger.info(`[Redis] Connected to ${REDIS_HOST}:${REDIS_PORT}${REDIS_TLS ? ' (TLS)' : ''}`);
     } catch (err) {
       this.isConnected = false;
-      logger.warn(`[Redis] Could not connect to ${REDIS_HOST}:${REDIS_PORT} (${(err as Error).message}). Operating in offline mode.`);
+      logger.warn(
+        `[Redis] Could not connect to ${REDIS_HOST}:${REDIS_PORT} (${(err as Error).message}). Operating in offline mode.`,
+      );
     }
   }
 

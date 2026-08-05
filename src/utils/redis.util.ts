@@ -20,7 +20,9 @@ export default class RedisUtil {
       await this.client.connect();
       console.log(`[RedisUtil] Connected to ${REDIS_HOST}:${REDIS_PORT}`);
     } catch (err) {
-      console.warn(`[RedisUtil] Could not connect to Redis (${(err as Error).message}). Rate limiting bypassed.`);
+      console.warn(
+        `[RedisUtil] Could not connect to Redis (${(err as Error).message}). Rate limiting bypassed.`,
+      );
     }
   }
 
