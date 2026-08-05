@@ -42,6 +42,17 @@ const onboardingSchema = Joi.object({
 });
 
 export default class AgentController {
+  static async getRecruits(req: Request, res: Response, next: NextFunction) {
+    try {
+      const recruits = await AgentService.getRecruits(
+        (req.user as { id: string }).id,
+      );
+      return responseSuccess(res, 200, recruits);
+    } catch (err) {
+      next(err);
+    }
+  }
+
   static async registerSeller(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
       firstName: Joi.string().required(),

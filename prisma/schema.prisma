@@ -19,7 +19,7 @@ model Users {
   lastName        String?
   phoneNumber     String?
   avatarFileId    String?           @unique
-  userReferralId  String?           @unique
+  userReferralId  String?
   accountStatus   USERACCOUNTSTATUS @default(ACTIVE)
   isEmailVerified Boolean           @default(false)
   isOnBoarding    Boolean           @default(false)

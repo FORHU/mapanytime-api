@@ -17,6 +17,39 @@ type SellerRegistrationData = {
 };
 
 export default class AgentService {
+  static async getRecruits(agentId: string) {
+    const sellers = await prisma.sellers.findMany({
+      where: {
+        deletedAt: null,
+        users: { userReferralId: agentId },
+      },
+      select: {
+        id: true,
+        createdAt: true,
+        applicationStatus: true,
+        onboardingStep: true,
+        isOnboarded: true,
+        users: {
+          select: { firstName: true, lastName: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return sellers.map((seller) => ({
+      sellerId: seller.id,
+      sellerName: [seller.users.firstName, seller.users.lastName]
+        .filter(Boolean)
+        .join(' '),
+      dateRecruited: seller.createdAt,
+      status: seller.isOnboarded
+        ? 'Active'
+        : seller.onboardingStep > 0
+          ? 'Incomplete'
+          : 'Pending Onboarding',
+    }));
+  }
+
   static async registerSeller(data: SellerRegistrationData) {
     const existingUser = await prisma.users.findFirst({
       where: { email: data.email, accountStatus: 'ACTIVE' },
@@ -40,6 +73,7 @@ export default class AgentService {
           firstName: data.firstName,
           lastName: data.lastName,
           phoneNumber: data.phoneNumber || null,
+          userReferral: { connect: { id: data.agentId } },
           isEmailVerified: true,
           isOnBoarding: true,
           accountStatus: 'ACTIVE',
