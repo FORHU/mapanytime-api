@@ -19,6 +19,7 @@ model Users {
   lastName        String?
   phoneNumber     String?
   avatarFileId    String?           @unique
+  userReferralId  String?
   accountStatus   USERACCOUNTSTATUS @default(ACTIVE)
   isEmailVerified Boolean           @default(false)
   isOnBoarding    Boolean           @default(false)
@@ -35,7 +36,11 @@ model Users {
   verifiedDocuments DocumentVerifications[]
   sentAdminInvites  AdminInvites[]
   notifications     Notifications[]
+  userReferral      Users?                  @relation("UserReferrals", fields: [userReferralId], references: [id])
+  userReferrals     Users[]                 @relation("UserReferrals")
 
+  @@unique([userReferralId, id])
+  @@index([userReferralId])
   @@index([email])
   @@index([accountStatus])
 }
@@ -74,6 +79,10 @@ enum USERACCOUNTSTATUS {
   ACTIVE
   SUSPENDED
   DEACTIVATED
+  PENDING_VERIFICATION
+  UNDER_REVIEW
+  BANNED
+  NEED_REVISSION
 }
 
 model Session {
@@ -122,6 +131,11 @@ model Sellers {
   updatedAt             DateTime                @updatedAt
   deletedAt             DateTime?
   applicationStatus     ApplicationStatus       @default(PENDING)
+  sellerPlan            String?
+  agentNotes            String?
+  onboardingStep        Int                     @default(0)
+  isOnboarded           Boolean                 @default(false)
+  onboardedAt           DateTime?
   documentVerifications DocumentVerifications[]
   users                 Users                   @relation(fields: [userId], references: [id])
   stores                Stores[]

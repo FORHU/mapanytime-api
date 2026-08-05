@@ -12,7 +12,7 @@
     "forceConsistentCasingInFileNames": true,
     "typeRoots": ["./node_modules/@types", "src/types"],
     "sourceMap": true,
-    "declaration": true
+    "declaration": false
   },
   "include": ["src/**/*.ts", "prisma/**/*"],
   "exclude": ["node_modules", "dist"]

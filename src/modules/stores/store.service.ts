@@ -9,10 +9,16 @@ import { prisma } from '../../utils/prisma';
 export default class StoreService {
   static async createStoreWithDocuments(
     sellerId: string,
-    storeData: { storeName: string; description?: string; categoryIds: string[] },
+    storeData: {
+      storeName: string;
+      description?: string;
+      categoryIds: string[];
+      email?: string;
+      phone?: string;
+    },
     locationData: Prisma.StoreLocationsCreateWithoutStoreInput,
     hoursData: Prisma.StoreHoursCreateWithoutStoreInput[],
-    rawDocuments?: {
+    rawDocuments?: Partial<{
       mayorsPermitFileName: string;
       mayorsPermitKey: string;
       dtiCertificateFileName: string;
@@ -21,30 +27,47 @@ export default class StoreService {
       birCertificateKey: string;
       secCertificateFileName: string;
       secCertificateKey: string;
-    },
+    }>,
+    options?: { completeOnboarding?: boolean },
   ) {
     const uploadedFiles = rawDocuments
       ? [
-          {
-            fileName: rawDocuments.mayorsPermitFileName,
-            fileUrl: rawDocuments.mayorsPermitKey,
-            documentType: 'MAYORS_PERMIT' as const,
-          },
-          {
-            fileName: rawDocuments.dtiCertificateFileName,
-            fileUrl: rawDocuments.dtiCertificateKey,
-            documentType: 'DTI_CERTIFICATE' as const,
-          },
-          {
-            fileName: rawDocuments.birCertificateFileName,
-            fileUrl: rawDocuments.birCertificateKey,
-            documentType: 'BIR_CERTIFICATE' as const,
-          },
-          {
-            fileName: rawDocuments.secCertificateFileName,
-            fileUrl: rawDocuments.secCertificateKey,
-            documentType: 'SEC_CERTIFICATE' as const,
-          },
+          ...(rawDocuments.mayorsPermitFileName && rawDocuments.mayorsPermitKey
+            ? [
+                {
+                  fileName: rawDocuments.mayorsPermitFileName,
+                  fileUrl: rawDocuments.mayorsPermitKey,
+                  documentType: 'MAYORS_PERMIT' as const,
+                },
+              ]
+            : []),
+          ...(rawDocuments.dtiCertificateFileName && rawDocuments.dtiCertificateKey
+            ? [
+                {
+                  fileName: rawDocuments.dtiCertificateFileName,
+                  fileUrl: rawDocuments.dtiCertificateKey,
+                  documentType: 'DTI_CERTIFICATE' as const,
+                },
+              ]
+            : []),
+          ...(rawDocuments.birCertificateFileName && rawDocuments.birCertificateKey
+            ? [
+                {
+                  fileName: rawDocuments.birCertificateFileName,
+                  fileUrl: rawDocuments.birCertificateKey,
+                  documentType: 'BIR_CERTIFICATE' as const,
+                },
+              ]
+            : []),
+          ...(rawDocuments.secCertificateFileName && rawDocuments.secCertificateKey
+            ? [
+                {
+                  fileName: rawDocuments.secCertificateFileName,
+                  fileUrl: rawDocuments.secCertificateKey,
+                  documentType: 'SEC_CERTIFICATE' as const,
+                },
+              ]
+            : []),
         ]
       : [];
 
@@ -54,6 +77,8 @@ export default class StoreService {
           sellerId,
           storeName: storeData.storeName,
           description: storeData.description,
+          email: storeData.email,
+          phone: storeData.phone,
           isActive: false,
           storeLocations: { create: locationData },
           storeHours: { create: hoursData },
@@ -89,6 +114,25 @@ export default class StoreService {
             fileId: savedFile.id,
             documentType: file.documentType,
           },
+        });
+      }
+
+      if (options?.completeOnboarding) {
+        const seller = await tx.sellers.findUnique({ where: { id: sellerId } });
+        if (!seller) throw { status: 404, message: 'Seller not found' };
+
+        await tx.sellers.update({
+          where: { id: sellerId },
+          data: {
+            onboardingStep: 3,
+            isOnboarded: true,
+            onboardedAt: new Date(),
+          },
+        });
+
+        await tx.users.update({
+          where: { id: seller.userId },
+          data: { isOnBoarding: false },
         });
       }
 

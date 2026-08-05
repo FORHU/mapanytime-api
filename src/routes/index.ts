@@ -16,6 +16,7 @@ import returnRoute from '../modules/returns/return.route';
 import settlementRoute from '../modules/settlements/settlement.route';
 import payoutRoute from '../modules/payouts/payout.route';
 import rbacRoute from './rbac.route';
+import agentRoute from './agent.route';
 
 const router = express.Router();
 
@@ -42,5 +43,6 @@ router.use('/v1/returns', returnRoute);
 router.use('/v1/settlements', settlementRoute);
 router.use('/v1/payouts', payoutRoute);
 router.use('/v1/rbac', rbacRoute);
+router.use('/v1/agent', agentRoute);
 
 export default router;

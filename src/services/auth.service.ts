@@ -238,7 +238,23 @@ export default class AuthSvc {
       return { accessToken, refreshToken };
     }
 
-    const stores = (user as Users & { seller?: { stores: unknown[] } }).seller?.stores || [];
+    const seller = (
+      user as Users & {
+        seller?: {
+          id: string;
+          applicationStatus: string;
+          isOnboarded: boolean;
+          onboardingStep: number;
+          stores: Array<{ deletedAt?: Date | null }>;
+        };
+      }
+    ).seller;
+    const stores = seller?.stores?.filter((store) => !store.deletedAt) || [];
+    const hasStores = stores.length > 0;
+
+    // Older approved seller records may have a store but still have the default
+    // isOnboarded=false value. Normalize that legacy state for authentication.
+    const isOnboarded = Boolean(seller?.isOnboarded || seller?.applicationStatus === 'APPROVED');
 
     const { passwordHash: _passwordHash, ...safeUser } = user as Users & {
       passwordHash?: string;
@@ -249,6 +265,15 @@ export default class AuthSvc {
       refreshToken,
       user: safeUser,
       stores,
+      seller: seller
+        ? {
+            id: seller.id,
+            applicationStatus: seller.applicationStatus,
+            isOnboarded,
+            onboardingStep: seller.onboardingStep,
+            hasStores,
+          }
+        : null,
       location: { country: user.countryCode },
     };
   }
