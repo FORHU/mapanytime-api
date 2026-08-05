@@ -254,9 +254,7 @@ export default class AuthSvc {
 
     // Older approved seller records may have a store but still have the default
     // isOnboarded=false value. Normalize that legacy state for authentication.
-    const isOnboarded = Boolean(
-      seller?.isOnboarded || (seller?.applicationStatus === 'APPROVED'),
-    );
+    const isOnboarded = Boolean(seller?.isOnboarded || seller?.applicationStatus === 'APPROVED');
 
     const { passwordHash: _passwordHash, ...safeUser } = user as Users & {
       passwordHash?: string;
