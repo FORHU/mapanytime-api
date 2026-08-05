@@ -552,8 +552,19 @@ export async function seedStores(prisma: PrismaClient) {
     // Ensure an APPROVED seller profile.
     const seller = await prisma.sellers.upsert({
       where: { userId: user.id },
-      update: { applicationStatus: 'APPROVED' },
-      create: { userId: user.id, applicationStatus: 'APPROVED' },
+      update: {
+        applicationStatus: 'APPROVED',
+        isOnboarded: true,
+        onboardingStep: 3,
+        onboardedAt: new Date(),
+      },
+      create: {
+        userId: user.id,
+        applicationStatus: 'APPROVED',
+        isOnboarded: true,
+        onboardingStep: 3,
+        onboardedAt: new Date(),
+      },
     });
 
     const storeSlug = s.storeName

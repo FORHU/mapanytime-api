@@ -36,8 +36,11 @@ model Users {
   verifiedDocuments DocumentVerifications[]
   sentAdminInvites  AdminInvites[]
   notifications     Notifications[]
-  userReferral      Users?                 @relation("UserReferrals", fields: [userReferralId], references: [id]) 
+  userReferral      Users?                  @relation("UserReferrals", fields: [userReferralId], references: [id])
+  userReferrals     Users[]                 @relation("UserReferrals")
 
+  @@unique([userReferralId, id])
+  @@index([userReferralId])
   @@index([email])
   @@index([accountStatus])
 }
