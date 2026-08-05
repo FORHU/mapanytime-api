@@ -19,7 +19,9 @@ const onboardingSchema = Joi.object({
     storeName: Joi.string().required(),
     description: Joi.string().allow('').optional(),
     categoryIds: Joi.array().items(Joi.string()).min(1).required(),
-    email: Joi.string().email({ tlds: { allow: false } }).optional(),
+    email: Joi.string()
+      .email({ tlds: { allow: false } })
+      .optional(),
     phone: Joi.string().allow('').optional(),
   }).required(),
   locationData: Joi.object({
@@ -32,21 +34,24 @@ const onboardingSchema = Joi.object({
     latitude: Joi.number().required(),
     longitude: Joi.number().required(),
   }).required(),
-  hoursData: Joi.array().items(Joi.object({
-    dayOfWeek: Joi.number().integer().min(0).max(6).required(),
-    openMinutes: Joi.number().integer().min(0).max(1440).required(),
-    closeMinutes: Joi.number().integer().min(0).max(1440).required(),
-    isClosed: Joi.boolean().default(false),
-  })).min(1).required(),
+  hoursData: Joi.array()
+    .items(
+      Joi.object({
+        dayOfWeek: Joi.number().integer().min(0).max(6).required(),
+        openMinutes: Joi.number().integer().min(0).max(1440).required(),
+        closeMinutes: Joi.number().integer().min(0).max(1440).required(),
+        isClosed: Joi.boolean().default(false),
+      }),
+    )
+    .min(1)
+    .required(),
   documents: documentSchema,
 });
 
 export default class AgentController {
   static async getRecruits(req: Request, res: Response, next: NextFunction) {
     try {
-      const recruits = await AgentService.getRecruits(
-        (req.user as { id: string }).id,
-      );
+      const recruits = await AgentService.getRecruits((req.user as { id: string }).id);
       return responseSuccess(res, 200, recruits);
     } catch (err) {
       next(err);
@@ -57,10 +62,14 @@ export default class AgentController {
     const schema = Joi.object({
       firstName: Joi.string().required(),
       lastName: Joi.string().required(),
-      email: Joi.string().email({ tlds: { allow: false } }).required(),
+      email: Joi.string()
+        .email({ tlds: { allow: false } })
+        .required(),
       phoneNumber: Joi.string().allow('').optional(),
       storeName: Joi.string().required(),
-      businessEmail: Joi.string().email({ tlds: { allow: false } }).required(),
+      businessEmail: Joi.string()
+        .email({ tlds: { allow: false } })
+        .required(),
       businessPhone: Joi.string().required(),
       sellerPlan: Joi.string().required(),
       agentNotes: Joi.string().allow('').optional(),

@@ -38,9 +38,7 @@ export default class AgentService {
 
     return sellers.map((seller) => ({
       sellerId: seller.id,
-      sellerName: [seller.users.firstName, seller.users.lastName]
-        .filter(Boolean)
-        .join(' '),
+      sellerName: [seller.users.firstName, seller.users.lastName].filter(Boolean).join(' '),
       dateRecruited: seller.createdAt,
       status: seller.isOnboarded
         ? 'Active'
@@ -61,9 +59,7 @@ export default class AgentService {
 
     const temporaryPassword = crypto.randomBytes(12).toString('base64url');
     const salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto
-      .pbkdf2Sync(temporaryPassword, salt, 1000, 64, 'sha512')
-      .toString('hex');
+    const hash = crypto.pbkdf2Sync(temporaryPassword, salt, 1000, 64, 'sha512').toString('hex');
 
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.users.create({
@@ -95,9 +91,7 @@ export default class AgentService {
       return { sellerId: seller.id, userId: user.id };
     });
 
-    logger.info(
-      `[Agent] Seller registered: sellerId=${result.sellerId}, agentId=${data.agentId}`,
-    );
+    logger.info(`[Agent] Seller registered: sellerId=${result.sellerId}, agentId=${data.agentId}`);
 
     return {
       ...result,

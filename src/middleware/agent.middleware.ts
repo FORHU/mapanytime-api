@@ -13,7 +13,6 @@ export const requireAgent = async (req: Request, res: Response, next: NextFuncti
     });
     console.log('User roles:', JSON.stringify(user));
     if (!user?.roles.some((role) => role.roleName === SYSTEM_ROLES.SUPPORT_AGENT)) {
-
       return res.status(403).json({ message: 'Support Agent privileges required.' });
     }
 

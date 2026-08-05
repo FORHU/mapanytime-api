@@ -33,32 +33,40 @@ export default class StoreService {
     const uploadedFiles = rawDocuments
       ? [
           ...(rawDocuments.mayorsPermitFileName && rawDocuments.mayorsPermitKey
-            ? [{
-            fileName: rawDocuments.mayorsPermitFileName,
-            fileUrl: rawDocuments.mayorsPermitKey,
-            documentType: 'MAYORS_PERMIT' as const,
-            }]
+            ? [
+                {
+                  fileName: rawDocuments.mayorsPermitFileName,
+                  fileUrl: rawDocuments.mayorsPermitKey,
+                  documentType: 'MAYORS_PERMIT' as const,
+                },
+              ]
             : []),
           ...(rawDocuments.dtiCertificateFileName && rawDocuments.dtiCertificateKey
-            ? [{
-            fileName: rawDocuments.dtiCertificateFileName,
-            fileUrl: rawDocuments.dtiCertificateKey,
-            documentType: 'DTI_CERTIFICATE' as const,
-            }]
+            ? [
+                {
+                  fileName: rawDocuments.dtiCertificateFileName,
+                  fileUrl: rawDocuments.dtiCertificateKey,
+                  documentType: 'DTI_CERTIFICATE' as const,
+                },
+              ]
             : []),
           ...(rawDocuments.birCertificateFileName && rawDocuments.birCertificateKey
-            ? [{
-            fileName: rawDocuments.birCertificateFileName,
-            fileUrl: rawDocuments.birCertificateKey,
-            documentType: 'BIR_CERTIFICATE' as const,
-            }]
+            ? [
+                {
+                  fileName: rawDocuments.birCertificateFileName,
+                  fileUrl: rawDocuments.birCertificateKey,
+                  documentType: 'BIR_CERTIFICATE' as const,
+                },
+              ]
             : []),
           ...(rawDocuments.secCertificateFileName && rawDocuments.secCertificateKey
-            ? [{
-            fileName: rawDocuments.secCertificateFileName,
-            fileUrl: rawDocuments.secCertificateKey,
-            documentType: 'SEC_CERTIFICATE' as const,
-            }]
+            ? [
+                {
+                  fileName: rawDocuments.secCertificateFileName,
+                  fileUrl: rawDocuments.secCertificateKey,
+                  documentType: 'SEC_CERTIFICATE' as const,
+                },
+              ]
             : []),
         ]
       : [];
