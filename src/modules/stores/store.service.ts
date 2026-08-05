@@ -190,7 +190,7 @@ export default class StoreService {
 
     try {
       const redis = redisConnection.getClient();
-      const cached = await redis.get(cacheKey);
+      const cached = await redis?.get(cacheKey);
 
       if (cached) {
         logger.info(`[Redis] Cache hit for ${cacheKey}`);
@@ -234,7 +234,7 @@ export default class StoreService {
 
     try {
       const redis = redisConnection.getClient();
-      await redis.setEx(cacheKey, 60, JSON.stringify(result));
+      await redis?.setEx(cacheKey, 60, JSON.stringify(result));
     } catch (err) {
       logger.warn(`[Redis] Cache write failed for ${cacheKey}.`);
     }

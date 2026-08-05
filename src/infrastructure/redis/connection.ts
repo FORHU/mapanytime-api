@@ -39,31 +39,38 @@ class RedisConnection {
       logger.warn('[Redis] Connection closed.');
     });
 
-    // Enforce a hard connection timeout via Promise.race
-    await Promise.race([
-      this.client.connect(),
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`[Redis] Connection timed out after ${CONNECT_TIMEOUT_MS}ms`)),
-          CONNECT_TIMEOUT_MS,
+    // Enforce a connection attempt with timeout
+    try {
+      await Promise.race([
+        this.client.connect(),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`Connection timed out after ${CONNECT_TIMEOUT_MS}ms`)),
+            CONNECT_TIMEOUT_MS,
+          ),
         ),
-      ),
-    ]);
+      ]);
 
-    this.isConnected = true;
-    logger.info(`[Redis] Connected to ${REDIS_HOST}:${REDIS_PORT}${REDIS_TLS ? ' (TLS)' : ''}`);
+      this.isConnected = true;
+      logger.info(`[Redis] Connected to ${REDIS_HOST}:${REDIS_PORT}${REDIS_TLS ? ' (TLS)' : ''}`);
+    } catch (err) {
+      this.isConnected = false;
+      logger.warn(`[Redis] Could not connect to ${REDIS_HOST}:${REDIS_PORT} (${(err as Error).message}). Operating in offline mode.`);
+    }
   }
 
-  public getClient(): RedisClientType {
+  public getClient(): RedisClientType | null {
     if (!this.client || !this.isConnected) {
-      throw new Error('[Redis] Client not initialized. Call connect() first.');
+      return null;
     }
     return this.client;
   }
 
   public async ping(): Promise<boolean> {
     try {
-      const result = await this.getClient().ping();
+      const cli = this.getClient();
+      if (!cli) return false;
+      const result = await cli.ping();
       return result === 'PONG';
     } catch {
       return false;

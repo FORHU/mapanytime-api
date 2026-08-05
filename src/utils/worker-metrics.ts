@@ -90,7 +90,7 @@ export class WorkerMetrics {
       try {
         const { redis } = await import('../infrastructure/redis');
         const client = redis.getClient();
-        await client.set('worker:metrics:snapshot', JSON.stringify(snapshot), {
+        await client?.set('worker:metrics:snapshot', JSON.stringify(snapshot), {
           EX: 300, // 5 min TTL — stale if worker dies
         });
       } catch (err) {

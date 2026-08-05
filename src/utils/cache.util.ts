@@ -9,7 +9,9 @@ export default class CacheUtil {
 
   static async get<T = unknown>(key: string): Promise<T | null> {
     try {
-      const data = await this.client().get(key);
+      const cli = this.client();
+      if (!cli) return null;
+      const data = await cli.get(key);
       if (!data) return null;
       return JSON.parse(data) as T;
     } catch (error) {
@@ -20,12 +22,14 @@ export default class CacheUtil {
 
   static async set(key: string, value: unknown, ttlSeconds?: number): Promise<void> {
     try {
+      const cli = this.client();
+      if (!cli) return;
       const serialized = JSON.stringify(value);
       const ttl = ttlSeconds || REDIS_TTL_SECONDS;
       if (ttl > 0) {
-        await this.client().setEx(key, ttl, serialized);
+        await cli.setEx(key, ttl, serialized);
       } else {
-        await this.client().set(key, serialized);
+        await cli.set(key, serialized);
       }
     } catch (error) {
       logger.error(`[CacheUtil:set] Failed to set key ${key}:`, error);
@@ -34,7 +38,9 @@ export default class CacheUtil {
 
   static async del(key: string): Promise<void> {
     try {
-      await this.client().del(key);
+      const cli = this.client();
+      if (!cli) return;
+      await cli.del(key);
     } catch (error) {
       logger.error(`[CacheUtil:del] Failed to delete key ${key}:`, error);
     }
@@ -42,8 +48,10 @@ export default class CacheUtil {
 
   static async delByPattern(pattern: string): Promise<void> {
     try {
-      const keys = await this.client().keys(pattern);
-      if (keys.length) await this.client().del(keys);
+      const cli = this.client();
+      if (!cli) return;
+      const keys = await cli.keys(pattern);
+      if (keys.length) await cli.del(keys);
     } catch (error) {
       logger.error(`[CacheUtil:delByPattern] Failed to delete pattern ${pattern}:`, error);
     }
@@ -51,11 +59,12 @@ export default class CacheUtil {
 
   static async flushAll(): Promise<void> {
     try {
-      await this.client().flushAll();
+      const cli = this.client();
+      if (!cli) return;
+      await cli.flushAll();
       logger.info('[CacheUtil] Redis cache flushed successfully');
     } catch (error) {
       logger.error('[CacheUtil:flushAll] Failed to flush cache:', error);
-      throw error;
     }
   }
 
