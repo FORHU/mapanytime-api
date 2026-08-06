@@ -139,10 +139,52 @@ model Sellers {
   documentVerifications DocumentVerifications[]
   users                 Users                   @relation(fields: [userId], references: [id])
   stores                Stores[]
+  properties            Properties[]
   supplierProducts      SupplierProducts[]
   settlements           Settlements[]
   payouts               SellerPayouts[]
   returnRequests        ReturnRequests[]
+}
+
+model Properties {
+  id               String         @id @default(cuid())
+  sellerId         String
+  sellerCapacity   SELLERCAPACITY
+  legalName        String
+  phone            String
+  email            String
+  governmentIdName String?
+  propertyType     PROPERTYTYPE
+  address          String
+  latitude         Float
+  longitude        Float
+  subdivision      String?
+  status           PROPERTYSTATUS @default(DRAFT)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  seller Sellers @relation(fields: [sellerId], references: [id])
+
+  @@index([sellerId])
+  @@index([propertyType])
+  @@index([status])
+  @@index([latitude, longitude])
+}
+
+enum SELLERCAPACITY {
+  OWNER
+  BROKER
+  PROXY
+}
+
+enum PROPERTYTYPE {
+  HOUSE_LOT
+  RAW_LAND
+}
+
+enum PROPERTYSTATUS {
+  DRAFT
+  PENDING_REVIEW
 }
 
 model Buyers {
