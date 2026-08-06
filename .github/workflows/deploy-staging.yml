@@ -197,11 +197,9 @@ jobs:
               --network mapanytime \
               --env-file /home/ec2-user/mapanytime-api.env \
               -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
-              --log-driver awslogs \
-              --log-opt awslogs-region=${{ env.AWS_REGION }} \
-              --log-opt awslogs-group=/mapanytime-api/staging \
-              --log-opt awslogs-stream=mapanytime-api \
-              --log-opt awslogs-create-group=true \
+              --log-driver json-file \
+              --log-opt max-size=10m \
+              --log-opt max-file=3 \
               ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
 
             docker stop ${{ env.CONTAINER_NAME }}-worker 2>/dev/null || true
@@ -210,11 +208,9 @@ jobs:
               --network mapanytime \
               --env-file /home/ec2-user/mapanytime-api.env \
               -p 127.0.0.1:8080:8080 \
-              --log-driver awslogs \
-              --log-opt awslogs-region=${{ env.AWS_REGION }} \
-              --log-opt awslogs-group=/mapanytime-api/staging \
-              --log-opt awslogs-stream=mapanytime-api-worker \
-              --log-opt awslogs-create-group=true \
+              --log-driver json-file \
+              --log-opt max-size=10m \
+              --log-opt max-file=3 \
               ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
               npm run worker
 
