@@ -29,7 +29,7 @@ export default class PropertyService {
         latitude: input.latitude,
         longitude: input.longitude,
         subdivision: input.subdivision,
-        status: PROPERTYSTATUS.DRAFT,
+        status: PROPERTYSTATUS.PENDING_REVIEW,
       },
     });
   }

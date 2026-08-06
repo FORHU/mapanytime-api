@@ -18,6 +18,9 @@ import payoutRoute from '../modules/payouts/payout.route';
 import rbacRoute from './rbac.route';
 import agentRoute from './agent.route';
 import propertyRoute from '../modules/properties/property.route';
+import adminApprovalRoute from '../modules/adminApprovals/adminApproval.route';
+import { authenticate } from '../middleware/auth.middleware';
+import { requireAdmin } from '../middleware/admin.middleware';
 
 const router = express.Router();
 
@@ -46,5 +49,6 @@ router.use('/v1/payouts', payoutRoute);
 router.use('/v1/rbac', rbacRoute);
 router.use('/v1/agent', agentRoute);
 router.use('/v1/properties', propertyRoute);
+router.use('/v1/admin/approvals', authenticate, requireAdmin, adminApprovalRoute);
 
 export default router;

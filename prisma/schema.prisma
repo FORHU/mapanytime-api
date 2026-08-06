@@ -28,16 +28,18 @@ model Users {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  roles             Roles[]                 @relation("UserRoles")
-  avatarFile        Files?                  @relation("UserAvatar", fields: [avatarFileId], references: [id])
-  session           Session[]
-  seller            Sellers?
-  buyer             Buyers?
-  verifiedDocuments DocumentVerifications[]
-  sentAdminInvites  AdminInvites[]
-  notifications     Notifications[]
-  userReferral      Users?                  @relation("UserReferrals", fields: [userReferralId], references: [id])
-  userReferrals     Users[]                 @relation("UserReferrals")
+  roles              Roles[]                 @relation("UserRoles")
+  avatarFile         Files?                  @relation("UserAvatar", fields: [avatarFileId], references: [id])
+  session            Session[]
+  seller             Sellers?
+  buyer              Buyers?
+  verifiedDocuments  DocumentVerifications[]
+  sentAdminInvites   AdminInvites[]
+  notifications      Notifications[]
+  reviewedProperties Properties[]            @relation("PropertyReviewers")
+  reviewedStores     Stores[]                @relation("StoreReviewers")
+  userReferral       Users?                  @relation("UserReferrals", fields: [userReferralId], references: [id])
+  userReferrals      Users[]                 @relation("UserReferrals")
 
   @@unique([userReferralId, id])
   @@index([userReferralId])
@@ -162,8 +164,12 @@ model Properties {
   status           PROPERTYSTATUS @default(DRAFT)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
+  rejectionReason  String?
+  reviewedAt       DateTime?
+  reviewedById     String?
 
-  seller Sellers @relation(fields: [sellerId], references: [id])
+  seller     Sellers @relation(fields: [sellerId], references: [id])
+  reviewedBy Users?  @relation("PropertyReviewers", fields: [reviewedById], references: [id])
 
   @@index([sellerId])
   @@index([propertyType])
@@ -185,6 +191,8 @@ enum PROPERTYTYPE {
 enum PROPERTYSTATUS {
   DRAFT
   PENDING_REVIEW
+  ACTIVE
+  REJECTED
 }
 
 model Buyers {
@@ -264,26 +272,30 @@ enum INVITESTATUS {
 // =========================================================================
 
 model Stores {
-  id             String    @id @default(cuid())
-  sellerId       String
-  storeName      String
-  description    String?
-  logoId         String?
-  bannerId       String?
-  slug           String?   @unique
-  phone          String?
-  email          String?
-  returnPolicy   String?
-  shippingPolicy String?
-  socialLinks    Json?
-  ratingAverage  Float     @default(0)
-  ratingCount    Int       @default(0)
-  followersCount Int       @default(0)
-  vacationMode   Boolean   @default(false)
-  isActive       Boolean   @default(false)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  deletedAt      DateTime?
+  id              String              @id @default(cuid())
+  sellerId        String
+  storeName       String
+  description     String?
+  logoId          String?
+  bannerId        String?
+  slug            String?             @unique
+  phone           String?
+  email           String?
+  returnPolicy    String?
+  shippingPolicy  String?
+  socialLinks     Json?
+  ratingAverage   Float               @default(0)
+  ratingCount     Int                 @default(0)
+  followersCount  Int                 @default(0)
+  vacationMode    Boolean             @default(false)
+  isActive        Boolean             @default(false)
+  approvalStatus  STOREAPPROVALSTATUS @default(PENDING)
+  rejectionReason String?
+  reviewedAt      DateTime?
+  reviewedById    String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  deletedAt       DateTime?
 
   logoFile              Files?                  @relation("StoreLogo", fields: [logoId], references: [id])
   bannerFile            Files?                  @relation("StoreBanner", fields: [bannerId], references: [id])
@@ -293,6 +305,7 @@ model Stores {
   storeLocations        StoreLocations?
   storeReviews          StoreReviews[]
   seller                Sellers                 @relation(fields: [sellerId], references: [id])
+  reviewedBy            Users?                  @relation("StoreReviewers", fields: [reviewedById], references: [id])
   categories            Categories[]            @relation("CategoriesToStores")
   orders                Orders[]
   inventory             Inventory[]
@@ -524,6 +537,12 @@ model ProductTags {
 enum ApplicationStatus {
   PENDING
   APPROVED
+  REJECTED
+}
+
+enum STOREAPPROVALSTATUS {
+  PENDING
+  ACTIVE
   REJECTED
 }
 
