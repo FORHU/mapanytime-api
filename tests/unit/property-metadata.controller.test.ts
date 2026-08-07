@@ -25,11 +25,7 @@ describe('PropertyController.updateMetadata', () => {
   it('returns 400 when the payload has no metadata fields', async () => {
     mockReq.body = {};
 
-    await PropertyController.updateMetadata(
-      mockReq as Request,
-      mockRes as Response,
-      next,
-    );
+    await PropertyController.updateMetadata(mockReq as Request, mockRes as Response, next);
 
     expect(mockRes.status).toHaveBeenCalledWith(400);
     expect(mockRes.json).toHaveBeenCalledWith(
@@ -45,11 +41,7 @@ describe('PropertyController.updateMetadata', () => {
       sellerCapacity: 'OWNER',
     });
 
-    await PropertyController.updateMetadata(
-      mockReq as Request,
-      mockRes as Response,
-      next,
-    );
+    await PropertyController.updateMetadata(mockReq as Request, mockRes as Response, next);
 
     expect(mockRes.status).toHaveBeenCalledWith(400);
     expect(mockRes.json).toHaveBeenCalledWith(
@@ -65,15 +57,13 @@ describe('PropertyController.updateMetadata', () => {
       sellerCapacity: 'OWNER',
     });
 
-    await PropertyController.updateMetadata(
-      mockReq as Request,
-      mockRes as Response,
-      next,
-    );
+    await PropertyController.updateMetadata(mockReq as Request, mockRes as Response, next);
 
     expect(mockRes.status).toHaveBeenCalledWith(400);
     expect(mockRes.json).toHaveBeenCalledWith(
-      expect.objectContaining({ message: expect.stringContaining('not allowed for property owners') }),
+      expect.objectContaining({
+        message: expect.stringContaining('not allowed for property owners'),
+      }),
     );
   });
 
@@ -85,11 +75,7 @@ describe('PropertyController.updateMetadata', () => {
       sellerCapacity: 'BROKER',
     });
 
-    await PropertyController.updateMetadata(
-      mockReq as Request,
-      mockRes as Response,
-      next,
-    );
+    await PropertyController.updateMetadata(mockReq as Request, mockRes as Response, next);
 
     expect(mockRes.status).toHaveBeenCalledWith(400);
     expect(mockRes.json).toHaveBeenCalledWith(
@@ -114,11 +100,7 @@ describe('PropertyController.updateMetadata', () => {
       pricePerSqm: 30000,
     });
 
-    await PropertyController.updateMetadata(
-      mockReq as Request,
-      mockRes as Response,
-      next,
-    );
+    await PropertyController.updateMetadata(mockReq as Request, mockRes as Response, next);
 
     expect(mockRes.status).toHaveBeenCalledWith(200);
     expect(PropertyService.updatePropertyMetadata).toHaveBeenCalledWith(

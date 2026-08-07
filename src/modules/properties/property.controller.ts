@@ -35,7 +35,14 @@ const propertySchema = Joi.object({
   hoaDues: Joi.number().min(0).optional(),
 }).custom((value, helpers) => {
   if (value.propertyType === 'raw-land') {
-    const houseOnly = ['floorArea', 'bedrooms', 'bathrooms', 'parkingSpaces', 'yearBuilt', 'furnishing'];
+    const houseOnly = [
+      'floorArea',
+      'bedrooms',
+      'bathrooms',
+      'parkingSpaces',
+      'yearBuilt',
+      'furnishing',
+    ];
     const present = houseOnly.filter((field) => value[field] !== undefined);
     if (present.length > 0) {
       return helpers.error('any.custom', {
@@ -108,7 +115,14 @@ const taxResponsibilitiesMap = {
   'standard-sharing': 'STANDARD_SHARING',
 } as const;
 
-const HOUSE_ONLY_FIELDS = ['floorArea', 'bedrooms', 'bathrooms', 'parkingSpaces', 'yearBuilt', 'furnishing'];
+const HOUSE_ONLY_FIELDS = [
+  'floorArea',
+  'bedrooms',
+  'bathrooms',
+  'parkingSpaces',
+  'yearBuilt',
+  'furnishing',
+];
 
 /** Maps the API's lowercase slug values to their DB enum values. */
 function mapMetadata(value: Record<string, unknown>): PropertyMetadataInput {
@@ -123,7 +137,9 @@ function mapMetadata(value: Record<string, unknown>): PropertyMetadataInput {
     furnishing: value.furnishing
       ? furnishingMap[value.furnishing as keyof typeof furnishingMap]
       : undefined,
-    titleType: value.titleType ? titleTypeMap[value.titleType as keyof typeof titleTypeMap] : undefined,
+    titleType: value.titleType
+      ? titleTypeMap[value.titleType as keyof typeof titleTypeMap]
+      : undefined,
     titleNumber: value.titleNumber as string | undefined,
     scannedTitleFile: value.scannedTitleFile as string | undefined,
     latestTaxReceiptFile: value.latestTaxReceiptFile as string | undefined,
@@ -155,7 +171,11 @@ function assertMetadataRules(
   if (propertyType === 'RAW_LAND') {
     const present = HOUSE_ONLY_FIELDS.filter((field) => value[field] !== undefined);
     if (present.length > 0) {
-      return responseError(res, 400, `Field(s) ${present.join(', ')} only apply to House & Lot properties.`);
+      return responseError(
+        res,
+        400,
+        `Field(s) ${present.join(', ')} only apply to House & Lot properties.`,
+      );
     }
   }
 
@@ -164,7 +184,11 @@ function assertMetadataRules(
       return responseError(res, 400, 'Authority to Sell / SPA is not allowed for property owners.');
     }
   } else if (strict && value.authorityToSellFile === undefined) {
-    return responseError(res, 400, 'Authority to Sell / SPA is required for broker or proxy sellers.');
+    return responseError(
+      res,
+      400,
+      'Authority to Sell / SPA is required for broker or proxy sellers.',
+    );
   }
 
   return null;
@@ -243,10 +267,7 @@ export default class PropertyController {
         return responseError(res, 403, 'User is not registered as a seller.');
       }
 
-      const property = await PropertyService.getVerifiedPropertyDashboard(
-        sellerId,
-        req.params.id,
-      );
+      const property = await PropertyService.getVerifiedPropertyDashboard(sellerId, req.params.id);
 
       return responseSuccess(res, 200, property);
     } catch (error) {
