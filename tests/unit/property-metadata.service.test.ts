@@ -3,22 +3,25 @@ import { prisma } from '../../src/utils/prisma';
 
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
-    properties: {
+    propertiesProducts: {
       create: jest.fn(),
       findMany: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
     },
+    stores: {
+      findFirst: jest.fn(),
+    }
   },
 }));
 
-const mockedPrisma = prisma.properties as jest.Mocked<typeof prisma.properties>;
+// Cast mocked methods to preserve TypeScript intellisense
+const mockedPropertiesProducts = prisma.propertiesProducts as jest.Mocked<typeof prisma.propertiesProducts>;
+const mockedStores = prisma.stores as jest.Mocked<typeof prisma.stores>;
 
 const baseCreateInput = {
   sellerCapacity: 'OWNER' as const,
   legalName: 'Juan Dela Cruz',
-  phone: '+639171234567',
-  email: 'juan@example.com',
   propertyType: 'HOUSE_LOT' as const,
   address: '48 Pine Ridge Rd, Baguio City, Benguet',
   latitude: 16.4164,
@@ -27,7 +30,7 @@ const baseCreateInput = {
 
 const basePropertyRecord: Record<string, unknown> = {
   id: 'prop-1',
-  sellerId: 'seller-1',
+  storeId: 'store-1',
   sellerCapacity: 'OWNER',
   governmentIdName: null,
   subdivision: null,
@@ -42,19 +45,11 @@ const basePropertyRecord: Record<string, unknown> = {
   parkingSpaces: null,
   yearBuilt: null,
   furnishing: null,
-  titleType: null,
-  titleNumber: null,
-  scannedTitleFile: null,
-  latestTaxReceiptFile: null,
-  lotPlanFile: null,
-  authorityToSellFile: null,
   sellingPrice: null,
   negotiability: null,
   taxResponsibilities: null,
   hoaDues: null,
   legalName: 'Juan Dela Cruz',
-  phone: '+639171234567',
-  email: 'juan@example.com',
   propertyType: 'HOUSE_LOT',
   address: '48 Pine Ridge Rd, Baguio City, Benguet',
   latitude: 16.4164,
@@ -71,7 +66,9 @@ describe('PropertyService metadata', () => {
 
   describe('createProperty', () => {
     it('persists Step 3-5 metadata fields', async () => {
-      mockedPrisma.create.mockResolvedValue({ ...basePropertyRecord, id: 'prop-1' } as never);
+      // Mock the store query so createProperty can find the related storeId
+      mockedStores.findFirst.mockResolvedValue({ id: 'store-1' } as never);
+      mockedPropertiesProducts.create.mockResolvedValue({ ...basePropertyRecord, id: 'prop-1' } as never);
 
       await PropertyService.createProperty('seller-1', {
         ...baseCreateInput,
@@ -83,34 +80,36 @@ describe('PropertyService metadata', () => {
         parkingSpaces: 2,
         yearBuilt: 2019,
         furnishing: 'FULLY_FURNISHED',
-        titleType: 'TCT',
-        titleNumber: 'T-08234',
-        scannedTitleFile: 'TCT-08234.pdf',
-        latestTaxReceiptFile: 'RPT-2026-receipt.pdf',
-        authorityToSellFile: 'spa-2026.pdf',
         sellingPrice: 5400000,
         negotiability: 'NEGOTIABLE',
         taxResponsibilities: 'STANDARD_SHARING',
         hoaDues: 750,
       });
 
-      expect(mockedPrisma.create).toHaveBeenCalledWith({
+      expect(mockedPropertiesProducts.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          sellerId: 'seller-1',
+          storeId: 'store-1',
           lotArea: 180,
           terrain: 'SLOPING',
           bedrooms: 3,
           sellingPrice: 5400000,
           hoaDues: 750,
-          authorityToSellFile: 'spa-2026.pdf',
         }),
       });
+    });
+    
+    it('throws 404 if the store is not found for the seller', async () => {
+      mockedStores.findFirst.mockResolvedValue(null);
+
+      await expect(
+        PropertyService.createProperty('seller-1', baseCreateInput)
+      ).rejects.toEqual({ status: 404, message: 'Store not found for this seller.' });
     });
   });
 
   describe('updatePropertyMetadata', () => {
     it('throws 404 when the property does not exist for the seller', async () => {
-      mockedPrisma.findFirst.mockResolvedValue(null);
+      mockedPropertiesProducts.findFirst.mockResolvedValue(null);
 
       await expect(
         PropertyService.updatePropertyMetadata('seller-1', 'missing', { sellingPrice: 100 }),
@@ -118,11 +117,10 @@ describe('PropertyService metadata', () => {
     });
 
     it('updates only provided fields and attaches derived pricePerSqm', async () => {
-      mockedPrisma.findFirst.mockResolvedValue({
+      mockedPropertiesProducts.findFirst.mockResolvedValue({
         ...basePropertyRecord,
-        sellerId: 'seller-1',
       } as never);
-      mockedPrisma.update.mockResolvedValue({
+      mockedPropertiesProducts.update.mockResolvedValue({
         ...basePropertyRecord,
         lotArea: 180,
         sellingPrice: 5400000,
@@ -133,7 +131,7 @@ describe('PropertyService metadata', () => {
         sellingPrice: 5400000,
       });
 
-      expect(mockedPrisma.update).toHaveBeenCalledWith({
+      expect(mockedPropertiesProducts.update).toHaveBeenCalledWith({
         where: { id: 'prop-1' },
         data: expect.objectContaining({
           lotArea: 180,
@@ -146,7 +144,7 @@ describe('PropertyService metadata', () => {
 
   describe('getSellerProperty', () => {
     it('throws 404 when not owned by the seller', async () => {
-      mockedPrisma.findFirst.mockResolvedValue(null);
+      mockedPropertiesProducts.findFirst.mockResolvedValue(null);
 
       await expect(PropertyService.getSellerProperty('seller-1', 'prop-x')).rejects.toEqual({
         status: 404,
