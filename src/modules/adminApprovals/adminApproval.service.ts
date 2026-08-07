@@ -14,9 +14,18 @@ export default class AdminApprovalService {
         },
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.properties.findMany({
+      prisma.propertiesProducts.findMany({
         include: {
-          seller: { include: { users: true } },
+          store: {
+            include: {
+              seller: { include: { users: true } },
+            },
+          },
+          propertyFiles: {
+            include: {
+              file: true,
+            },
+          },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -42,7 +51,7 @@ export default class AdminApprovalService {
         entityType: 'PROPERTY' as const,
         name: property.propertyType === 'HOUSE_LOT' ? 'House & Lot' : 'Raw Land',
         owner: property.legalName,
-        email: property.email,
+        email: property.store.seller.users.email,
         address: property.address,
         city: null,
         province: null,
@@ -60,10 +69,10 @@ export default class AdminApprovalService {
   }
 
   static async approveProperty(propertyId: string, adminId: string) {
-    const property = await prisma.properties.findUnique({ where: { id: propertyId } });
+    const property = await prisma.propertiesProducts.findUnique({ where: { id: propertyId } });
     if (!property) throw { status: 404, message: 'Property not found.' };
 
-    return prisma.properties.update({
+    return prisma.propertiesProducts.update({
       where: { id: propertyId },
       data: {
         status: PROPERTYSTATUS.ACTIVE,
@@ -75,10 +84,10 @@ export default class AdminApprovalService {
   }
 
   static async rejectProperty(propertyId: string, adminId: string, reason: string) {
-    const property = await prisma.properties.findUnique({ where: { id: propertyId } });
+    const property = await prisma.propertiesProducts.findUnique({ where: { id: propertyId } });
     if (!property) throw { status: 404, message: 'Property not found.' };
 
-    return prisma.properties.update({
+    return prisma.propertiesProducts.update({
       where: { id: propertyId },
       data: {
         status: PROPERTYSTATUS.REJECTED,
