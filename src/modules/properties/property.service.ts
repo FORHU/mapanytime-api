@@ -26,7 +26,7 @@ export type PropertyMetadataInput = {
   latestTaxReceiptFile?: string;
   lotPlanFile?: string;
   authorityToSellFile?: string;
-  
+
   sellingPrice?: number;
   negotiability?: NEGOTIABILITY;
   taxResponsibilities?: TAXRESPONSIBILITY;
@@ -65,7 +65,7 @@ export default class PropertyService {
     const store = await prisma.stores.findFirst({
       where: { sellerId },
     });
-    
+
     if (!store) {
       throw { status: 404, message: 'Store not found for this seller.' };
     }
