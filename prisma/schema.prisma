@@ -28,16 +28,18 @@ model Users {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  roles             Roles[]                 @relation("UserRoles")
-  avatarFile        Files?                  @relation("UserAvatar", fields: [avatarFileId], references: [id])
-  session           Session[]
-  seller            Sellers?
-  buyer             Buyers?
-  verifiedDocuments DocumentVerifications[]
-  sentAdminInvites  AdminInvites[]
-  notifications     Notifications[]
-  userReferral      Users?                  @relation("UserReferrals", fields: [userReferralId], references: [id])
-  userReferrals     Users[]                 @relation("UserReferrals")
+  roles              Roles[]                 @relation("UserRoles")
+  avatarFile         Files?                  @relation("UserAvatar", fields: [avatarFileId], references: [id])
+  session            Session[]
+  seller             Sellers?
+  buyer              Buyers?
+  verifiedDocuments  DocumentVerifications[]
+  sentAdminInvites   AdminInvites[]
+  notifications      Notifications[]
+  reviewedProperties PropertiesProducts[]            @relation("PropertyReviewers")
+  reviewedStores     Stores[]                @relation("StoreReviewers")
+  userReferral       Users?                  @relation("UserReferrals", fields: [userReferralId], references: [id])
+  userReferrals      Users[]                 @relation("UserReferrals")
 
   @@unique([userReferralId, id])
   @@index([userReferralId])
@@ -122,6 +124,7 @@ model Files {
   productImages ProductImages[]
   logoStores    Stores[]        @relation("StoreLogo")
   bannerStores  Stores[]        @relation("StoreBanner")
+  propertiesFiles PropertiesFiles[] @relation("PropertyFiles")
 }
 
 model Sellers {
@@ -143,6 +146,112 @@ model Sellers {
   settlements           Settlements[]
   payouts               SellerPayouts[]
   returnRequests        ReturnRequests[]
+}
+
+model PropertiesFiles {
+  id                  String    @id @default(cuid())
+  propertyId          String
+  fileId              String
+  titleType           TITLETYPE?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  propertiesProducts PropertiesProducts @relation(fields: [propertyId], references: [id])
+  file Files @relation("PropertyFiles", fields: [fileId], references: [id])
+
+  @@index([propertyId])
+}
+
+model PropertiesProducts {
+  id               String         @id @default(cuid())
+  storeId          String
+  sellerCapacity   SELLERCAPACITY
+  legalName        String
+  governmentIdName String?
+  propertyType     PROPERTYTYPE
+  address          String
+  latitude         Float
+  longitude        Float
+  subdivision      String?
+  status           PROPERTYSTATUS @default(DRAFT)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  rejectionReason  String?
+  reviewedAt       DateTime?
+  reviewedById     String?
+
+  // Specs (Step 3: Property Specifications)
+  lotArea       Float?
+  terrain       TERRAIN?
+  floorArea     Float?
+  bedrooms      Int?
+  bathrooms     Int?
+  parkingSpaces Int?
+  yearBuilt     Int?
+  furnishing    FURNISHING?
+
+  // Pricing & financial terms
+  sellingPrice       Decimal?         @db.Decimal(12, 2)
+  negotiability      NEGOTIABILITY?
+  taxResponsibilities TAXRESPONSIBILITY?
+  hoaDues            Decimal?         @db.Decimal(12, 2)
+
+  store      Stores        @relation("StoreProperties", fields: [storeId], references: [id])
+  reviewedBy Users?        @relation("PropertyReviewers", fields: [reviewedById], references: [id])
+  propertyFiles PropertiesFiles[]
+
+  @@index([storeId])
+  @@index([propertyType])
+  @@index([status])
+  @@index([latitude, longitude])
+}
+
+enum SELLERCAPACITY {
+  OWNER
+  BROKER
+  PROXY
+}
+
+enum PROPERTYTYPE {
+  HOUSE_LOT
+  RAW_LAND
+}
+
+enum TERRAIN {
+  FLAT
+  SLOPING
+  ROLLING
+  MOUNTAINOUS
+}
+
+enum FURNISHING {
+  BARE
+  SEMI_FURNISHED
+  FULLY_FURNISHED
+}
+
+enum TITLETYPE {
+  TCT
+  OCT
+  TAX_DECLARATION
+}
+
+enum NEGOTIABILITY {
+  FIXED
+  NEGOTIABLE
+}
+
+enum TAXRESPONSIBILITY {
+  SELLER
+  BUYER
+  STANDARD_SHARING
+}
+
+enum PROPERTYSTATUS {
+  DRAFT
+  PENDING_REVIEW
+  ACTIVE
+  REJECTED
 }
 
 model Buyers {
@@ -222,26 +331,30 @@ enum INVITESTATUS {
 // =========================================================================
 
 model Stores {
-  id             String    @id @default(cuid())
-  sellerId       String
-  storeName      String
-  description    String?
-  logoId         String?
-  bannerId       String?
-  slug           String?   @unique
-  phone          String?
-  email          String?
-  returnPolicy   String?
-  shippingPolicy String?
-  socialLinks    Json?
-  ratingAverage  Float     @default(0)
-  ratingCount    Int       @default(0)
-  followersCount Int       @default(0)
-  vacationMode   Boolean   @default(false)
-  isActive       Boolean   @default(false)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  deletedAt      DateTime?
+  id              String              @id @default(cuid())
+  sellerId        String
+  storeName       String
+  description     String?
+  logoId          String?
+  bannerId        String?
+  slug            String?             @unique
+  phone           String?
+  email           String?
+  returnPolicy    String?
+  shippingPolicy  String?
+  socialLinks     Json?
+  ratingAverage   Float               @default(0)
+  ratingCount     Int                 @default(0)
+  followersCount  Int                 @default(0)
+  vacationMode    Boolean             @default(false)
+  isActive        Boolean             @default(false)
+  approvalStatus  STOREAPPROVALSTATUS @default(PENDING)
+  rejectionReason String?
+  reviewedAt      DateTime?
+  reviewedById    String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  deletedAt       DateTime?
 
   logoFile              Files?                  @relation("StoreLogo", fields: [logoId], references: [id])
   bannerFile            Files?                  @relation("StoreBanner", fields: [bannerId], references: [id])
@@ -251,10 +364,12 @@ model Stores {
   storeLocations        StoreLocations?
   storeReviews          StoreReviews[]
   seller                Sellers                 @relation(fields: [sellerId], references: [id])
+  reviewedBy            Users?                  @relation("StoreReviewers", fields: [reviewedById], references: [id])
   categories            Categories[]            @relation("CategoriesToStores")
   orders                Orders[]
   inventory             Inventory[]
   inventoryMovements    InventoryMovements[]
+  propertiesProducts    PropertiesProducts[]    @relation("StoreProperties")
 
   @@index([sellerId])
   @@index([isActive])
@@ -482,6 +597,12 @@ model ProductTags {
 enum ApplicationStatus {
   PENDING
   APPROVED
+  REJECTED
+}
+
+enum STOREAPPROVALSTATUS {
+  PENDING
+  ACTIVE
   REJECTED
 }
 
