@@ -168,6 +168,30 @@ model Properties {
   reviewedAt       DateTime?
   reviewedById     String?
 
+  // --- Specs (Step 3: Property Specifications) ---
+  lotArea       Float?
+  terrain       TERRAIN?
+  floorArea     Float?
+  bedrooms      Int?
+  bathrooms     Int?
+  parkingSpaces Int?
+  yearBuilt     Int?
+  furnishing    FURNISHING?
+
+  // --- Legal & ownership documents (Step 4) ---
+  titleType           TITLETYPE?
+  titleNumber         String?
+  scannedTitleFile    String?
+  latestTaxReceiptFile String?
+  lotPlanFile         String?
+  authorityToSellFile String?
+
+  // --- Pricing & financial terms (Step 5) ---
+  sellingPrice       Decimal?         @db.Decimal(12, 2)
+  negotiability      NEGOTIABILITY?
+  taxResponsibilities TAXRESPONSIBILITY?
+  hoaDues            Decimal?         @db.Decimal(12, 2)
+
   seller     Sellers @relation(fields: [sellerId], references: [id])
   reviewedBy Users?  @relation("PropertyReviewers", fields: [reviewedById], references: [id])
 
@@ -186,6 +210,36 @@ enum SELLERCAPACITY {
 enum PROPERTYTYPE {
   HOUSE_LOT
   RAW_LAND
+}
+
+enum TERRAIN {
+  FLAT
+  SLOPING
+  ROLLING
+  MOUNTAINOUS
+}
+
+enum FURNISHING {
+  BARE
+  SEMI_FURNISHED
+  FULLY_FURNISHED
+}
+
+enum TITLETYPE {
+  TCT
+  OCT
+  TAX_DECLARATION
+}
+
+enum NEGOTIABILITY {
+  FIXED
+  NEGOTIABLE
+}
+
+enum TAXRESPONSIBILITY {
+  SELLER
+  BUYER
+  STANDARD_SHARING
 }
 
 enum PROPERTYSTATUS {
