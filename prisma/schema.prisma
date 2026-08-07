@@ -124,6 +124,7 @@ model Files {
   productImages ProductImages[]
   logoStores    Stores[]        @relation("StoreLogo")
   bannerStores  Stores[]        @relation("StoreBanner")
+  propertiesFiles PropertiesFiles[] @relation("PropertyFiles")
 }
 
 model Sellers {
@@ -156,7 +157,7 @@ model PropertiesFiles {
   updatedAt           DateTime  @updatedAt
 
   propertiesProducts PropertiesProducts @relation(fields: [propertyId], references: [id])
-  file               Files @relation(fields: [fileId], references: [id])
+  file Files @relation("PropertyFiles", fields: [fileId], references: [id])
 
   @@index([propertyId])
 }
