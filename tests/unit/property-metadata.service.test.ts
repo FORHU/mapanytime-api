@@ -11,12 +11,14 @@ jest.mock('../../src/utils/prisma', () => ({
     },
     stores: {
       findFirst: jest.fn(),
-    }
+    },
   },
 }));
 
 // Cast mocked methods to preserve TypeScript intellisense
-const mockedPropertiesProducts = prisma.propertiesProducts as jest.Mocked<typeof prisma.propertiesProducts>;
+const mockedPropertiesProducts = prisma.propertiesProducts as jest.Mocked<
+  typeof prisma.propertiesProducts
+>;
 const mockedStores = prisma.stores as jest.Mocked<typeof prisma.stores>;
 
 const baseCreateInput = {
@@ -68,7 +70,10 @@ describe('PropertyService metadata', () => {
     it('persists Step 3-5 metadata fields', async () => {
       // Mock the store query so createProperty can find the related storeId
       mockedStores.findFirst.mockResolvedValue({ id: 'store-1' } as never);
-      mockedPropertiesProducts.create.mockResolvedValue({ ...basePropertyRecord, id: 'prop-1' } as never);
+      mockedPropertiesProducts.create.mockResolvedValue({
+        ...basePropertyRecord,
+        id: 'prop-1',
+      } as never);
 
       await PropertyService.createProperty('seller-1', {
         ...baseCreateInput,
@@ -97,13 +102,14 @@ describe('PropertyService metadata', () => {
         }),
       });
     });
-    
+
     it('throws 404 if the store is not found for the seller', async () => {
       mockedStores.findFirst.mockResolvedValue(null);
 
-      await expect(
-        PropertyService.createProperty('seller-1', baseCreateInput)
-      ).rejects.toEqual({ status: 404, message: 'Store not found for this seller.' });
+      await expect(PropertyService.createProperty('seller-1', baseCreateInput)).rejects.toEqual({
+        status: 404,
+        message: 'Store not found for this seller.',
+      });
     });
   });
 
