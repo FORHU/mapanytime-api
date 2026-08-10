@@ -15,6 +15,7 @@ model Users {
   id              String            @id @default(cuid())
   email           String            @unique
   passwordHash    String
+  activeSessionId String?
   firstName       String?
   lastName        String?
   phoneNumber     String?
@@ -1021,3 +1022,46 @@ model Notifications {
   @@index([userId])
   @@index([readAt])
 }
+
+// =========================================================================
+// 📱 FEATURE DOMAIN: MOBILE APP RELEASE MANAGEMENT & VERSIONING
+// =========================================================================
+
+enum RELEASESTATUS {
+  ACTIVE
+  DEPRECATED
+  FAILED
+}
+
+model AppRelease {
+  id String @id @default(cuid())
+
+  version String @unique
+  // Unique because every ordering in the module depends on it: the isLatest fallback in
+  // getLatestRelease, the rollback target, and the admin console's next-build calculation.
+  // Duplicates would make "the latest release" nondeterministic. The @unique also provides the
+  // index those orderBy clauses need.
+  buildNumber Int @unique
+
+  // Build metadata carries no column defaults on purpose — RELEASE_DEFAULTS in
+  // app-release.constants.ts is the single source of truth, and the service always supplies a
+  // value. Duplicating them here is what let '8.0+' and 'Android 8.0+' drift apart.
+  channel           String
+  apkUrl            String
+  fileSize          String
+  minAndroidVersion String
+  architecture      String
+  sha256            String?
+  whatsNew          Json
+
+  status      RELEASESTATUS @default(ACTIVE)
+  isLatest    Boolean       @default(false)
+  forceUpdate Boolean       @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([isLatest])
+}
+
