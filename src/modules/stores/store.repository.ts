@@ -8,6 +8,7 @@ export interface NearbyStore {
   isActive: boolean;
   distanceKm: number;
   coordinates: { lat: number; lng: number };
+  logoUrl: string | null;
   address: {
     currentAddress: string;
     city: string;
@@ -21,6 +22,7 @@ interface NearbyRow {
   storeName: string;
   description: string | null;
   isActive: boolean;
+  logoUrl: string | null;
   latitude: number;
   longitude: number;
   currentAddress: string;
@@ -90,11 +92,13 @@ export default class StoreRepository {
     const rows = await prisma.$queryRaw<NearbyRow[]>(Prisma.sql`
       SELECT DISTINCT
         s."id", s."storeName", s."description", s."isActive",
+        f."path" AS "logoUrl",
         l."latitude", l."longitude",
         l."currentAddress", l."city", l."province", l."country",
         ROUND((${distanceKm})::numeric, 2) AS "distanceKm"
       FROM "Stores" s
       JOIN "StoreLocations" l ON l."storeId" = s."id"
+      LEFT JOIN "Files" f ON f."id" = s."logoId"
       ${categoryJoin}
       WHERE ${inViewport}
       ORDER BY "distanceKm" ASC
@@ -114,6 +118,7 @@ export default class StoreRepository {
       storeName: r.storeName,
       description: r.description,
       isActive: r.isActive,
+      logoUrl: r.logoUrl,
       distanceKm: Number(r.distanceKm),
       coordinates: { lat: r.latitude, lng: r.longitude },
       address: {
