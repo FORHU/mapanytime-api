@@ -54,13 +54,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Grant EC2 role CloudWatch Logs access
-        run: |
-          aws iam put-role-policy \
-            --role-name "${{ env.EC2_IAM_ROLE_NAME }}" \
-            --policy-name mapanytime-api-cloudwatch-logs \
-            --policy-document file://infra/ec2-cloudwatch-logs-policy.json
-
       - name: Grant EC2 role ECR pull access
         run: |
           aws iam put-role-policy \
@@ -92,11 +85,19 @@ jobs:
           ACCESS_TOKEN_EXPIRY: ${{ secrets.ACCESS_TOKEN_EXPIRY || '7d' }}
           REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
           REFRESH_TOKEN_EXPIRY: ${{ secrets.REFRESH_TOKEN_EXPIRY || '1d' }}
-          MAILER_TRANSPORT_HOST: ${{ secrets.MAILER_TRANSPORT_HOST || 'smtp.ethereal.email' }}
-          MAILER_TRANSPORT_PORT: ${{ secrets.MAILER_TRANSPORT_PORT || '587' }}
+          MAILER_TRANSPORT_HOST: ${{ secrets.MAILER_TRANSPORT_HOST || secrets.SMTP_HOST || 'smtp.ethereal.email' }}
+          MAILER_TRANSPORT_PORT: ${{ secrets.MAILER_TRANSPORT_PORT || secrets.SMTP_PORT || '587' }}
           MAILER_TRANSPORT_SECURE: ${{ secrets.MAILER_TRANSPORT_SECURE || 'false' }}
-          MAILER_EMAIL: ${{ secrets.MAILER_EMAIL || '' }}
-          MAILER_PASSWORD: ${{ secrets.MAILER_PASSWORD || '' }}
+          MAILER_EMAIL: ${{ secrets.MAILER_EMAIL || secrets.SMTP_USER || '' }}
+          MAILER_PASSWORD: ${{ secrets.MAILER_PASSWORD || secrets.SMTP_PASS || '' }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST || secrets.MAILER_TRANSPORT_HOST || 'smtp.ethereal.email' }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || secrets.MAILER_TRANSPORT_PORT || '587' }}
+          SMTP_USER: ${{ secrets.SMTP_USER || secrets.MAILER_EMAIL || '' }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS || secrets.MAILER_PASSWORD || '' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
+          CHAT_WONDER_API_URL: ${{ secrets.CHAT_WONDER_API_URL || '' }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID || '' }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET || '' }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY || secrets.AWS_ACCESS_KEY_ID || secrets.APP_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY || secrets.APP_AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ secrets.AWS_REGION || secrets.APP_AWS_REGION || env.AWS_REGION }}
@@ -128,6 +129,14 @@ jobs:
           MAILER_TRANSPORT_SECURE=${MAILER_TRANSPORT_SECURE}
           MAILER_EMAIL=${MAILER_EMAIL}
           MAILER_PASSWORD=${MAILER_PASSWORD}
+          SMTP_HOST=${SMTP_HOST}
+          SMTP_PORT=${SMTP_PORT}
+          SMTP_USER=${SMTP_USER}
+          SMTP_PASS=${SMTP_PASS}
+          OPENAI_API_KEY=${OPENAI_API_KEY}
+          CHAT_WONDER_API_URL=${CHAT_WONDER_API_URL}
+          GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+          GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
           AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
           AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
           AWS_REGION=${AWS_REGION}
@@ -160,14 +169,17 @@ jobs:
           script: |
             set -e
             chmod 600 /home/ec2-user/mapanytime-api.env
+            set -a
+            source /home/ec2-user/mapanytime-api.env
+            set +a
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
-            docker image prune -a -f
             docker pull ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
 
             # Run migrations before swapping the container.
             # --entrypoint overrides the image CMD so only the migration runs (not the app).
             docker run --rm \
               --entrypoint npx \
+              --network mapanytime \
               --env-file /home/ec2-user/mapanytime-api.env \
               ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
               prisma migrate deploy
@@ -175,26 +187,43 @@ jobs:
             docker stop ${{ env.CONTAINER_NAME }} 2>/dev/null || true
             docker rm   ${{ env.CONTAINER_NAME }} 2>/dev/null || true
             docker run -d --name ${{ env.CONTAINER_NAME }} --restart unless-stopped \
+              --network mapanytime \
               --env-file /home/ec2-user/mapanytime-api.env \
               -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
-              --log-driver awslogs \
-              --log-opt awslogs-region=${{ env.AWS_REGION }} \
-              --log-opt awslogs-group=/mapanytime-api/staging \
-              --log-opt awslogs-stream=mapanytime-api \
-              --log-opt awslogs-create-group=true \
+              --log-driver json-file \
+              --log-opt max-size=10m \
+              --log-opt max-file=3 \
               ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
 
             docker stop ${{ env.CONTAINER_NAME }}-worker 2>/dev/null || true
             docker rm   ${{ env.CONTAINER_NAME }}-worker 2>/dev/null || true
             docker run -d --name ${{ env.CONTAINER_NAME }}-worker --restart unless-stopped \
+              --network mapanytime \
               --env-file /home/ec2-user/mapanytime-api.env \
-              -p 8080:8080 \
-              --log-driver awslogs \
-              --log-opt awslogs-region=${{ env.AWS_REGION }} \
-              --log-opt awslogs-group=/mapanytime-api/staging \
-              --log-opt awslogs-stream=mapanytime-api-worker \
-              --log-opt awslogs-create-group=true \
+              -p 127.0.0.1:8080:8080 \
+              --log-driver json-file \
+              --log-opt max-size=10m \
+              --log-opt max-file=3 \
               ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
               npm run worker
+
+            # Health check loop for API container
+            echo "Verifying API container health..."
+            HEALTH_CHECK_PASSED=false
+            for i in {1..10}; do
+              if curl -sf http://127.0.0.1:${{ env.APP_PORT }}/api/health/live > /dev/null 2>&1; then
+                echo "Health check passed!"
+                HEALTH_CHECK_PASSED=true
+                break
+              fi
+              echo "Waiting for API to become ready... (attempt $i/10)"
+              sleep 3
+            done
+
+            if [ "$HEALTH_CHECK_PASSED" = false ]; then
+              echo "Health check failed after 30 seconds. Displaying container logs:"
+              docker logs ${{ env.CONTAINER_NAME }} --tail 50
+              exit 1
+            fi
 
             docker image prune -f
