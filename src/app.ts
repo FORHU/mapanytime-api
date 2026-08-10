@@ -46,13 +46,49 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Set up rate limiting middleware
+/**
+ * Global throttle — a blunt guard against abuse, not a per-feature budget.
+ *
+ * The previous 100-per-15-minutes worked out to under 7 requests a minute for an entire IP,
+ * which a single authenticated dashboard session burns through in a couple of minutes. Two
+ * things made it bite harder than the number suggests:
+ *   - CORS preflights counted. Every cross-origin call carrying Authorization triggers an
+ *     OPTIONS first, so the real budget was roughly half the stated one. They're skipped now.
+ *   - Shared egress IPs (office NAT, mobile carriers) pool their users into one budget.
+ */
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  standardHeaders: true, // expose RateLimit-* so clients can back off before being cut off
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
+  // JSON, not the library's plain-text default — the web client parses every error body as JSON
+  // and a text body surfaced to users as a generic "Request failed".
+  message: { status: 429, message: 'Too many requests. Please slow down and try again shortly.' },
 });
 
-if (!isDev) app.use(limiter);
+/**
+ * Credential endpoints get their own, much tighter budget. Login is the one route where a high
+ * request rate is itself the attack, and it must not share a counter with ordinary browsing —
+ * otherwise a busy session exhausts the pool that is supposed to be slowing down guessing.
+ */
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS',
+  skipSuccessfulRequests: true, // only failed attempts count toward the limit
+  message: { status: 429, message: 'Too many attempts. Please try again in a few minutes.' },
+});
+
+// Rate limiting runs in production only, which is why limit problems never surface locally.
+// Set RATE_LIMIT_IN_DEV=true to exercise it against a dev server before shipping a change.
+if (!isDev || process.env.RATE_LIMIT_IN_DEV === 'true') {
+  app.use('/api/v1/auth/login', authLimiter);
+  app.use('/api/v1/auth/register', authLimiter);
+  app.use(limiter);
+}
 
 // Set up security headers
 app.disable('x-powered-by');
