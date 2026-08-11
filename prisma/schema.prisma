@@ -37,7 +37,7 @@ model Users {
   verifiedDocuments  DocumentVerifications[]
   sentAdminInvites   AdminInvites[]
   notifications      Notifications[]
-  reviewedProperties PropertiesProducts[]            @relation("PropertyReviewers")
+  reviewedProperties ProductProperties[]            @relation("PropertyReviewers")
   reviewedStores     Stores[]                @relation("StoreReviewers")
   userReferral       Users?                  @relation("UserReferrals", fields: [userReferralId], references: [id])
   userReferrals      Users[]                 @relation("UserReferrals")
@@ -157,13 +157,13 @@ model PropertiesFiles {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  propertiesProducts PropertiesProducts @relation(fields: [propertyId], references: [id])
+  property ProductProperties @relation(fields: [propertyId], references: [id])
   file Files @relation("PropertyFiles", fields: [fileId], references: [id])
 
   @@index([propertyId])
 }
 
-model PropertiesProducts {
+model ProductProperties {
   id               String         @id @default(cuid())
   storeId          String
   sellerCapacity   SELLERCAPACITY
@@ -370,7 +370,7 @@ model Stores {
   orders                Orders[]
   inventory             Inventory[]
   inventoryMovements    InventoryMovements[]
-  propertiesProducts    PropertiesProducts[]    @relation("StoreProperties")
+  productProperties    ProductProperties[]    @relation("StoreProperties")
 
   @@index([sellerId])
   @@index([isActive])

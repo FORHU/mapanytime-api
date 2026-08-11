@@ -14,7 +14,7 @@ export default class AdminApprovalService {
         },
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.propertiesProducts.findMany({
+      prisma.productProperties.findMany({
         include: {
           store: {
             include: {
@@ -69,10 +69,10 @@ export default class AdminApprovalService {
   }
 
   static async approveProperty(propertyId: string, adminId: string) {
-    const property = await prisma.propertiesProducts.findUnique({ where: { id: propertyId } });
+    const property = await prisma.productProperties.findUnique({ where: { id: propertyId } });
     if (!property) throw { status: 404, message: 'Property not found.' };
 
-    return prisma.propertiesProducts.update({
+    return prisma.productProperties.update({
       where: { id: propertyId },
       data: {
         status: PROPERTYSTATUS.ACTIVE,
@@ -84,10 +84,10 @@ export default class AdminApprovalService {
   }
 
   static async rejectProperty(propertyId: string, adminId: string, reason: string) {
-    const property = await prisma.propertiesProducts.findUnique({ where: { id: propertyId } });
+    const property = await prisma.productProperties.findUnique({ where: { id: propertyId } });
     if (!property) throw { status: 404, message: 'Property not found.' };
 
-    return prisma.propertiesProducts.update({
+    return prisma.productProperties.update({
       where: { id: propertyId },
       data: {
         status: PROPERTYSTATUS.REJECTED,

@@ -3,7 +3,7 @@ import { prisma } from '../../src/utils/prisma';
 
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
-    propertiesProducts: {
+    productProperties: {
       create: jest.fn(),
       findMany: jest.fn(),
       findFirst: jest.fn(),
@@ -16,8 +16,8 @@ jest.mock('../../src/utils/prisma', () => ({
 }));
 
 // Cast mocked methods to preserve TypeScript intellisense
-const mockedPropertiesProducts = prisma.propertiesProducts as jest.Mocked<
-  typeof prisma.propertiesProducts
+const mockedProductProperties = prisma.productProperties as jest.Mocked<
+  typeof prisma.productProperties
 >;
 const mockedStores = prisma.stores as jest.Mocked<typeof prisma.stores>;
 
@@ -70,7 +70,7 @@ describe('PropertyService metadata', () => {
     it('persists Step 3-5 metadata fields', async () => {
       // Mock the store query so createProperty can find the related storeId
       mockedStores.findFirst.mockResolvedValue({ id: 'store-1' } as never);
-      mockedPropertiesProducts.create.mockResolvedValue({
+      mockedProductProperties.create.mockResolvedValue({
         ...basePropertyRecord,
         id: 'prop-1',
       } as never);
@@ -91,7 +91,7 @@ describe('PropertyService metadata', () => {
         hoaDues: 750,
       });
 
-      expect(mockedPropertiesProducts.create).toHaveBeenCalledWith({
+      expect(mockedProductProperties.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           storeId: 'store-1',
           lotArea: 180,
@@ -115,7 +115,7 @@ describe('PropertyService metadata', () => {
 
   describe('updatePropertyMetadata', () => {
     it('throws 404 when the property does not exist for the seller', async () => {
-      mockedPropertiesProducts.findFirst.mockResolvedValue(null);
+      mockedProductProperties.findFirst.mockResolvedValue(null);
 
       await expect(
         PropertyService.updatePropertyMetadata('seller-1', 'missing', { sellingPrice: 100 }),
@@ -123,10 +123,10 @@ describe('PropertyService metadata', () => {
     });
 
     it('updates only provided fields and attaches derived pricePerSqm', async () => {
-      mockedPropertiesProducts.findFirst.mockResolvedValue({
+      mockedProductProperties.findFirst.mockResolvedValue({
         ...basePropertyRecord,
       } as never);
-      mockedPropertiesProducts.update.mockResolvedValue({
+      mockedProductProperties.update.mockResolvedValue({
         ...basePropertyRecord,
         lotArea: 180,
         sellingPrice: 5400000,
@@ -137,7 +137,7 @@ describe('PropertyService metadata', () => {
         sellingPrice: 5400000,
       });
 
-      expect(mockedPropertiesProducts.update).toHaveBeenCalledWith({
+      expect(mockedProductProperties.update).toHaveBeenCalledWith({
         where: { id: 'prop-1' },
         data: expect.objectContaining({
           lotArea: 180,
@@ -150,7 +150,7 @@ describe('PropertyService metadata', () => {
 
   describe('getSellerProperty', () => {
     it('throws 404 when not owned by the seller', async () => {
-      mockedPropertiesProducts.findFirst.mockResolvedValue(null);
+      mockedProductProperties.findFirst.mockResolvedValue(null);
 
       await expect(PropertyService.getSellerProperty('seller-1', 'prop-x')).rejects.toEqual({
         status: 404,

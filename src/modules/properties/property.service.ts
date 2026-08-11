@@ -7,7 +7,7 @@ import {
   TAXRESPONSIBILITY,
   TERRAIN,
   TITLETYPE,
-  type PropertiesProducts,
+  type ProductProperties,
 } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 
@@ -50,7 +50,7 @@ export function computePricePerSqm(sellingPrice?: number, lotArea?: number): num
   return Math.round((sellingPrice / lotArea) * 100) / 100;
 }
 
-function withPricePerSqm(property: PropertiesProducts) {
+function withPricePerSqm(property: ProductProperties) {
   return {
     ...property,
     pricePerSqm: computePricePerSqm(
@@ -70,7 +70,7 @@ export default class PropertyService {
       throw { status: 404, message: 'Store not found for this seller.' };
     }
 
-    return prisma.propertiesProducts.create({
+    return prisma.productProperties.create({
       data: {
         storeId: store.id,
         sellerCapacity: input.sellerCapacity,
@@ -99,7 +99,7 @@ export default class PropertyService {
   }
 
   static async getMyProperties(sellerId: string) {
-    const properties = await prisma.propertiesProducts.findMany({
+    const properties = await prisma.productProperties.findMany({
       where: { store: { sellerId } },
       orderBy: { createdAt: 'desc' },
     });
@@ -108,7 +108,7 @@ export default class PropertyService {
   }
 
   static async getPropertyById(sellerId: string, propertyId: string) {
-    const property = await prisma.propertiesProducts.findFirst({
+    const property = await prisma.productProperties.findFirst({
       where: { id: propertyId, store: { sellerId } },
     });
 
@@ -120,7 +120,7 @@ export default class PropertyService {
   }
 
   static async getVerifiedPropertyDashboard(sellerId: string, propertyId: string) {
-    const property = await prisma.propertiesProducts.findFirst({
+    const property = await prisma.productProperties.findFirst({
       where: {
         id: propertyId,
         store: { sellerId },
@@ -140,7 +140,7 @@ export default class PropertyService {
   }
 
   static async getSellerProperty(sellerId: string, propertyId: string) {
-    const property = await prisma.propertiesProducts.findFirst({
+    const property = await prisma.productProperties.findFirst({
       where: { id: propertyId, store: { sellerId } },
     });
 
@@ -158,8 +158,7 @@ export default class PropertyService {
   ) {
     await this.getSellerProperty(sellerId, propertyId);
 
-    // FIX: Changed to propertiesProducts and removed non-existent file fields
-    const updated = await prisma.propertiesProducts.update({
+    const updated = await prisma.productProperties.update({
       where: { id: propertyId },
       data: {
         lotArea: input.lotArea,
