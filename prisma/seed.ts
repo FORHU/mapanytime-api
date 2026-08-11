@@ -4,6 +4,7 @@ import { seedStores } from './seeders/stores.seeder';
 import { seedRoles } from './seeders/roles.seeder';
 import { seedCategories } from './seeders/categories.seeder';
 import { seedMarketplaceData } from './seeders/marketplace_data.seeder';
+import { seedMerchantAds } from './seeders/merchant_ads.seeder';
 
 const prisma = new PrismaClient();
 
@@ -16,6 +17,7 @@ async function main() {
     await seedUsers(prisma);
     await seedCategories(prisma);
     await seedStores(prisma);
+    await seedMerchantAds(prisma);
     await seedMarketplaceData(prisma);
 
     console.log('🎉 All seeder modules executed successfully!');
