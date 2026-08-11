@@ -147,4 +147,23 @@ export default class StoreController {
       next(error);
     }
   }
+
+  static async getStoreProducts(req: Request, res: Response, next: NextFunction) {
+    const { id } = req.params;
+    const schema = Joi.object({
+      limit: Joi.number().integer().min(1).max(100).default(20),
+      offset: Joi.number().integer().min(0).default(0),
+    });
+    const { error, value } = schema.validate(req.query);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const data = await StoreService.getStoreProducts(id, value.limit, value.offset);
+      return responseSuccess(res, 200, data);
+    } catch (error) {
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+      if (err.status) return responseError(res, err.status, err.message || 'An error occurred');
+      next(error);
+    }
+  }
 }
