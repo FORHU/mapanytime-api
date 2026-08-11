@@ -26,8 +26,8 @@ export default class ProductRepository {
 
   static async getProductsByStoreId(storeId: string) {
     return prisma.products.findMany({
-      where: { storeId: storeId },
-      include: { category: true, tags: true },
+      where: { storeId: storeId, isActive: true },
+      include: { category: true, tags: true, inventory: true },
     });
   }
 
