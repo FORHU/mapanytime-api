@@ -1,5 +1,12 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
+import { S3_CDN_URL } from '../../config';
+import S3Util from '../../utils/s3.util';
+
+async function resolveImageUrl(file: { path: string; bucket?: string | null }): Promise<string> {
+  if (S3_CDN_URL) return `${S3_CDN_URL}/${file.path}`;
+  return S3Util.getFileUrl(file.path);
+}
 
 export default class ProductRepository {
   static async getSellerByUserId(userId: string) {
@@ -25,10 +32,33 @@ export default class ProductRepository {
   }
 
   static async getProductsByStoreId(storeId: string) {
-    return prisma.products.findMany({
+    const products = await prisma.products.findMany({
       where: { storeId: storeId, isActive: true },
-      include: { category: true, tags: true, inventory: true },
+      include: {
+        category: true,
+        tags: true,
+        inventory: true,
+        productImages: {
+          include: { file: { select: { path: true, bucket: true } } },
+          orderBy: { displayOrder: 'asc' },
+        },
+      },
     });
+
+    return Promise.all(
+      products.map(async (product) => ({
+        ...product,
+        productImages: await Promise.all(
+          product.productImages.map(async (pi) => ({
+            ...pi,
+            file: {
+              ...pi.file,
+              url: await resolveImageUrl(pi.file),
+            },
+          })),
+        ),
+      })),
+    );
   }
 
   static async getProductById(productId: string) {
@@ -99,7 +129,7 @@ export default class ProductRepository {
           store: { select: { id: true, storeName: true } },
           productImages: {
             where: { isPrimary: true },
-            select: { file: { select: { path: true } } },
+            include: { file: { select: { path: true, bucket: true } } },
             take: 1,
           },
         },
@@ -110,6 +140,21 @@ export default class ProductRepository {
       prisma.products.count({ where }),
     ]);
 
-    return { items, total };
+    const resolved = await Promise.all(
+      items.map(async (product) => ({
+        ...product,
+        productImages: await Promise.all(
+          product.productImages.map(async (pi) => ({
+            ...pi,
+            file: {
+              ...pi.file,
+              url: await resolveImageUrl(pi.file),
+            },
+          })),
+        ),
+      })),
+    );
+
+    return { items: resolved, total };
   }
 }

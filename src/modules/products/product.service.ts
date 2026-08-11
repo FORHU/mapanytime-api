@@ -15,6 +15,7 @@ export default class ProductService {
       tags?: string[];
       isActive?: boolean;
       initialStock?: number;
+      imageIds?: string[];
     },
   ) {
     const seller = await ProductRepository.getSellerByUserId(userId);
@@ -35,7 +36,7 @@ export default class ProductService {
       throw { status: 403, message: 'Store must be approved before adding products.' };
     }
 
-    const { tags, initialStock = 0, categoryId, ...productFields } = payload;
+    const { tags, initialStock = 0, imageIds, categoryId, ...productFields } = payload;
 
     const newProduct = await ProductRepository.createProduct({
       ...productFields,
@@ -64,6 +65,17 @@ export default class ProductService {
         quantityReserved: 0,
       },
     });
+
+    if (imageIds && imageIds.length > 0) {
+      await prisma.productImages.createMany({
+        data: imageIds.map((fileId, index) => ({
+          productId: newProduct.id,
+          fileId,
+          isPrimary: index === 0,
+          displayOrder: index,
+        })),
+      });
+    }
 
     return newProduct;
   }
