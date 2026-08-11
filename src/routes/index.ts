@@ -17,10 +17,10 @@ import settlementRoute from '../modules/settlements/settlement.route';
 import payoutRoute from '../modules/payouts/payout.route';
 import rbacRoute from './rbac.route';
 import agentRoute from './agent.route';
-import propertyRoute from '../modules/properties/property.route';
-import adminApprovalRoute from '../modules/adminApprovals/adminApproval.route';
-import { authenticate } from '../middleware/auth.middleware';
-import { requireAdmin } from '../middleware/admin.middleware';
+import {
+  publicAppReleaseRouter,
+  adminAppReleaseRouter,
+} from '../modules/appRelease/app-release.route';
 
 const router = express.Router();
 
@@ -48,7 +48,7 @@ router.use('/v1/settlements', settlementRoute);
 router.use('/v1/payouts', payoutRoute);
 router.use('/v1/rbac', rbacRoute);
 router.use('/v1/agent', agentRoute);
-router.use('/v1/properties', propertyRoute);
-router.use('/v1/admin/approvals', authenticate, requireAdmin, adminApprovalRoute);
+router.use('/v1/app', publicAppReleaseRouter);
+router.use('/v1/admin/app-releases', adminAppReleaseRouter);
 
 export default router;
