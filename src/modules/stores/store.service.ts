@@ -259,4 +259,19 @@ export default class StoreService {
 
     return store;
   }
+
+  static async getStoreProducts(storeId: string, limit: number, offset: number) {
+    // Verify store exists first
+    const store = await StoreRepository.getStoreById(storeId);
+    if (!store) throw { status: 404, message: 'Store not found.' };
+
+    const { items, total } = await StoreRepository.getStoreProducts(storeId, limit, offset);
+    return {
+      items,
+      total,
+      limit,
+      offset,
+      hasMore: offset + items.length < total,
+    };
+  }
 }

@@ -16,6 +16,7 @@ export interface NearbyStore {
     province: string;
     country: string;
   };
+  categoryName: string | null;
 }
 
 interface NearbyRow {
@@ -30,7 +31,8 @@ interface NearbyRow {
   city: string;
   province: string;
   country: string;
-  distanceKm: string;
+  distanceKm: number;
+  categoryName: string | null;
 }
 
 export default class StoreRepository {
@@ -96,7 +98,14 @@ export default class StoreRepository {
         f."path" AS "logoUrl",
         l."latitude", l."longitude",
         l."currentAddress", l."city", l."province", l."country",
-        ROUND((${distanceKm})::numeric, 2) AS "distanceKm"
+        ROUND((${distanceKm})::numeric, 2) AS "distanceKm",
+        (
+          SELECT c."name"
+          FROM "Categories" c
+          JOIN "_CategoriesToStores" cs_inner ON cs_inner."A" = c."id"
+          WHERE cs_inner."B" = s."id" AND c."parentId" IS NULL
+          LIMIT 1
+        ) AS "categoryName"
       FROM "Stores" s
       JOIN "StoreLocations" l ON l."storeId" = s."id"
       LEFT JOIN "Files" f ON f."id" = s."logoId"
@@ -128,6 +137,7 @@ export default class StoreRepository {
         province: r.province,
         country: r.country,
       },
+      categoryName: r.categoryName,
     }));
 
     return { items, total: Number(totalRows[0]?.count ?? 0) };
@@ -152,5 +162,27 @@ export default class StoreRepository {
         categories: true,
       },
     });
+  }
+
+  static async getStoreProducts(storeId: string, limit: number, offset: number) {
+    const [items, total] = await Promise.all([
+      prisma.products.findMany({
+        where: { storeId, isActive: true, deletedAt: null },
+        take: limit,
+        skip: offset,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          category: true,
+          productImages: {
+            include: { file: true },
+            orderBy: { displayOrder: 'asc' },
+          },
+        },
+      }),
+      prisma.products.count({
+        where: { storeId, isActive: true, deletedAt: null },
+      }),
+    ]);
+    return { items, total };
   }
 }
