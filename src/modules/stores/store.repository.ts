@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
+import S3Util from '../../utils/s3.util';
 
 export interface NearbyStore {
   id: string;
@@ -118,7 +119,7 @@ export default class StoreRepository {
       storeName: r.storeName,
       description: r.description,
       isActive: r.isActive,
-      logoUrl: r.logoUrl,
+      logoUrl: S3Util.getPublicUrl(r.logoUrl),
       distanceKm: Number(r.distanceKm),
       coordinates: { lat: r.latitude, lng: r.longitude },
       address: {
