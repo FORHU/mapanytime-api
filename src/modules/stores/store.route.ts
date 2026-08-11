@@ -10,6 +10,7 @@ router.get('/my-stores', authenticate, StoreController.getMyStores);
 
 // Public storefront — buyer views a store by id (no auth required)
 router.get('/:id', StoreController.getById);
+router.get('/:id/products', StoreController.getStoreProducts);
 
 router.post('/', authenticate, StoreController.createStore);
 
