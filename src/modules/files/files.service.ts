@@ -18,9 +18,7 @@ export default class FilesService {
       storageProvider: payload.storageProvider || 'S3',
       bucket: payload.bucket || undefined,
       path: payload.fileKey,
-      ...(payload.uploadedById
-        ? { uploadedById: payload.uploadedById }
-        : {}),
+      ...(payload.uploadedById ? { uploadedById: payload.uploadedById } : {}),
     });
   }
 }

@@ -24,7 +24,6 @@ import {
 } from '../modules/appRelease/app-release.route';
 import filesRoute from '../modules/files/files.route';
 
-
 const router = express.Router();
 
 router.get('/v1', (_, res) => {
