@@ -10,6 +10,11 @@ export interface NearbyStore {
   distanceKm: number;
   coordinates: { lat: number; lng: number };
   logoUrl: string | null;
+  rating: number;
+  ratingCount: number;
+  categoryId: string | null;
+  categoryName: string | null;
+  isOpen: boolean;
   address: {
     currentAddress: string;
     city: string;
@@ -24,6 +29,13 @@ interface NearbyRow {
   description: string | null;
   isActive: boolean;
   logoUrl: string | null;
+  ratingAverage: number;
+  ratingCount: number;
+  categoryId: string | null;
+  categoryName: string | null;
+  hoursIsClosed: boolean | null;
+  openMinutes: number | null;
+  closeMinutes: number | null;
   latitude: number;
   longitude: number;
   currentAddress: string;
@@ -31,6 +43,21 @@ interface NearbyRow {
   province: string;
   country: string;
   distanceKm: string;
+}
+
+// No hours row for today (isClosed is null) defaults to open — matches the
+// app's prior client-side default when hours are unknown.
+function isOpenNow(
+  isClosed: boolean | null,
+  openMinutes: number | null,
+  closeMinutes: number | null,
+  now = new Date(),
+): boolean {
+  if (isClosed === null) return true;
+  if (isClosed) return false;
+  if (openMinutes == null || closeMinutes == null) return true;
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  return nowMinutes >= openMinutes && nowMinutes < closeMinutes;
 }
 
 export default class StoreRepository {
@@ -52,7 +79,9 @@ export default class StoreRepository {
     centerLat: number,
     centerLng: number,
     search?: string,
+    todayDow?: number,
   ): Promise<{ items: NearbyStore[]; total: number }> {
+    const dow = todayDow ?? new Date().getDay();
     const distanceKm = Prisma.sql`
       6371 * 2 * asin(sqrt(
         power(sin(radians(l."latitude" - ${centerLat}) / 2), 2) +
@@ -94,12 +123,17 @@ export default class StoreRepository {
       SELECT DISTINCT
         s."id", s."storeName", s."description", s."isActive",
         f."path" AS "logoUrl",
+        s."ratingAverage", s."ratingCount",
+        s."primaryCategoryId" AS "categoryId", pc."name" AS "categoryName",
+        h."isClosed" AS "hoursIsClosed", h."openMinutes", h."closeMinutes",
         l."latitude", l."longitude",
         l."currentAddress", l."city", l."province", l."country",
         ROUND((${distanceKm})::numeric, 2) AS "distanceKm"
       FROM "Stores" s
       JOIN "StoreLocations" l ON l."storeId" = s."id"
       LEFT JOIN "Files" f ON f."id" = s."logoId"
+      LEFT JOIN "Categories" pc ON pc."id" = s."primaryCategoryId"
+      LEFT JOIN "StoreHours" h ON h."storeId" = s."id" AND h."dayOfWeek" = ${dow}
       ${categoryJoin}
       WHERE ${inViewport}
       ORDER BY "distanceKm" ASC
@@ -120,6 +154,11 @@ export default class StoreRepository {
       description: r.description,
       isActive: r.isActive,
       logoUrl: S3Util.getPublicUrl(r.logoUrl),
+      rating: Number(r.ratingAverage),
+      ratingCount: r.ratingCount,
+      categoryId: r.categoryId,
+      categoryName: r.categoryName,
+      isOpen: isOpenNow(r.hoursIsClosed, r.openMinutes, r.closeMinutes),
       distanceKm: Number(r.distanceKm),
       coordinates: { lat: r.latitude, lng: r.longitude },
       address: {
@@ -150,6 +189,18 @@ export default class StoreRepository {
           orderBy: { dayOfWeek: 'asc' },
         },
         categories: true,
+        primaryCategory: true,
+        merchantAds: {
+          where: { isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+          include: {
+            products: {
+              include: {
+                product: { include: { inventory: true } },
+                variant: { include: { inventory: true } },
+              },
+            },
+          },
+        },
       },
     });
   }

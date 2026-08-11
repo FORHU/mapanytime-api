@@ -43,6 +43,7 @@ export default class OrderService {
       const storeEmailSnapshot = store.email ?? store.seller?.users?.email ?? null;
 
       let subtotalAmount = 0;
+      let totalDiscount = 0;
       const orderItemsData = [];
       let primaryCategoryId: string | undefined;
 
@@ -74,11 +75,49 @@ export default class OrderService {
         const itemTotal = numericPrice * item.quantity;
         subtotalAmount += itemTotal;
 
+        // Buy-X-take-Y (e.g. buy 1 take 1): find an active ad linking this
+        // product to a BOGO rule for this store, and give away the free
+        // units. variantId is left out — cart items are product-only today.
+        const bogoLink = await tx.merchantAdProducts.findFirst({
+          where: {
+            productId: item.productId,
+            ad: {
+              storeId: payload.storeId,
+              isActive: true,
+              buyQuantity: { not: null },
+              freeQuantity: { not: null },
+              OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+            },
+          },
+          include: { ad: true },
+        });
+        const bogoAd = bogoLink?.ad;
+
+        let itemDiscount = 0;
+        let appliedAdId: string | null = null;
+        if (bogoAd && bogoAd.buyQuantity && bogoAd.freeQuantity) {
+          // Bundle size is buy+free (e.g. "buy 1 take 1" = pay for 1, get 2
+          // total per bundle) — dividing by buyQuantity alone would give
+          // away a free unit for every single unit bought, not every pair.
+          const bundleSize = bogoAd.buyQuantity + bogoAd.freeQuantity;
+          const freeUnits = Math.min(
+            item.quantity,
+            Math.floor(item.quantity / bundleSize) * bogoAd.freeQuantity,
+          );
+          if (freeUnits > 0) {
+            itemDiscount = freeUnits * numericPrice;
+            appliedAdId = bogoAd.id;
+          }
+        }
+        totalDiscount += itemDiscount;
+
         orderItemsData.push({
           productId: product.id,
           productName: product.name,
           quantity: item.quantity,
           unitPrice: product.price,
+          discountAmount: itemDiscount,
+          appliedAdId,
         });
 
         await tx.inventory.update({
@@ -103,6 +142,7 @@ export default class OrderService {
       const financials = await TaxationService.calculateOrderFinancials({
         subtotalAmount,
         categoryId: primaryCategoryId,
+        discountAmount: totalDiscount,
       });
 
       const orderData = {
@@ -114,6 +154,7 @@ export default class OrderService {
         storeEmailSnapshot,
         totalAmount: financials.totalAmount,
         subtotalAmount: financials.subtotalAmount,
+        discountAmount: financials.discountAmount,
         taxAmount: financials.taxAmount,
         marketplaceFeeAmount: financials.marketplaceFeeAmount,
         sellerNetAmount: financials.sellerNetAmount,
