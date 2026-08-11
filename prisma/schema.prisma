@@ -348,6 +348,7 @@ model Stores {
   ratingAverage   Float               @default(0)
   ratingCount     Int                 @default(0)
   followersCount  Int                 @default(0)
+  primaryCategoryId String?
   vacationMode    Boolean             @default(false)
   isActive        Boolean             @default(false)
   approvalStatus  STOREAPPROVALSTATUS @default(PENDING)
@@ -360,6 +361,7 @@ model Stores {
 
   logoFile              Files?                  @relation("StoreLogo", fields: [logoId], references: [id])
   bannerFile            Files?                  @relation("StoreBanner", fields: [bannerId], references: [id])
+  primaryCategory       Categories?             @relation("StorePrimaryCategory", fields: [primaryCategoryId], references: [id])
   documentVerifications DocumentVerifications[]
   products              Products[]
   storeHours            StoreHours[]
@@ -376,6 +378,7 @@ model Stores {
 
   @@index([sellerId])
   @@index([isActive])
+  @@index([primaryCategoryId])
 }
 
 model StoreHours {
