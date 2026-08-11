@@ -21,7 +21,6 @@ export interface NearbyStore {
     province: string;
     country: string;
   };
-  categoryName: string | null;
 }
 
 interface NearbyRow {
@@ -44,7 +43,6 @@ interface NearbyRow {
   province: string;
   country: string;
   distanceKm: number;
-  categoryName: string | null;
 }
 
 // No hours row for today (isClosed is null) defaults to open — matches the
@@ -126,7 +124,7 @@ export default class StoreRepository {
         s."id", s."storeName", s."description", s."isActive",
         f."path" AS "logoUrl",
         s."ratingAverage", s."ratingCount",
-        s."primaryCategoryId" AS "categoryId", pc."name" AS "categoryName",
+        s."primaryCategoryId" AS "categoryId",
         h."isClosed" AS "hoursIsClosed", h."openMinutes", h."closeMinutes",
         l."latitude", l."longitude",
         l."currentAddress", l."city", l."province", l."country",
@@ -141,7 +139,6 @@ export default class StoreRepository {
       FROM "Stores" s
       JOIN "StoreLocations" l ON l."storeId" = s."id"
       LEFT JOIN "Files" f ON f."id" = s."logoId"
-      LEFT JOIN "Categories" pc ON pc."id" = s."primaryCategoryId"
       LEFT JOIN "StoreHours" h ON h."storeId" = s."id" AND h."dayOfWeek" = ${dow}
       ${categoryJoin}
       WHERE ${inViewport}
@@ -176,7 +173,6 @@ export default class StoreRepository {
         province: r.province,
         country: r.country,
       },
-      categoryName: r.categoryName,
     }));
 
     return { items, total: Number(totalRows[0]?.count ?? 0) };
