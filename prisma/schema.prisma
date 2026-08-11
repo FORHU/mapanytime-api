@@ -347,6 +347,7 @@ model Stores {
   ratingAverage   Float               @default(0)
   ratingCount     Int                 @default(0)
   followersCount  Int                 @default(0)
+  primaryCategoryId String?
   vacationMode    Boolean             @default(false)
   isActive        Boolean             @default(false)
   approvalStatus  STOREAPPROVALSTATUS @default(PENDING)
@@ -356,27 +357,6 @@ model Stores {
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
   deletedAt       DateTime?
-  id                String    @id @default(cuid())
-  sellerId          String
-  storeName         String
-  description       String?
-  logoId            String?
-  bannerId          String?
-  slug              String?   @unique
-  phone             String?
-  email             String?
-  returnPolicy      String?
-  shippingPolicy    String?
-  socialLinks       Json?
-  ratingAverage     Float     @default(0)
-  ratingCount       Int       @default(0)
-  followersCount    Int       @default(0)
-  vacationMode      Boolean   @default(false)
-  isActive          Boolean   @default(false)
-  primaryCategoryId String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  deletedAt         DateTime?
 
   logoFile              Files?                  @relation("StoreLogo", fields: [logoId], references: [id])
   bannerFile            Files?                  @relation("StoreBanner", fields: [bannerId], references: [id])
