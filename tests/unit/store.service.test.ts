@@ -19,6 +19,8 @@ describe('StoreService', () => {
         },
         storeHours: [{ dayOfWeek: 1, openMinutes: 480, closeMinutes: 1080, isClosed: false }],
         categories: [{ id: 'cat-1', name: 'Groceries' }],
+        primaryCategory: { id: 'cat-1', name: 'Groceries' },
+        merchantAds: [],
       };
 
       (StoreRepository.getStoreById as jest.Mock).mockResolvedValue(mockStore);
@@ -26,6 +28,49 @@ describe('StoreService', () => {
       const result = await StoreService.getStoreById('store-123');
       expect(result).toEqual(mockStore);
       expect(StoreRepository.getStoreById).toHaveBeenCalledWith('store-123');
+    });
+
+    it('drops a stock-linked ad once its linked inventory is sold out', async () => {
+      const mockStore = {
+        id: 'store-123',
+        storeName: 'Test Store',
+        isActive: true,
+        merchantAds: [
+          {
+            id: 'ad-promo',
+            kind: 'PROMO',
+            products: [],
+          },
+          {
+            id: 'ad-event-live',
+            kind: 'EVENT',
+            products: [
+              {
+                variant: null,
+                product: { inventory: [{ quantityOnHand: 5, quantityReserved: 2 }] },
+              },
+            ],
+          },
+          {
+            id: 'ad-event-sold-out',
+            kind: 'EVENT',
+            products: [
+              {
+                variant: null,
+                product: { inventory: [{ quantityOnHand: 3, quantityReserved: 3 }] },
+              },
+            ],
+          },
+        ],
+      };
+
+      (StoreRepository.getStoreById as jest.Mock).mockResolvedValue(mockStore);
+
+      const result = await StoreService.getStoreById('store-123');
+      expect(result.merchantAds.map((ad: { id: string }) => ad.id)).toEqual([
+        'ad-promo',
+        'ad-event-live',
+      ]);
     });
 
     it('throws 404 if store does not exist', async () => {

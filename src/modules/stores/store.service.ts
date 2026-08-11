@@ -6,6 +6,32 @@ import logger from '../../utils/logger';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 
+type MerchantAdWithProducts = Prisma.MerchantAdsGetPayload<{
+  include: {
+    products: {
+      include: {
+        product: { include: { inventory: true } };
+        variant: { include: { inventory: true } };
+      };
+    };
+  };
+}>;
+
+// EVENT (or any stock-linked) ads end when their linked stock sells out.
+// quantityOnHand - quantityReserved, not raw quantityOnHand, since Inventory
+// only decrements quantityOnHand at fulfillment — pending orders already
+// reserved units shouldn't still count as available here.
+function filterLiveAds(ads: MerchantAdWithProducts[]) {
+  return ads.filter((ad) => {
+    if (ad.products.length === 0) return true;
+    const available = ad.products.reduce((sum, p) => {
+      const inv = p.variant?.inventory[0] ?? p.product.inventory[0];
+      return sum + (inv ? inv.quantityOnHand - inv.quantityReserved : 0);
+    }, 0);
+    return available > 0;
+  });
+}
+
 export default class StoreService {
   static async createStoreWithDocuments(
     sellerId: string,
@@ -222,6 +248,7 @@ export default class StoreService {
       lat,
       lng,
       search,
+      new Date().getDay(),
     );
 
     const result = {
@@ -257,7 +284,7 @@ export default class StoreService {
       throw { status: 404, message: 'Store is not currently active.' };
     }
 
-    return store;
+    return { ...store, merchantAds: filterLiveAds(store.merchantAds) };
   }
 
   static async getStoreProducts(storeId: string, limit: number, offset: number) {
