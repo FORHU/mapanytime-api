@@ -7,6 +7,7 @@ import {
   AWS_ACCESS_KEY_ID,
   AWS_SECRET_ACCESS_KEY,
   AWS_S3_BUCKET_NAME,
+  S3_CDN_URL,
 } from '../config';
 
 const s3Client = new S3Client({
@@ -53,5 +54,16 @@ export default class S3Util {
     const downloadUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
 
     return downloadUrl;
+  }
+
+  // Generates an absolute public URL for a given S3 key
+  static getPublicUrl(fileKey: string | null): string | null {
+    if (!fileKey) return null;
+    if (fileKey.startsWith('http')) return fileKey; // Already an absolute URL
+
+    if (S3_CDN_URL) {
+      return `${S3_CDN_URL.replace(/\/$/, '')}/${fileKey}`;
+    }
+    return `https://${AWS_S3_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${fileKey}`;
   }
 }

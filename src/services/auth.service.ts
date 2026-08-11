@@ -186,7 +186,38 @@ export default class AuthSvc {
 
     const updatedUser = await AuthRepo.updateUserLoginStatus(user.id);
     logger.info(`[Auth] Login successful: ${updatedUser.id} (${data.email})`);
-    return this.generateAuthResponse(updatedUser as Users, 'local');
+    return this.generateAuthResponse(updatedUser as Users, 'local', true, {
+      revokeOtherSessions: true,
+    });
+  }
+
+  /**
+   * Google OAuth Sign-In — NOT IMPLEMENTED, fails closed.
+   *
+   * The previous implementation took `data.email` at face value and minted tokens for it, which
+   * is unauthenticated account takeover for any address the caller names. It was held back only
+   * by a commented-out route in auth.route.ts, and a comment is not a safety mechanism — so the
+   * body is gone and this throws instead. Registering the route now returns 501 rather than
+   * handing out sessions.
+   *
+   * To implement:
+   *   1. Take an `idToken` from the client instead of email/firstName/lastName/googleId.
+   *   2. Verify it with `new OAuth2Client(GOOGLE_CLIENT_ID).verifyIdToken({ idToken, audience:
+   *      GOOGLE_CLIENT_ID })` and reject anything failing signature, audience, issuer or expiry.
+   *   3. Read email/name/sub from the verified payload only, and require `email_verified`.
+   *   4. Find-or-create the user — mirror register()'s single transaction so an account can't be
+   *      created without its buyer profile, and hardcode the BUYER role; never let the caller
+   *      pick one, or an attacker self-provisions an admin.
+   *   5. Return `generateAuthResponse(user, 'google', true, { revokeOtherSessions: true,
+   *      providerUserId, providerAvatarUrl })` — the Session model already carries the Google
+   *      identity, since Users has no googleId column and stores avatars as Files rows.
+   */
+  static async googleLogin(data: { email?: string }) {
+    logger.error(`[Auth] Blocked call to unimplemented googleLogin for ${data.email}`);
+    throw {
+      status: 501,
+      message: 'Google sign-in is not available — ID token verification is not implemented',
+    };
   }
 
   static async refreshToken(refreshToken: string) {
@@ -202,35 +233,66 @@ export default class AuthSvc {
 
     logger.info(`[Auth] Token refreshed for user ${user.id}`);
 
-    await AuthRepo.deleteSession(refreshToken);
-
-    return this.generateAuthResponse(user, 'local', false);
+    // Carry the original provider through — otherwise a Google session is relabelled 'local'
+    // the first time it refreshes. Retire only this session, not the user's other devices.
+    return this.generateAuthResponse(user, session.provider || 'local', false, {
+      replacesRefreshToken: refreshToken,
+    });
   }
 
   static async logout(userId: string, refreshToken?: string) {
     if (refreshToken) await AuthRepo.deleteSession(refreshToken);
+    await AuthRepo.updateActiveSession(userId, null);
     await CacheUtil.del(`user:${userId}`);
     logger.info(`[Auth] User ${userId} logged out (session revoked: ${Boolean(refreshToken)})`);
     return { message: 'Logged out successfully' };
   }
 
-  private static async generateAuthResponse(user: Users, provider: string, includeUser = true) {
-    const accessToken = jwt.sign({ userId: user.id }, ACCESS_TOKEN_SECRET, {
-      expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'],
-    });
-
+  /**
+   * Mints a fresh session plus its token pair.
+   *
+   * `revokeOtherSessions` enforces the single-active-device rule and is only correct for a real
+   * login. A refresh passes `replacesRefreshToken` so it retires the session it came from and
+   * leaves the user's other devices alone.
+   */
+  private static async generateAuthResponse(
+    user: Users,
+    provider: string,
+    includeUser = true,
+    options: {
+      revokeOtherSessions?: boolean;
+      replacesRefreshToken?: string;
+      providerUserId?: string;
+      providerAvatarUrl?: string;
+    } = {},
+  ) {
     const refreshToken = jwt.sign(
       { userId: user.id, jti: crypto.randomBytes(16).toString('hex') },
       REFRESH_TOKEN_SECRET,
       { expiresIn: REFRESH_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] },
     );
 
-    await AuthRepo.createSession({
+    // Purge, create, and point activeSessionId at the new session — all or nothing.
+    const newSession = await AuthRepo.rotateSession({
       userId: user.id,
       refreshToken,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       provider,
+      revokeOtherSessions: options.revokeOtherSessions,
+      replacesRefreshToken: options.replacesRefreshToken,
+      providerUserId: options.providerUserId,
+      providerAvatarUrl: options.providerAvatarUrl,
     });
+
+    user.activeSessionId = newSession.id;
+
+    // The access token carries sessionId so authenticate() can tell a live session from a
+    // superseded one without a second lookup.
+    const accessToken = jwt.sign(
+      { userId: user.id, sessionId: newSession.id },
+      ACCESS_TOKEN_SECRET,
+      { expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] },
+    );
 
     await CacheUtil.set(`user:${user.id}`, user);
 

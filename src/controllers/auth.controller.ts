@@ -66,6 +66,43 @@ export default class AuthController {
   }
 
   /**
+   * Google OAuth Sign-In
+   *
+   * SECURITY — NOT SAFE TO REGISTER AS A ROUTE YET.
+   * This handler takes `email` at face value from the request body, so anyone who can reach it
+   * could mint tokens for any account by posting that account's address. It is deliberately not
+   * wired up in auth.route.ts, and AuthSvc.googleLogin now throws 501 unconditionally so that
+   * wiring it up fails loudly instead of opening account takeover.
+   *
+   * Before re-enabling, replace the body-supplied identity with a verified one:
+   *   1. Require an `idToken` from the client instead of `email`/`firstName`/`lastName`/`googleId`.
+   *   2. Verify it — `new OAuth2Client(GOOGLE_CLIENT_ID).verifyIdToken({ idToken, audience: GOOGLE_CLIENT_ID })`
+   *      — and reject anything that fails signature, audience, issuer, or expiry checks.
+   *   3. Read email/name/sub from the verified payload only, and require `email_verified`.
+   */
+  static async googleLogin(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({
+      email: Joi.string()
+        .email({ tlds: { allow: false } })
+        .required(),
+      firstName: Joi.string().optional(),
+      lastName: Joi.string().optional(),
+      googleId: Joi.string().optional(),
+      avatarUrl: Joi.string().optional(),
+    });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const data = await AuthSvc.googleLogin(value);
+      return responseSuccess(res, 200, data, 'Google login successful');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
    * Refresh access token
    */
   static async refreshToken(req: Request, res: Response, next: NextFunction) {
