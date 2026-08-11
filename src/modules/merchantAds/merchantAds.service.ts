@@ -66,7 +66,7 @@ export default class MerchantAdsService {
     });
   }
 
-  static async archiveAd(userId: string, adId: string) {
+  static async setActive(userId: string, adId: string, isActive: boolean) {
     const ad = await MerchantAdsRepository.getAdById(adId);
     if (!ad) {
       throw { status: 404, message: 'Merchant ad not found.' };
@@ -76,9 +76,9 @@ export default class MerchantAdsService {
     const seller = await MerchantAdsRepository.getSellerByUserId(userId);
 
     if (!seller || !store || store.sellerId !== seller.id) {
-      throw { status: 403, message: 'Unauthorized to delete this merchant ad.' };
+      throw { status: 403, message: 'Unauthorized to update this merchant ad.' };
     }
 
-    return MerchantAdsRepository.archiveAd(adId);
+    return MerchantAdsRepository.setActive(adId, isActive);
   }
 }

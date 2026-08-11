@@ -58,13 +58,22 @@ export default class MerchantAdsController {
     }
   }
 
-  static async delete(req: Request, res: Response, next: NextFunction) {
+  static async toggle(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({ isActive: Joi.boolean().required() });
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
     try {
       const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
-      await MerchantAdsService.archiveAd(userId, req.params.id);
-      return responseSuccess(res, 200, null, 'Merchant ad archived successfully');
+      const data = await MerchantAdsService.setActive(userId, req.params.id, value.isActive);
+      return responseSuccess(
+        res,
+        200,
+        data,
+        `Merchant ad ${value.isActive ? 'enabled' : 'disabled'}`,
+      );
     } catch (error) {
       next(error);
     }

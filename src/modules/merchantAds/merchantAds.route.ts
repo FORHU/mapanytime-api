@@ -6,6 +6,6 @@ const router = express.Router();
 
 router.get('/', authenticate, MerchantAdsController.index);
 router.post('/', authenticate, MerchantAdsController.create);
-router.delete('/:id', authenticate, MerchantAdsController.delete);
+router.patch('/:id', authenticate, MerchantAdsController.toggle);
 
 export default router;

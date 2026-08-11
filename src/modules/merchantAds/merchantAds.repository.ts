@@ -25,10 +25,10 @@ export default class MerchantAdsRepository {
     return prisma.merchantAds.create({ data });
   }
 
-  static async archiveAd(adId: string) {
+  static async setActive(adId: string, isActive: boolean) {
     return prisma.merchantAds.update({
       where: { id: adId },
-      data: { isActive: false },
+      data: { isActive },
     });
   }
 }
