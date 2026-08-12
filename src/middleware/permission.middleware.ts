@@ -34,9 +34,7 @@ export const requirePermission = (permissionCode: string) => {
       const hasPermission =
         isAdmin ||
         user.roles.some((r) =>
-          (
-            r as unknown as { permissions: Array<{ permission: { code: string } }> }
-          ).permissions.some((rp) => rp.permission?.code === permissionCode),
+          r.permissions.some((rp) => rp.permission?.code === permissionCode),
         );
 
       if (!hasPermission) {
