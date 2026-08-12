@@ -11,7 +11,12 @@ const router = express.Router();
 // gates the /v1/rbac router. Both are administrator-only today, so these gates
 // match the requireAdmin checks they replaced.
 router.get('/me', authenticate, UserController.getMe);
-router.get('/:userId', authenticate, requirePermission(PERMISSIONS.USERS_MANAGE), UserController.show);
+router.get(
+  '/:userId',
+  authenticate,
+  requirePermission(PERMISSIONS.USERS_MANAGE),
+  UserController.show,
+);
 router.get('/', UserController.index);
 router.post('/', UserController.create);
 router.put(

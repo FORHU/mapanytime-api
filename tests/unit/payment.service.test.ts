@@ -52,9 +52,9 @@ describe('PaymentService.processMockWebhook', () => {
   it('rejects an unknown order', async () => {
     tx.payments.findFirst.mockResolvedValue(null);
 
-    await expect(PaymentService.processMockWebhook(ORDER_ID, 'COMPLETED', 'ref')).rejects.toMatchObject(
-      { status: 404 },
-    );
+    await expect(
+      PaymentService.processMockWebhook(ORDER_ID, 'COMPLETED', 'ref'),
+    ).rejects.toMatchObject({ status: 404 });
   });
 
   describe('when the payment is already COMPLETED', () => {

@@ -49,9 +49,7 @@ const resolveGlob = (pattern: string): string[] => {
   const filePattern = remainder.replace(/^\*\*\//, '');
 
   // `*` matches within a single filename segment only.
-  const fileRegex = new RegExp(
-    `^${filePattern.split('*').map(escapeRegExp).join('[^/\\\\]*')}$`,
-  );
+  const fileRegex = new RegExp(`^${filePattern.split('*').map(escapeRegExp).join('[^/\\\\]*')}$`);
 
   const candidates = recursive
     ? walk(baseDir)
