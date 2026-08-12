@@ -17,11 +17,14 @@ import returnRoute from '../modules/returns/return.route';
 import settlementRoute from '../modules/settlements/settlement.route';
 import payoutRoute from '../modules/payouts/payout.route';
 import rbacRoute from './rbac.route';
+import adminApprovalRoute from '../modules/adminApprovals/adminApproval.route';
 import agentRoute from './agent.route';
+import propertyRoute from '../modules/properties/property.route';
 import {
   publicAppReleaseRouter,
   adminAppReleaseRouter,
 } from '../modules/appRelease/app-release.route';
+import filesRoute from '../modules/files/files.route';
 
 const router = express.Router();
 
@@ -34,6 +37,7 @@ router.get('/v1', (_, res) => {
 router.use('/v1/auth', authRoute);
 router.use('/v1/users', userRoute);
 router.use('/v1/file-uploads', fileUploadRoute);
+router.use('/v1/files', filesRoute);
 router.use('/v1/products', productRoute);
 router.use('/v1/supplier-products', supplierProductsRoute);
 router.use('/v1/stores', storeRoute);
@@ -52,5 +56,7 @@ router.use('/v1/rbac', rbacRoute);
 router.use('/v1/agent', agentRoute);
 router.use('/v1/app', publicAppReleaseRouter);
 router.use('/v1/admin/app-releases', adminAppReleaseRouter);
+router.use('/v1/admin/approvals', adminApprovalRoute);
+router.use('/v1/properties', propertyRoute);
 
 export default router;
