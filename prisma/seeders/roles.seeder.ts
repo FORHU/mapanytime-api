@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { SYSTEM_ROLES, ADMIN_ROLES, SystemRole } from '../../src/constants/roles.constant';
+import { PERMISSIONS, SYSTEM_PERMISSIONS } from '../../src/constants/permissions.constant';
 
 interface PermissionSeederRecord {
   id: string;
@@ -11,43 +12,9 @@ interface PermissionSeederRecord {
 export async function seedRoles(prisma: PrismaClient) {
   console.log('🌱 Seeding Master Roles & Granular Permissions...');
 
-  const systemPermissions = [
-    {
-      code: 'stores.approve',
-      name: 'Approve Merchant Stores',
-      description: 'Can review and verify pending seller store requests',
-    },
-    {
-      code: 'stores.manage',
-      name: 'Manage Store Listings',
-      description: 'Can create, edit, or suspend merchant stores',
-    },
-    {
-      code: 'categories.manage',
-      name: 'Manage Categories',
-      description: 'Can create, edit, and toggle marketplace categories',
-    },
-    {
-      code: 'users.manage',
-      name: 'Manage Users',
-      description: 'Can view and modify user profiles and account statuses',
-    },
-    {
-      code: 'users.roles',
-      name: 'Manage Roles & RBAC',
-      description: 'Can assign roles and modify permission matrixes',
-    },
-    {
-      code: 'orders.view',
-      name: 'View System Orders',
-      description: 'Can monitor platform-wide buyer orders and pickup schedules',
-    },
-    {
-      code: 'analytics.view',
-      name: 'View Platform Analytics',
-      description: 'Can access gross merchandise volume and revenue charts',
-    },
-  ];
+  // Catalogue lives in src/constants/permissions.constant.ts so the codes the
+  // route gates reference and the codes seeded here are the same list.
+  const systemPermissions = SYSTEM_PERMISSIONS;
 
   const seededPermissions: Record<string, string> = {};
 
@@ -110,9 +77,13 @@ export async function seedRoles(prisma: PrismaClient) {
     if (ADMIN_ROLES.includes(roleData.roleName as SystemRole)) {
       assignedCodes = Object.keys(seededPermissions);
     } else if (roleData.roleName === SYSTEM_ROLES.SELLER) {
-      assignedCodes = ['stores.manage', 'orders.view', 'analytics.view'];
+      assignedCodes = [
+        PERMISSIONS.STORES_MANAGE,
+        PERMISSIONS.ORDERS_VIEW,
+        PERMISSIONS.ANALYTICS_VIEW,
+      ];
     } else if (roleData.roleName === SYSTEM_ROLES.SUPPORT_AGENT) {
-      assignedCodes = ['orders.view', 'stores.manage'];
+      assignedCodes = [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.STORES_MANAGE];
     }
 
     for (const code of assignedCodes) {

@@ -26,6 +26,10 @@ publicAppReleaseRouter.get('/history', getPublicReleaseHistory);
  */
 export const adminAppReleaseRouter = express.Router();
 
+// Still the coarse role check rather than a permission code: nothing in
+// SYSTEM_PERMISSIONS describes publishing or rolling back a mobile release, and
+// inventing a code here would mean seeding a permission no role has been
+// designed around. Revisit if a `releases.manage` code is ever added.
 adminAppReleaseRouter.use(authenticate, requireAdmin);
 
 adminAppReleaseRouter.get('/history', getAdminReleaseHistory);
