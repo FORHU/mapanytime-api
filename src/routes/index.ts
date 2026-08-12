@@ -6,7 +6,7 @@ import healthRouter from './health.route';
 import productRoute from '../modules/products/product.route';
 import storeRoute from '../modules/stores/store.route';
 import merchantAdsRoute from '../modules/merchantAds/merchantAds.route';
-import categoryRoute from './category.route';
+import categoryRoute from '../modules/categories/category.route';
 import orderRoute from '../modules/orders/order.route';
 import inventoryRoutes from './inventory.route';
 import cartRoutes from '../modules/cart/cart.route';

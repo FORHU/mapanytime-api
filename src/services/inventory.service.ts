@@ -1,5 +1,5 @@
 import InventoryRepository from '../repositories/inventory.repository';
-import ProductRepository from '../repositories/product.repository';
+import ProductRepository from '../modules/products/product.repository';
 
 export default class InventoryService {
   static async restock(userId: string, productId: string, addedQuantity: number) {

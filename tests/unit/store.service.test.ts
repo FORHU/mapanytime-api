@@ -1,7 +1,7 @@
-import StoreService from '../../src/services/store.service';
-import StoreRepository from '../../src/repositories/store.repository';
+import StoreService from '../../src/modules/stores/store.service';
+import StoreRepository from '../../src/modules/stores/store.repository';
 
-jest.mock('../../src/repositories/store.repository');
+jest.mock('../../src/modules/stores/store.repository');
 
 describe('StoreService', () => {
   describe('getStoreById', () => {
