@@ -1,0 +1,133 @@
+tags:
+  - name: Analytics
+    description: Marketplace behavioural event ingestion
+
+paths:
+  /v1/analytics/events:
+    post:
+      summary: Record one or more analytics events
+      description: >
+        Accepts a single event or a batch of up to 50. Authentication is
+        optional — anonymous browsing is the common case, and events are tied
+        together by the client-generated `sessionId` instead. When a bearer
+        token is supplied the event is additionally attributed to that user.
+
+
+        Returns **202 Accepted**: events are normally still on the queue when
+        this responds, not yet rows in the table. `userId`, `ipAddress` and
+        `userAgent` are taken from the request and ignored if sent in the body.
+      tags: [Analytics]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/AnalyticsEvent'
+                - type: object
+                  required: [events]
+                  properties:
+                    events:
+                      type: array
+                      minItems: 1
+                      maxItems: 50
+                      items:
+                        $ref: '#/components/schemas/AnalyticsEvent'
+            examples:
+              singleProductView:
+                summary: One product view
+                value:
+                  eventType: PRODUCT_VIEW
+                  sessionId: 6f1c2b9e-2f0a-4a1e-9c3d-8b7a5e4d3c2b
+                  productId: clx1product0000
+                  storeId: clx1store00000
+              batchedSearch:
+                summary: A batch with search metadata
+                value:
+                  events:
+                    - eventType: SEARCH
+                      sessionId: 6f1c2b9e-2f0a-4a1e-9c3d-8b7a5e4d3c2b
+                      metadata:
+                        query: running shoes
+                        resultCount: 24
+                    - eventType: PRODUCT_CLICK
+                      sessionId: 6f1c2b9e-2f0a-4a1e-9c3d-8b7a5e4d3c2b
+                      productId: clx1product0000
+                      occurredAt: '2026-08-12T09:15:00.000Z'
+      responses:
+        '202':
+          description: Events accepted for processing
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          accepted:
+                            type: integer
+                            example: 2
+                          transport:
+                            type: string
+                            enum: [queued, direct]
+                            description: >
+                              `queued` is the normal path. `direct` means
+                              RabbitMQ was unreachable and the events were
+                              written straight to the database instead.
+                            example: queued
+        '400':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    AnalyticsEvent:
+      type: object
+      required: [eventType]
+      properties:
+        eventType:
+          type: string
+          enum:
+            - STORE_VIEW
+            - PRODUCT_VIEW
+            - PRODUCT_CLICK
+            - SEARCH
+            - ADD_TO_CART
+            - ADD_TO_WISHLIST
+            - CHECKOUT_STARTED
+            - ORDER_COMPLETED
+          example: PRODUCT_VIEW
+        sessionId:
+          type: string
+          maxLength: 64
+          description: >
+            Client-generated anonymous session id, persisted in localStorage or
+            a first-party cookie on first visit. Required for unique-visitor and
+            deduplicated-view counts to mean anything.
+          example: 6f1c2b9e-2f0a-4a1e-9c3d-8b7a5e4d3c2b
+        storeId:
+          type: string
+          maxLength: 64
+        productId:
+          type: string
+          maxLength: 64
+        categoryId:
+          type: string
+          maxLength: 64
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Event-shaped extras — search terms, result counts, cart quantity.
+        occurredAt:
+          type: string
+          format: date-time
+          description: >
+            When the interaction happened. Defaults to server receipt time;
+            a value in the future is rejected in favour of receipt time.

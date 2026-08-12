@@ -70,6 +70,26 @@ class RabbitMQConnection {
     return this.channel;
   }
 
+  /**
+   * Open a channel separate from the shared one, with its own prefetch.
+   *
+   * The shared channel is pinned at prefetch(1) for fair dispatch, which makes
+   * batching impossible on it: a consumer never holds more than one unacked
+   * message, so a buffer can never fill. A batch consumer needs to hold a whole
+   * batch in flight at once, and prefetch is a channel-level setting — so it
+   * needs a channel of its own rather than raising the limit for every other
+   * consumer sharing this one.
+   */
+  public async createDedicatedChannel(prefetch: number): Promise<Channel> {
+    if (!this.connection) {
+      throw new Error('[RabbitMQ] Connection not initialized. Call connect() first.');
+    }
+
+    const channel = await this.connection.createChannel();
+    await channel.prefetch(prefetch);
+    return channel;
+  }
+
   public isReady(): boolean {
     return !!this.connection && !!this.channel;
   }

@@ -52,3 +52,37 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     return res.status(401).json({ message: 'Invalid token' });
   }
 };
+
+/**
+ * Attach `req.user` when the request carries a usable token, but never reject.
+ *
+ * For endpoints that serve authenticated and anonymous callers alike — analytics
+ * ingestion is the first — where knowing *who* is optional but the request must
+ * succeed either way.
+ *
+ * Every rejection path in `authenticate` becomes "continue anonymously" here,
+ * including the single-active-device check: a superseded token identifies a
+ * real person, but not one we are willing to attribute events to, so it is
+ * treated as no token at all rather than trusted.
+ */
+export const optionalAuthenticate = async (req: Request, _res: Response, next: NextFunction) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return next();
+
+  try {
+    const decoded = jwt.verify(token, ACCESS_TOKEN_SECRET) as {
+      userId: string;
+      sessionId?: string;
+    };
+    const user = await AuthRepo.findUserById(decoded.userId);
+
+    if (!user || user.accountStatus !== 'ACTIVE') return next();
+    if (decoded.sessionId && decoded.sessionId !== user.activeSessionId) return next();
+
+    req.user = user;
+  } catch {
+    // Malformed or expired token — fall through as anonymous.
+  }
+
+  return next();
+};
