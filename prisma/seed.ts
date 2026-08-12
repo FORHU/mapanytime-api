@@ -1,6 +1,5 @@
 import { PrismaClient } from '@prisma/client';
 import { seedUsers } from './seeders/users.seeder';
-import { seedStores } from './seeders/stores.seeder';
 import { seedRoles } from './seeders/roles.seeder';
 import { seedCategories } from './seeders/categories.seeder';
 import { seedMarketplaceData } from './seeders/marketplace_data.seeder';
@@ -16,7 +15,6 @@ async function main() {
     await seedRoles(prisma);
     await seedUsers(prisma);
     await seedCategories(prisma);
-    await seedStores(prisma);
     await seedMerchantAds(prisma);
     await seedMarketplaceData(prisma);
 
