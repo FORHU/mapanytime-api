@@ -1,0 +1,183 @@
+import PropertyService, { computePricePerSqm } from '../../src/modules/properties/property.service';
+import { prisma } from '../../src/utils/prisma';
+
+jest.mock('../../src/utils/prisma', () => ({
+  prisma: {
+    productProperties: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
+    stores: {
+      findFirst: jest.fn(),
+    },
+  },
+}));
+
+// Cast mocked methods to preserve TypeScript intellisense
+const mockedProductProperties = prisma.productProperties as jest.Mocked<
+  typeof prisma.productProperties
+>;
+const mockedStores = prisma.stores as jest.Mocked<typeof prisma.stores>;
+
+const baseCreateInput = {
+  sellerCapacity: 'OWNER' as const,
+  legalName: 'Juan Dela Cruz',
+  propertyType: 'HOUSE_LOT' as const,
+  address: '48 Pine Ridge Rd, Baguio City, Benguet',
+  latitude: 16.4164,
+  longitude: 120.5931,
+};
+
+const basePropertyRecord: Record<string, unknown> = {
+  id: 'prop-1',
+  storeId: 'store-1',
+  sellerCapacity: 'OWNER',
+  governmentIdName: null,
+  subdivision: null,
+  rejectionReason: null,
+  reviewedAt: null,
+  reviewedById: null,
+  lotArea: null,
+  terrain: null,
+  floorArea: null,
+  bedrooms: null,
+  bathrooms: null,
+  parkingSpaces: null,
+  yearBuilt: null,
+  furnishing: null,
+  sellingPrice: null,
+  negotiability: null,
+  taxResponsibilities: null,
+  hoaDues: null,
+  legalName: 'Juan Dela Cruz',
+  propertyType: 'HOUSE_LOT',
+  address: '48 Pine Ridge Rd, Baguio City, Benguet',
+  latitude: 16.4164,
+  longitude: 120.5931,
+  status: 'ACTIVE',
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
+describe('PropertyService metadata', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('createProperty', () => {
+    it('persists Step 3-5 metadata fields', async () => {
+      // Mock the store query so createProperty can find the related storeId
+      mockedStores.findFirst.mockResolvedValue({ id: 'store-1' } as never);
+      mockedProductProperties.create.mockResolvedValue({
+        ...basePropertyRecord,
+        id: 'prop-1',
+      } as never);
+
+      await PropertyService.createProperty('seller-1', {
+        ...baseCreateInput,
+        lotArea: 180,
+        terrain: 'SLOPING',
+        floorArea: 120,
+        bedrooms: 3,
+        bathrooms: 2,
+        parkingSpaces: 2,
+        yearBuilt: 2019,
+        furnishing: 'FULLY_FURNISHED',
+        sellingPrice: 5400000,
+        negotiability: 'NEGOTIABLE',
+        taxResponsibilities: 'STANDARD_SHARING',
+        hoaDues: 750,
+      });
+
+      expect(mockedProductProperties.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          storeId: 'store-1',
+          lotArea: 180,
+          terrain: 'SLOPING',
+          bedrooms: 3,
+          sellingPrice: 5400000,
+          hoaDues: 750,
+        }),
+      });
+    });
+
+    it('throws 404 if the store is not found for the seller', async () => {
+      mockedStores.findFirst.mockResolvedValue(null);
+
+      await expect(PropertyService.createProperty('seller-1', baseCreateInput)).rejects.toEqual({
+        status: 404,
+        message: 'Store not found for this seller.',
+      });
+    });
+  });
+
+  describe('updatePropertyMetadata', () => {
+    it('throws 404 when the property does not exist for the seller', async () => {
+      mockedProductProperties.findFirst.mockResolvedValue(null);
+
+      await expect(
+        PropertyService.updatePropertyMetadata('seller-1', 'missing', { sellingPrice: 100 }),
+      ).rejects.toEqual({ status: 404, message: 'Property not found.' });
+    });
+
+    it('updates only provided fields and attaches derived pricePerSqm', async () => {
+      mockedProductProperties.findFirst.mockResolvedValue({
+        ...basePropertyRecord,
+      } as never);
+      mockedProductProperties.update.mockResolvedValue({
+        ...basePropertyRecord,
+        lotArea: 180,
+        sellingPrice: 5400000,
+      } as never);
+
+      const result = await PropertyService.updatePropertyMetadata('seller-1', 'prop-1', {
+        lotArea: 180,
+        sellingPrice: 5400000,
+      });
+
+      expect(mockedProductProperties.update).toHaveBeenCalledWith({
+        where: { id: 'prop-1' },
+        data: expect.objectContaining({
+          lotArea: 180,
+          sellingPrice: 5400000,
+        }),
+      });
+      expect(result.pricePerSqm).toBe(30000);
+    });
+  });
+
+  describe('getSellerProperty', () => {
+    it('throws 404 when not owned by the seller', async () => {
+      mockedProductProperties.findFirst.mockResolvedValue(null);
+
+      await expect(PropertyService.getSellerProperty('seller-1', 'prop-x')).rejects.toEqual({
+        status: 404,
+        message: 'Property not found.',
+      });
+    });
+  });
+
+  describe('computePricePerSqm', () => {
+    it('computes price / lot area', () => {
+      expect(computePricePerSqm(5400000, 180)).toBe(30000);
+    });
+
+    it('rounds to 2 decimal places', () => {
+      expect(computePricePerSqm(3100000, 72)).toBe(43055.56);
+    });
+
+    it('falls back to 0 when lot area is missing or zero', () => {
+      expect(computePricePerSqm(5400000, undefined)).toBe(0);
+      expect(computePricePerSqm(5400000, 0)).toBe(0);
+      expect(computePricePerSqm(undefined, 180)).toBe(0);
+    });
+
+    it('falls back to 0 for non-finite values', () => {
+      expect(computePricePerSqm(NaN, 180)).toBe(0);
+      expect(computePricePerSqm(5400000, NaN)).toBe(0);
+      expect(computePricePerSqm(Infinity, 180)).toBe(0);
+    });
+  });
+});
