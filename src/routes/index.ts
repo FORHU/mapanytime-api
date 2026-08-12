@@ -17,6 +17,7 @@ import returnRoute from '../modules/returns/return.route';
 import settlementRoute from '../modules/settlements/settlement.route';
 import payoutRoute from '../modules/payouts/payout.route';
 import rbacRoute from './rbac.route';
+import adminApprovalRoute from '../modules/adminApprovals/adminApproval.route';
 import agentRoute from './agent.route';
 import propertyRoute from '../modules/properties/property.route';
 import {
@@ -55,6 +56,7 @@ router.use('/v1/rbac', rbacRoute);
 router.use('/v1/agent', agentRoute);
 router.use('/v1/app', publicAppReleaseRouter);
 router.use('/v1/admin/app-releases', adminAppReleaseRouter);
+router.use('/v1/admin/approvals', adminApprovalRoute);
 router.use('/v1/properties', propertyRoute);
 
 export default router;
