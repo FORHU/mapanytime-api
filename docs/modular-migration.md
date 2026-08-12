@@ -26,9 +26,10 @@ inventory  merchantAds  notifications  orders  payments  payouts  products
 rbac  returns  settlements  shipments  stores  supplierProducts  taxation  users
 ```
 
-`src/routes/index.ts` is the only survivor of the layered folders. It is the
-router aggregator, not a feature, and every one of its imports now points at
-`../modules/...`.
+**No layered folders remain.** The router aggregator that used to be
+`src/routes/index.ts` is now `src/routes.ts` — a single file rather than a
+folder holding one file. `src/app.ts` imports it as `./routes`, which resolves
+to either form, so that move cost no call-site changes.
 
 ### Naming
 
@@ -106,9 +107,7 @@ The controller now delegates to `RbacService` and holds only HTTP concerns.
 All four casts and both hand-written `PermissionRecord` / `RoleWithPermissions`
 interfaces are gone; types come from the Prisma client. 165 → 62 lines.
 
-> ⚠️ **Unverified by tests.** There is no rbac coverage anywhere in `tests/`, so
-> this rewire is guaranteed only by the compiler. The four endpoints under
-> `/v1/rbac` are worth an integration test.
+> This was unverified by tests at the time — see step 5, which closed that gap.
 
 ### Step 4 — the remaining 9 features migrated
 
@@ -122,8 +121,23 @@ history). Imports inside the moved files were rewritten on two rules:
 
 Five call sites outside the moved features needed updating —
 `middleware/auth.middleware.ts`, `types/express.d.ts`,
-`infrastructure/scheduler/index.ts`, `modules/orders/order.service.ts` and
-`routes/index.ts` — plus six test files.
+`infrastructure/scheduler/index.ts`, `modules/orders/order.service.ts` and the
+router aggregator — plus six test files.
+
+### Step 5 — rbac test coverage, and the last folder
+
+`tests/unit/rbac.controller.test.ts` and `tests/unit/rbac.service.test.ts` close
+the gap left by step 3 (17 tests). Both were mutation-checked rather than merely
+run green: removing the `permissionIds.length > 0` guard in the service fails 2
+tests, and dropping the `Array.isArray(permissionCodes)` validation in the
+controller fails 1.
+
+The service tests pin the behaviour that is easy to regress silently — that
+`updateRolePermissions` clears *before* it assigns, and that an empty or
+unmatched code list still clears rather than becoming a no-op.
+
+`src/routes/index.ts` then moved to `src/routes.ts`, removing the last layered
+folder.
 
 ---
 
@@ -150,7 +164,7 @@ layered folders; it resolved when taxation moved.
 ```bash
 npx tsc --noEmit     # clean
 npm run lint         # clean
-npm test             # 11 suites / 59 tests passing
+npm test             # 13 suites / 76 tests passing
 ```
 
 Use npm/npx here — not bun.
@@ -167,7 +181,11 @@ Stale `dist/` output can also contain references to the deleted layered paths.
 
 ## Follow-ups
 
-- **rbac has no test coverage** — see step 3.
-- **Consider whether `src/routes/index.ts` should move.** It is the last file in
-  a layered folder. Leaving it is defensible (it aggregates, it is not a
-  feature), but `src/routes/` now exists to hold exactly one file.
+None outstanding. Both items raised during the migration — rbac's missing test
+coverage and the single-file `src/routes/` folder — were closed in step 5.
+
+Worth knowing for future work: coverage across the codebase is still thin
+(13 suites for 23 modules). rbac, taxation, inventoryReservation, store and
+order have unit tests; most modules have none. Nothing about the migration made
+that worse — the shims never had tests either — but a module boundary is a
+natural place to add them.
