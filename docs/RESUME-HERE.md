@@ -5,6 +5,30 @@ and pushed**, so nothing is lost if this machine goes down.
 
 ---
 
+> ## ✅ The merge described below has happened
+>
+> `feat/refactor-revamp` landed on `main` as **PR #45** (`244e5fb`) later on
+> 2026-08-12. The "do this first" section is kept for the record but is no
+> longer an instruction — staging is no longer blocked by the checksum
+> mismatch.
+>
+> **The deploy steps moved to [`staging-deploy.md`](./staging-deploy.md)**,
+> which also documents a hazard found afterwards: the repo's local `.env`
+> `DATABASE_URL` points at **staging**, so `migrate dev` / `db:setup` /
+> `migrate reset` from a normal checkout write to the shared database.
+>
+> Follow-up status, as of the same day:
+>
+> | Follow-up                      | Status                                          |
+> | ------------------------------ | ----------------------------------------------- |
+> | `requirePermission` unenforced | ✅ Done — gates on rbac, approvals, user admin  |
+> | Swagger globs unguarded        | ✅ Done — `tests/unit/swagger.spec.test.ts`     |
+> | Coverage thin                  | ◐ Improved — 23 suites / 180 tests, gaps remain |
+> | Web never got a browser pass   | ❌ Still outstanding                            |
+> | "Flaky" test                   | ✅ Reproduced and fixed — bcrypt vs. 5s timeout |
+
+---
+
 ## Where things stand
 
 |               |                                                          |
@@ -132,6 +156,14 @@ merged schema exactly.
   while a dev server and a concurrent `prisma generate` were running. Since
   then: **9 consecutive clean runs**, 99/99. Treating it as environmental
   contention, not a real defect. If CI flakes, that is the thread to pull.
+
+  **Update — pulled, and it was contention.** It reproduced once the suite grew
+  to 23 suites: `tests/unit/password.util.test.ts` hashes at
+  `SALT_ROUNDS = 12`, which takes a few hundred ms on an idle machine and
+  several seconds when every jest worker is competing for CPU. "Produce a
+  unique hash each time" does two sequential hashes against jest's default 5s
+  timeout. A timeout, not a defect in the hashing — the tests now carry a 30s
+  timeout rather than a lowered cost factor.
 
 ## Backups held in scratchpad (this machine only)
 

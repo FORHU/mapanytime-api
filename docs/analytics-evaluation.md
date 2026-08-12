@@ -8,24 +8,31 @@ This document evaluates the proposed event-based analytics and recommendation ar
 ## Strengths of the Proposal
 
 ### 1. Performance and Scalability (Avoiding N+1 Writes)
-The most critical advantage of the event-based approach over adding a `viewCount` column is database performance. 
-* **The Anti-Pattern:** A `viewCount` field requires executing an `UPDATE products SET viewCount = viewCount + 1` for every page load. In a busy marketplace, this leads to massive row-level locking, deadlocks, and write-contention in PostgreSQL.
-* **The Proposed Solution:** By moving to an event-based system (`STORE_VIEW`, `PRODUCT_VIEW`), writes become append-only. This is incredibly efficient for relational databases.
+
+The most critical advantage of the event-based approach over adding a `viewCount` column is database performance.
+
+- **The Anti-Pattern:** A `viewCount` field requires executing an `UPDATE products SET viewCount = viewCount + 1` for every page load. In a busy marketplace, this leads to massive row-level locking, deadlocks, and write-contention in PostgreSQL.
+- **The Proposed Solution:** By moving to an event-based system (`STORE_VIEW`, `PRODUCT_VIEW`), writes become append-only. This is incredibly efficient for relational databases.
 
 ### 2. Utilizing Existing Infrastructure
-The MapAnytime API environment already includes **RabbitMQ** (via `RABBITMQ_URL` and `INGESTION_QUEUE_NAME`). This existing infrastructure is perfectly suited for this proposal. 
-* The API can quickly push an event to the RabbitMQ exchange and return a `200 OK` to the frontend without blocking the HTTP request.
-* A background worker process can then consume these events and batch-insert them into the database, providing massive throughput capabilities.
+
+The MapAnytime API environment already includes **RabbitMQ** (via `RABBITMQ_URL` and `INGESTION_QUEUE_NAME`). This existing infrastructure is perfectly suited for this proposal.
+
+- The API can quickly push an event to the RabbitMQ exchange and return a `200 OK` to the frontend without blocking the HTTP request.
+- A background worker process can then consume these events and batch-insert them into the database, providing massive throughput capabilities.
 
 ### 3. Data Richness and Future-Proofing
+
 A simple integer (`viewCount: 1540`) cannot answer business-critical questions like:
-* "How many views did this get *this week*?"
-* "What is the conversion rate from view to purchase?"
-* "Is this product trending up or down?"
+
+- "How many views did this get _this week_?"
+- "What is the conversion rate from view to purchase?"
+- "Is this product trending up or down?"
 
 The event log inherently captures the dimension of time, allowing for the precise aggregations mentioned in **Phase 3 (Daily Analytics Aggregation)**.
 
 ### 4. Pragmatic Rollout Strategy
+
 The recommendation explicitly advises against jumping straight into Machine Learning (**Phase 6 & 7**). Starting with a rule-based weighted ranking system is exactly the right move. It provides immediate value (better search/sorting) using basic math, while quietly building the historical dataset that an ML model will eventually require to train on.
 
 ## Technical Considerations & Recommendations for Implementation
@@ -33,22 +40,24 @@ The recommendation explicitly advises against jumping straight into Machine Lear
 If MapAnytime proceeds with this architecture, here are a few technical considerations to keep in mind:
 
 ### Event Ingestion and Storage
-* **RabbitMQ Batching:** The background worker consuming `ingestion_jobs` should batch events (e.g., insert 100-500 events at a time) rather than performing single inserts. This maximizes Postgres write performance.
-* **Table Partitioning:** The `AnalyticsEvent` table will grow rapidly. Plan to use PostgreSQL native table partitioning (e.g., partition by `date` or `month`) from the beginning so that old events can be dropped or archived to S3 without expensive `DELETE` queries.
+
+- **RabbitMQ Batching:** The background worker consuming `ingestion_jobs` should batch events (e.g., insert 100-500 events at a time) rather than performing single inserts. This maximizes Postgres write performance.
+- **Table Partitioning:** The `AnalyticsEvent` table will grow rapidly. Plan to use PostgreSQL native table partitioning (e.g., partition by `date` or `month`) from the beginning so that old events can be dropped or archived to S3 without expensive `DELETE` queries.
 
 ### Session Deduplication (Phase 2)
-* **Anonymous Sessions:** To distinguish raw events from unique visitors, the `mapanytime-market-web` frontend should generate a UUID on the first visit and store it in `localStorage` or a first-party cookie as an `anonymous_session_id`. This ID must be included in all analytics API payloads.
-* **Deduplication Logic:** Deduplication shouldn't happen during ingestion. Store all raw events, but calculate "Unique Views" during the **Phase 3 Aggregation** process (e.g., using `COUNT(DISTINCT session_id)` grouped by day).
+
+- **Anonymous Sessions:** To distinguish raw events from unique visitors, the `mapanytime-market-web` frontend should generate a UUID on the first visit and store it in `localStorage` or a first-party cookie as an `anonymous_session_id`. This ID must be included in all analytics API payloads.
+- **Deduplication Logic:** Deduplication shouldn't happen during ingestion. Store all raw events, but calculate "Unique Views" during the **Phase 3 Aggregation** process (e.g., using `COUNT(DISTINCT session_id)` grouped by day).
 
 ### Aggregation Mechanics (Phase 3)
-* **Materialized Views vs. Cron Jobs:** You can use PostgreSQL `MATERIALIZED VIEWS` to handle the daily aggregations, or run a nightly background job that calculates the stats and writes them to a dedicated `DailyProductStats` table. The nightly job approach is usually more resilient and easier to monitor.
+
+- **Materialized Views vs. Cron Jobs:** You can use PostgreSQL `MATERIALIZED VIEWS` to handle the daily aggregations, or run a nightly background job that calculates the stats and writes them to a dedicated `DailyProductStats` table. The nightly job approach is usually more resilient and easier to monitor.
 
 ## Conclusion
 
-The recommendation to avoid a simplistic `viewCount` in favor of an event-driven architecture is sound. It leverages the existing RabbitMQ infrastructure, protects the primary database from write-lock exhaustion, and establishes the exact data foundation needed for future ML-based personalization. 
+The recommendation to avoid a simplistic `viewCount` in favor of an event-driven architecture is sound. It leverages the existing RabbitMQ infrastructure, protects the primary database from write-lock exhaustion, and establishes the exact data foundation needed for future ML-based personalization.
 
 **Recommendation:** Proceed with Phase 1 and 2 of this plan as written.
-
 
 # Recommendation: Marketplace Analytics and Recommendation System
 
@@ -62,25 +71,25 @@ Create a centralized analytics event system that records meaningful user interac
 
 Initial events should include:
 
-* `STORE_VIEW`
-* `PRODUCT_VIEW`
-* `PRODUCT_CLICK`
-* `SEARCH`
-* `ADD_TO_CART`
-* `ADD_TO_WISHLIST`
-* `CHECKOUT_STARTED`
-* `ORDER_COMPLETED`
+- `STORE_VIEW`
+- `PRODUCT_VIEW`
+- `PRODUCT_CLICK`
+- `SEARCH`
+- `ADD_TO_CART`
+- `ADD_TO_WISHLIST`
+- `CHECKOUT_STARTED`
+- `ORDER_COMPLETED`
 
 Each event should record information such as:
 
-* Event type
-* User ID when authenticated
-* Anonymous session ID when unauthenticated
-* Store ID when applicable
-* Product ID when applicable
-* Category ID when applicable
-* Metadata when necessary
-* Timestamp
+- Event type
+- User ID when authenticated
+- Anonymous session ID when unauthenticated
+- Store ID when applicable
+- Product ID when applicable
+- Category ID when applicable
+- Metadata when necessary
+- Timestamp
 
 The analytics event table should become the source of truth instead of maintaining simple lifetime view counters.
 
@@ -92,10 +101,10 @@ For example, repeatedly opening the same store within a short period should not 
 
 Use a session/time-based deduplication mechanism so that the system can distinguish:
 
-* Raw events
-* Meaningful views
-* Unique visitors
-* Returning visitors
+- Raw events
+- Meaningful views
+- Unique visitors
+- Returning visitors
 
 This will make store and product rankings significantly more reliable.
 
@@ -107,24 +116,24 @@ Use an aggregation process that produces daily statistics such as:
 
 ### Store Analytics
 
-* Views
-* Unique visitors
-* Product views
-* Cart additions
-* Wishlist additions
-* Orders
-* Revenue
-* Conversion rate
+- Views
+- Unique visitors
+- Product views
+- Cart additions
+- Wishlist additions
+- Orders
+- Revenue
+- Conversion rate
 
 ### Product Analytics
 
-* Views
-* Unique visitors
-* Cart additions
-* Wishlist additions
-* Orders
-* Revenue
-* Conversion rate
+- Views
+- Unique visitors
+- Cart additions
+- Wishlist additions
+- Orders
+- Revenue
+- Conversion rate
 
 This provides fast queries for dashboards, rankings, and marketplace discovery.
 
@@ -191,13 +200,13 @@ For example, if a user searches for:
 
 the system can prioritize products that:
 
-* Match the search query
-* Are currently in stock
-* Are popular
-* Are trending
-* Are frequently purchased
-* Come from nearby stores
-* Match the user's previous interests
+- Match the search query
+- Are currently in stock
+- Are popular
+- Are trending
+- Are frequently purchased
+- Come from nearby stores
+- Match the user's previous interests
 
 ## 6. Start With Rule-Based Ranking
 

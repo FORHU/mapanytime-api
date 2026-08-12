@@ -210,17 +210,36 @@ router with `authenticate + requireAdmin`, covered by
 
 ## Follow-ups
 
-Open, in rough priority order:
+Status as of 2026-08-12, on
+`feat/analytics-events-and-permission-gates`.
 
-- **`requirePermission` is wired into zero routes.** The permission system is
-  administrable but unenforced; real authorization is the coarse `requireAdmin`
-  role check. The seed data already contains `users.roles` ("Manage Roles &
-  RBAC"), which is the natural gate for the rbac router itself. Deciding which
-  codes guard which endpoints is a policy call, not a refactor.
-- **Nothing guards the swagger globs.** They broke silently once and would again
-  on the next restructure. A test asserting the spec has more than 0 paths would
-  catch it.
-- **Coverage is thin** — 14 suites for 23 modules. rbac, taxation,
-  inventoryReservation, store and order have unit tests; most modules have none.
-  Nothing about the migration made that worse — the shims never had tests either
-  — but a module boundary is a natural place to add them.
+- ✅ **`requirePermission` is now wired.** Gates: `/v1/rbac` and the two
+  role-writing user endpoints on `users.roles`, `/v1/admin/approvals` on
+  `stores.approve`, `GET /v1/users/:userId` on `users.manage`. All four codes
+  are administrator-only in the seed data, and the middleware short-circuits on
+  `isAdmin`, so the change is behaviour-preserving today — what it buys is that
+  the gates are delegable without a code change.
+
+  The trap worth remembering: because `requirePermission` can only ever _widen_
+  access, gating an admin surface with `stores.manage`, `orders.view` or
+  `analytics.view` would have handed every SELLER access to it.
+  `tests/unit/permission.gates.test.ts` asserts no route does.
+
+  `/v1/admin/app-releases` stays on `requireAdmin` — nothing in the catalogue
+  describes publishing a mobile release.
+
+- ✅ **The swagger globs are guarded.** `tests/unit/swagger.spec.test.ts`
+  resolves every configured glob against the filesystem and asserts each
+  `src/swagger/*.yaml` contributes its declared paths to the spec.
+
+  It also turned up something the original note missed: **no file under
+  `src/modules/` carries an `@swagger` JSDoc block**, so the two module globs
+  contribute nothing. Every path in the spec comes from the YAML files. The
+  globs are kept because JSDoc annotations are the intended direction, but
+  today they are decorative.
+
+- ◐ **Coverage is better but still thin** — 23 suites / 180 tests for 27
+  modules. Added since: analytics (service, endpoint, batch consumer), cart,
+  payments, plus the two guards above. Still untested: agent, adminApprovals,
+  merchantAds, categories, users, payouts, returns, shipments, notifications,
+  supplierProducts, audit, files, appRelease, fileUpload.
