@@ -67,8 +67,12 @@ const options: swaggerJsdoc.Options = {
     },
     security: [{ BearerAuth: [] }],
   },
-  // Glob pattern for JSDoc-annotated route files and YAML files
-  apis: ['./src/routes/*.ts', './src/controllers/*.ts', './src/docs/*.yaml'],
+  // Glob patterns for the YAML specs and any JSDoc-annotated source.
+  // These are matched against the filesystem at startup, so a path that no
+  // longer exists fails silently — it just contributes no endpoints. Keep them
+  // in step with the layout: the YAML lives in src/swagger/, and feature code
+  // lives in src/modules/, not the old src/{routes,controllers}/ folders.
+  apis: ['./src/swagger/*.yaml', './src/modules/**/*.route.ts', './src/modules/**/*.controller.ts'],
 };
 
 export const swaggerSpec = swaggerJsdoc(options);

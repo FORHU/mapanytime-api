@@ -1,4 +1,4 @@
-import AuthRepo from '../../src/repositories/auth.repository';
+import AuthRepo from '../../src/modules/auth/auth.repository';
 import { prisma } from '../../src/utils/prisma';
 import CacheUtil from '../../src/utils/cache.util';
 

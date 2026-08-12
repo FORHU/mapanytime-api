@@ -1,10 +1,10 @@
 import OrderService from '../../src/modules/orders/order.service';
 import OrderRepository from '../../src/modules/orders/order.repository';
-import TaxationRepository from '../../src/repositories/taxation.repository';
+import TaxationRepository from '../../src/modules/taxation/taxation.repository';
 import { prisma } from '../../src/utils/prisma';
 
 jest.mock('../../src/modules/orders/order.repository');
-jest.mock('../../src/repositories/taxation.repository');
+jest.mock('../../src/modules/taxation/taxation.repository');
 jest.mock('../../src/infrastructure/socket', () => ({
   emitNotificationToUser: jest.fn(),
 }));

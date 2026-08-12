@@ -1,7 +1,7 @@
-import TaxationService from '../../src/services/taxation.service';
-import TaxationRepository from '../../src/repositories/taxation.repository';
+import TaxationService from '../../src/modules/taxation/taxation.service';
+import TaxationRepository from '../../src/modules/taxation/taxation.repository';
 
-jest.mock('../../src/repositories/taxation.repository');
+jest.mock('../../src/modules/taxation/taxation.repository');
 
 describe('TaxationService', () => {
   beforeEach(() => {

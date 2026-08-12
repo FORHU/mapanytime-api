@@ -1,5 +1,5 @@
-import CategoryRepository from '../../repositories/category.repository';
-import StoreRepository from '../../repositories/store.repository';
+import CategoryRepository from '../categories/category.repository';
+import StoreRepository from './store.repository';
 import { redisConnection } from '../../infrastructure/redis/connection';
 import { emitStoreUpserted } from '../../infrastructure/socket';
 import logger from '../../utils/logger';

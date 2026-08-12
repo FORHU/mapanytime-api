@@ -1,8 +1,8 @@
-import InventoryReservationService from '../../src/services/inventoryReservation.service';
-import InventoryReservationRepository from '../../src/repositories/inventoryReservation.repository';
+import InventoryReservationService from '../../src/modules/inventory/inventoryReservation.service';
+import InventoryReservationRepository from '../../src/modules/inventory/inventoryReservation.repository';
 import { prisma } from '../../src/utils/prisma';
 
-jest.mock('../../src/repositories/inventoryReservation.repository');
+jest.mock('../../src/modules/inventory/inventoryReservation.repository');
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
     buyers: {

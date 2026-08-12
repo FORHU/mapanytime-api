@@ -1,5 +1,5 @@
 import ProductRepository from './product.repository';
-import CategoryService from '../../services/category.service';
+import CategoryService from '../categories/category.service';
 import { prisma } from '../../utils/prisma';
 
 export default class ProductService {

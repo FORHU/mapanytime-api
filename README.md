@@ -163,9 +163,13 @@ npm run worker
 
 ```text
 src/
-├── controllers/            # HTTP request handlers (thin layer, no business logic)
-├── services/               # Business logic, orchestrates repos + publishes events
-├── repositories/           # Data access via Prisma
+├── modules/                # One folder per feature — all 23 live here
+│   └── <feature>/          # e.g. users/, orders/, rbac/
+│       ├── <name>.controller.ts   # HTTP handlers (thin, no business logic)
+│       ├── <name>.service.ts      # Business logic, orchestrates repos + events
+│       ├── <name>.repository.ts   # Data access via Prisma
+│       └── <name>.route.ts        # URL routing
+├── routes.ts               # Router aggregator — mounts every module's route
 ├── middleware/
 │   ├── correlation.middleware.ts   # Assigns requestId + correlationId to every request
 │   ├── auth.middleware.ts
@@ -275,9 +279,9 @@ sequenceDiagram
 
 **Files tracing this exact flow:**
 
-1. `src/controllers/user.controller.ts` — Parses request, returns standard response
-2. `src/services/user.service.ts` — Executes business rules, orchestrates repository, publishes events
-3. `src/repositories/user.repository.ts` — Handles Prisma queries
+1. `src/modules/users/user.controller.ts` — Parses request, returns standard response
+2. `src/modules/users/user.service.ts` — Executes business rules, orchestrates repository, publishes events
+3. `src/modules/users/user.repository.ts` — Handles Prisma queries
 4. `src/consumers/email.consumer.ts` — Background worker reacting to the new user
 
 ---
