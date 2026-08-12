@@ -1,6 +1,6 @@
 import OrderRepository from './order.repository';
 import ProductRepository from '../products/product.repository';
-import TaxationService from '../../services/taxation.service';
+import TaxationService from '../taxation/taxation.service';
 import { validateOrderTransition } from './order.state';
 import { prisma } from '../../utils/prisma';
 import { emitNotificationToUser } from '../../infrastructure/socket';

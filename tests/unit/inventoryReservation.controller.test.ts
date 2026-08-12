@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
-import InventoryReservationController from '../../src/controllers/inventoryReservation.controller';
-import InventoryReservationService from '../../src/services/inventoryReservation.service';
+import InventoryReservationController from '../../src/modules/inventory/inventoryReservation.controller';
+import InventoryReservationService from '../../src/modules/inventory/inventoryReservation.service';
 
-jest.mock('../../src/services/inventoryReservation.service');
+jest.mock('../../src/modules/inventory/inventoryReservation.service');
 
 describe('InventoryReservationController', () => {
   let mockReq: Partial<Request>;

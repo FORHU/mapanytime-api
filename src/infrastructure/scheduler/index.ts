@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import logger from '../../utils/logger';
-import InventoryReservationService from '../../services/inventoryReservation.service';
+import InventoryReservationService from '../../modules/inventory/inventoryReservation.service';
 
 /**
  * Scheduled Jobs Registry

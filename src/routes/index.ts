@@ -1,14 +1,14 @@
 import express from 'express';
-import authRoute from './auth.route';
-import userRoute from './user.route';
-import fileUploadRoute from './fileUpload.route';
-import healthRouter from './health.route';
+import authRoute from '../modules/auth/auth.route';
+import userRoute from '../modules/users/user.route';
+import fileUploadRoute from '../modules/fileUpload/fileUpload.route';
+import healthRouter from '../modules/health/health.route';
 import productRoute from '../modules/products/product.route';
 import storeRoute from '../modules/stores/store.route';
 import merchantAdsRoute from '../modules/merchantAds/merchantAds.route';
 import categoryRoute from '../modules/categories/category.route';
 import orderRoute from '../modules/orders/order.route';
-import inventoryRoutes from './inventory.route';
+import inventoryRoutes from '../modules/inventory/inventory.route';
 import cartRoutes from '../modules/cart/cart.route';
 import paymentRoute from '../modules/payments/payment.route';
 import supplierProductsRoute from '../modules/supplierProducts/supplierProducts.route';
@@ -16,8 +16,8 @@ import shipmentRoute from '../modules/shipments/shipment.route';
 import returnRoute from '../modules/returns/return.route';
 import settlementRoute from '../modules/settlements/settlement.route';
 import payoutRoute from '../modules/payouts/payout.route';
-import rbacRoute from './rbac.route';
-import agentRoute from './agent.route';
+import rbacRoute from '../modules/rbac/rbac.route';
+import agentRoute from '../modules/agent/agent.route';
 import {
   publicAppReleaseRouter,
   adminAppReleaseRouter,
