@@ -2,13 +2,16 @@
 CREATE SCHEMA IF NOT EXISTS "public";
 
 -- CreateEnum
-CREATE TYPE "USERACCOUNTSTATUS" AS ENUM ('ACTIVE', 'SUSPENDED', 'DEACTIVATED');
+CREATE TYPE "USERACCOUNTSTATUS" AS ENUM ('ACTIVE', 'SUSPENDED', 'DEACTIVATED', 'PENDING_VERIFICATION', 'UNDER_REVIEW', 'BANNED', 'NEED_REVISSION');
 
 -- CreateEnum
 CREATE TYPE "DOCUMENTTYPES" AS ENUM ('TIN_ID', 'GOV_ID', 'DTI_CERTIFICATE', 'MAYORS_PERMIT', 'BIR_CERTIFICATE', 'SEC_CERTIFICATE');
 
 -- CreateEnum
 CREATE TYPE "INVITESTATUS" AS ENUM ('PENDING', 'ACCEPTED', 'REVOKED', 'EXPIRED');
+
+-- CreateEnum
+CREATE TYPE "MERCHANTADKIND" AS ENUM ('PROMO', 'JOB', 'EVENT');
 
 -- CreateEnum
 CREATE TYPE "PRODUCTSTATUS" AS ENUM ('DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'ARCHIVED', 'HIDDEN');
@@ -29,6 +32,9 @@ CREATE TYPE "FULLFILLMENTTYPE" AS ENUM ('DELIVERY', 'PICKUP');
 CREATE TYPE "ORDERSTATUS" AS ENUM ('PENDING', 'PROCESSING', 'READY_FOR_PICKUP', 'COMPLETED', 'CANCELLED', 'FAILED');
 
 -- CreateEnum
+CREATE TYPE "RESERVATIONSTATUS" AS ENUM ('RESERVED', 'CONSUMED', 'EXPIRED', 'RELEASED');
+
+-- CreateEnum
 CREATE TYPE "PAYMENTMETHOD" AS ENUM ('BANK', 'E_WALLET', 'CASH_ON_DELIVERY');
 
 -- CreateEnum
@@ -47,20 +53,28 @@ CREATE TYPE "ADDRESSTYPE" AS ENUM ('SHIPPING', 'BILLING', 'HOME', 'OFFICE');
 CREATE TYPE "INVENTORYMOVEMENTTYPE" AS ENUM ('RESTOCK', 'SALE', 'RETURN', 'TRANSFER', 'ADJUSTMENT');
 
 -- CreateEnum
+CREATE TYPE "INVENTORYREFERENCETYPE" AS ENUM ('ORDER', 'RETURN', 'TRANSFER', 'RESTOCK', 'MANUAL_ADJUSTMENT');
+
+-- CreateEnum
 CREATE TYPE "SHIPMENTSTATUS" AS ENUM ('PENDING', 'LABEL_CREATED', 'PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED', 'FAILED', 'RETURNED');
 
 -- CreateEnum
 CREATE TYPE "RETURNSTATUS" AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'ITEM_RECEIVED', 'REFUNDED');
+
+-- CreateEnum
+CREATE TYPE "RELEASESTATUS" AS ENUM ('ACTIVE', 'DEPRECATED', 'FAILED');
 
 -- CreateTable
 CREATE TABLE "Users" (
     "id" TEXT NOT NULL,
     "email" TEXT NOT NULL,
     "passwordHash" TEXT NOT NULL,
+    "activeSessionId" TEXT,
     "firstName" TEXT,
     "lastName" TEXT,
     "phoneNumber" TEXT,
-    "avatarId" TEXT,
+    "avatarFileId" TEXT,
+    "userReferralId" TEXT,
     "accountStatus" "USERACCOUNTSTATUS" NOT NULL DEFAULT 'ACTIVE',
     "isEmailVerified" BOOLEAN NOT NULL DEFAULT false,
     "isOnBoarding" BOOLEAN NOT NULL DEFAULT false,
@@ -135,6 +149,7 @@ CREATE TABLE "Files" (
     "uploadedById" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "deletedAt" TIMESTAMP(3),
 
     CONSTRAINT "Files_pkey" PRIMARY KEY ("id")
 );
@@ -147,6 +162,11 @@ CREATE TABLE "Sellers" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
     "applicationStatus" "ApplicationStatus" NOT NULL DEFAULT 'PENDING',
+    "sellerPlan" TEXT,
+    "agentNotes" TEXT,
+    "onboardingStep" INTEGER NOT NULL DEFAULT 0,
+    "isOnboarded" BOOLEAN NOT NULL DEFAULT false,
+    "onboardedAt" TIMESTAMP(3),
 
     CONSTRAINT "Sellers_pkey" PRIMARY KEY ("id")
 );
@@ -221,6 +241,7 @@ CREATE TABLE "Stores" (
     "followersCount" INTEGER NOT NULL DEFAULT 0,
     "vacationMode" BOOLEAN NOT NULL DEFAULT false,
     "isActive" BOOLEAN NOT NULL DEFAULT false,
+    "primaryCategoryId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "deletedAt" TIMESTAMP(3),
@@ -233,8 +254,8 @@ CREATE TABLE "StoreHours" (
     "id" TEXT NOT NULL,
     "storeId" TEXT NOT NULL,
     "dayOfWeek" INTEGER NOT NULL,
-    "openTime" TEXT NOT NULL,
-    "closeTime" TEXT NOT NULL,
+    "openMinutes" INTEGER NOT NULL,
+    "closeMinutes" INTEGER NOT NULL,
     "isClosed" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -271,6 +292,37 @@ CREATE TABLE "StoreReviews" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "StoreReviews_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "MerchantAds" (
+    "id" TEXT NOT NULL,
+    "storeId" TEXT NOT NULL,
+    "kind" "MERCHANTADKIND" NOT NULL,
+    "title" TEXT NOT NULL,
+    "description" TEXT NOT NULL,
+    "imageUrl" TEXT,
+    "badgeLabel" TEXT,
+    "ctaLabel" TEXT,
+    "salaryLabel" TEXT,
+    "buyQuantity" INTEGER,
+    "freeQuantity" INTEGER,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "expiresAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "MerchantAds_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "MerchantAdProducts" (
+    "id" TEXT NOT NULL,
+    "adId" TEXT NOT NULL,
+    "productId" TEXT NOT NULL,
+    "variantId" TEXT,
+
+    CONSTRAINT "MerchantAdProducts_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -396,6 +448,9 @@ CREATE TABLE "Orders" (
     "storeId" TEXT NOT NULL,
     "storeName" TEXT,
     "sellerName" TEXT,
+    "storeAddressSnapshot" TEXT,
+    "sellerPhoneSnapshot" TEXT,
+    "storeEmailSnapshot" TEXT,
     "totalAmount" DECIMAL(12,2) NOT NULL,
     "subtotalAmount" DECIMAL(12,2) NOT NULL DEFAULT 0,
     "shippingAmount" DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -431,6 +486,8 @@ CREATE TABLE "OrderItems" (
     "categoryName" TEXT,
     "quantity" INTEGER NOT NULL,
     "unitPrice" DECIMAL(12,2) NOT NULL,
+    "discountAmount" DECIMAL(12,2) NOT NULL DEFAULT 0,
+    "appliedAdId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -453,7 +510,7 @@ CREATE TABLE "ProductImages" (
 -- CreateTable
 CREATE TABLE "Inventory" (
     "id" TEXT NOT NULL,
-    "productId" TEXT NOT NULL,
+    "productId" TEXT,
     "variantId" TEXT,
     "storeId" TEXT NOT NULL,
     "quantityOnHand" INTEGER NOT NULL DEFAULT 0,
@@ -464,6 +521,22 @@ CREATE TABLE "Inventory" (
     "deletedAt" TIMESTAMP(3),
 
     CONSTRAINT "Inventory_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "InventoryReservations" (
+    "id" TEXT NOT NULL,
+    "inventoryId" TEXT NOT NULL,
+    "buyerId" TEXT NOT NULL,
+    "cartId" TEXT,
+    "orderId" TEXT,
+    "quantity" INTEGER NOT NULL,
+    "status" "RESERVATIONSTATUS" NOT NULL DEFAULT 'RESERVED',
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "InventoryReservations_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -631,7 +704,7 @@ CREATE TABLE "WishlistItems" (
 CREATE TABLE "InventoryMovements" (
     "id" TEXT NOT NULL,
     "inventoryId" TEXT NOT NULL,
-    "productId" TEXT NOT NULL,
+    "productId" TEXT,
     "variantId" TEXT,
     "storeId" TEXT NOT NULL,
     "movementType" "INVENTORYMOVEMENTTYPE" NOT NULL,
@@ -639,6 +712,7 @@ CREATE TABLE "InventoryMovements" (
     "previousOnHand" INTEGER NOT NULL,
     "newOnHand" INTEGER NOT NULL,
     "referenceId" TEXT,
+    "referenceType" "INVENTORYREFERENCETYPE",
     "note" TEXT,
     "createdById" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -686,12 +760,14 @@ CREATE TABLE "ReturnRequests" (
 -- CreateTable
 CREATE TABLE "AuditLogs" (
     "id" TEXT NOT NULL,
-    "userId" TEXT,
+    "performedById" TEXT,
     "action" TEXT NOT NULL,
     "entityType" TEXT NOT NULL,
     "entityId" TEXT NOT NULL,
     "metadata" JSONB,
     "ipAddress" TEXT,
+    "userAgent" TEXT,
+    "requestId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "AuditLogs_pkey" PRIMARY KEY ("id")
@@ -704,11 +780,31 @@ CREATE TABLE "Notifications" (
     "title" TEXT NOT NULL,
     "body" TEXT NOT NULL,
     "metadata" JSONB,
-    "isRead" BOOLEAN NOT NULL DEFAULT false,
     "readAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Notifications_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "AppRelease" (
+    "id" TEXT NOT NULL,
+    "version" TEXT NOT NULL,
+    "buildNumber" INTEGER NOT NULL,
+    "channel" TEXT NOT NULL,
+    "apkUrl" TEXT NOT NULL,
+    "fileSize" TEXT NOT NULL,
+    "minAndroidVersion" TEXT NOT NULL,
+    "architecture" TEXT NOT NULL,
+    "sha256" TEXT,
+    "whatsNew" JSONB NOT NULL,
+    "status" "RELEASESTATUS" NOT NULL DEFAULT 'ACTIVE',
+    "isLatest" BOOLEAN NOT NULL DEFAULT false,
+    "forceUpdate" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "AppRelease_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -731,13 +827,19 @@ CREATE TABLE "_CategoriesToStores" (
 CREATE UNIQUE INDEX "Users_email_key" ON "Users"("email");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Users_avatarId_key" ON "Users"("avatarId");
+CREATE UNIQUE INDEX "Users_avatarFileId_key" ON "Users"("avatarFileId");
+
+-- CreateIndex
+CREATE INDEX "Users_userReferralId_idx" ON "Users"("userReferralId");
 
 -- CreateIndex
 CREATE INDEX "Users_email_idx" ON "Users"("email");
 
 -- CreateIndex
 CREATE INDEX "Users_accountStatus_idx" ON "Users"("accountStatus");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Users_userReferralId_id_key" ON "Users"("userReferralId", "id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Roles_roleName_key" ON "Roles"("roleName");
@@ -773,6 +875,12 @@ CREATE INDEX "Stores_sellerId_idx" ON "Stores"("sellerId");
 CREATE INDEX "Stores_isActive_idx" ON "Stores"("isActive");
 
 -- CreateIndex
+CREATE INDEX "Stores_primaryCategoryId_idx" ON "Stores"("primaryCategoryId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "StoreHours_storeId_dayOfWeek_key" ON "StoreHours"("storeId", "dayOfWeek");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "StoreLocations_storeId_key" ON "StoreLocations"("storeId");
 
 -- CreateIndex
@@ -786,6 +894,15 @@ CREATE INDEX "StoreReviews_buyerId_idx" ON "StoreReviews"("buyerId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "StoreReviews_storeId_buyerId_key" ON "StoreReviews"("storeId", "buyerId");
+
+-- CreateIndex
+CREATE INDEX "MerchantAds_storeId_isActive_idx" ON "MerchantAds"("storeId", "isActive");
+
+-- CreateIndex
+CREATE INDEX "MerchantAdProducts_productId_idx" ON "MerchantAdProducts"("productId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MerchantAdProducts_adId_productId_variantId_key" ON "MerchantAdProducts"("adId", "productId", "variantId");
 
 -- CreateIndex
 CREATE INDEX "Products_storeId_idx" ON "Products"("storeId");
@@ -836,6 +953,9 @@ CREATE INDEX "Categories_parentId_idx" ON "Categories"("parentId");
 CREATE INDEX "Categories_status_idx" ON "Categories"("status");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Categories_parentId_name_key" ON "Categories"("parentId", "name");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Tags_name_key" ON "Tags"("name");
 
 -- CreateIndex
@@ -869,10 +989,16 @@ CREATE INDEX "OrderItems_productId_idx" ON "OrderItems"("productId");
 CREATE INDEX "OrderItems_variantId_idx" ON "OrderItems"("variantId");
 
 -- CreateIndex
+CREATE INDEX "OrderItems_appliedAdId_idx" ON "OrderItems"("appliedAdId");
+
+-- CreateIndex
 CREATE INDEX "ProductImages_productId_idx" ON "ProductImages"("productId");
 
 -- CreateIndex
 CREATE INDEX "ProductImages_variantId_idx" ON "ProductImages"("variantId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ProductImages_productId_variantId_isPrimary_key" ON "ProductImages"("productId", "variantId", "isPrimary");
 
 -- CreateIndex
 CREATE INDEX "Inventory_productId_idx" ON "Inventory"("productId");
@@ -882,6 +1008,21 @@ CREATE INDEX "Inventory_storeId_idx" ON "Inventory"("storeId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Inventory_storeId_productId_variantId_key" ON "Inventory"("storeId", "productId", "variantId");
+
+-- CreateIndex
+CREATE INDEX "InventoryReservations_inventoryId_status_idx" ON "InventoryReservations"("inventoryId", "status");
+
+-- CreateIndex
+CREATE INDEX "InventoryReservations_expiresAt_status_idx" ON "InventoryReservations"("expiresAt", "status");
+
+-- CreateIndex
+CREATE INDEX "InventoryReservations_buyerId_status_idx" ON "InventoryReservations"("buyerId", "status");
+
+-- CreateIndex
+CREATE INDEX "InventoryReservations_orderId_idx" ON "InventoryReservations"("orderId");
+
+-- CreateIndex
+CREATE INDEX "InventoryReservations_cartId_idx" ON "InventoryReservations"("cartId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Payments_referenceNumber_key" ON "Payments"("referenceNumber");
@@ -977,16 +1118,31 @@ CREATE INDEX "ReturnRequests_buyerId_idx" ON "ReturnRequests"("buyerId");
 CREATE INDEX "ReturnRequests_sellerId_idx" ON "ReturnRequests"("sellerId");
 
 -- CreateIndex
-CREATE INDEX "AuditLogs_userId_idx" ON "AuditLogs"("userId");
+CREATE INDEX "AuditLogs_performedById_idx" ON "AuditLogs"("performedById");
 
 -- CreateIndex
 CREATE INDEX "AuditLogs_entityType_entityId_idx" ON "AuditLogs"("entityType", "entityId");
 
 -- CreateIndex
+CREATE INDEX "AuditLogs_requestId_idx" ON "AuditLogs"("requestId");
+
+-- CreateIndex
 CREATE INDEX "Notifications_userId_idx" ON "Notifications"("userId");
 
 -- CreateIndex
-CREATE INDEX "Notifications_isRead_idx" ON "Notifications"("isRead");
+CREATE INDEX "Notifications_readAt_idx" ON "Notifications"("readAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "AppRelease_version_key" ON "AppRelease"("version");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "AppRelease_buildNumber_key" ON "AppRelease"("buildNumber");
+
+-- CreateIndex
+CREATE INDEX "AppRelease_status_idx" ON "AppRelease"("status");
+
+-- CreateIndex
+CREATE INDEX "AppRelease_isLatest_idx" ON "AppRelease"("isLatest");
 
 -- CreateIndex
 CREATE INDEX "_UserRoles_B_index" ON "_UserRoles"("B");
@@ -995,7 +1151,10 @@ CREATE INDEX "_UserRoles_B_index" ON "_UserRoles"("B");
 CREATE INDEX "_CategoriesToStores_B_index" ON "_CategoriesToStores"("B");
 
 -- AddForeignKey
-ALTER TABLE "Users" ADD CONSTRAINT "Users_avatarId_fkey" FOREIGN KEY ("avatarId") REFERENCES "Files"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "Users" ADD CONSTRAINT "Users_avatarFileId_fkey" FOREIGN KEY ("avatarFileId") REFERENCES "Files"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Users" ADD CONSTRAINT "Users_userReferralId_fkey" FOREIGN KEY ("userReferralId") REFERENCES "Users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "RolePermissions" ADD CONSTRAINT "RolePermissions_roleId_fkey" FOREIGN KEY ("roleId") REFERENCES "Roles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1037,6 +1196,9 @@ ALTER TABLE "Stores" ADD CONSTRAINT "Stores_logoId_fkey" FOREIGN KEY ("logoId") 
 ALTER TABLE "Stores" ADD CONSTRAINT "Stores_bannerId_fkey" FOREIGN KEY ("bannerId") REFERENCES "Files"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Stores" ADD CONSTRAINT "Stores_primaryCategoryId_fkey" FOREIGN KEY ("primaryCategoryId") REFERENCES "Categories"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Stores" ADD CONSTRAINT "Stores_sellerId_fkey" FOREIGN KEY ("sellerId") REFERENCES "Sellers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -1050,6 +1212,18 @@ ALTER TABLE "StoreReviews" ADD CONSTRAINT "StoreReviews_storeId_fkey" FOREIGN KE
 
 -- AddForeignKey
 ALTER TABLE "StoreReviews" ADD CONSTRAINT "StoreReviews_buyerId_fkey" FOREIGN KEY ("buyerId") REFERENCES "Buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MerchantAds" ADD CONSTRAINT "MerchantAds_storeId_fkey" FOREIGN KEY ("storeId") REFERENCES "Stores"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MerchantAdProducts" ADD CONSTRAINT "MerchantAdProducts_adId_fkey" FOREIGN KEY ("adId") REFERENCES "MerchantAds"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MerchantAdProducts" ADD CONSTRAINT "MerchantAdProducts_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Products"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MerchantAdProducts" ADD CONSTRAINT "MerchantAdProducts_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariants"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Products" ADD CONSTRAINT "Products_storeId_fkey" FOREIGN KEY ("storeId") REFERENCES "Stores"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -1103,6 +1277,9 @@ ALTER TABLE "OrderItems" ADD CONSTRAINT "OrderItems_productId_fkey" FOREIGN KEY 
 ALTER TABLE "OrderItems" ADD CONSTRAINT "OrderItems_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariants"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "OrderItems" ADD CONSTRAINT "OrderItems_appliedAdId_fkey" FOREIGN KEY ("appliedAdId") REFERENCES "MerchantAds"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ProductImages" ADD CONSTRAINT "ProductImages_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Products"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -1112,13 +1289,25 @@ ALTER TABLE "ProductImages" ADD CONSTRAINT "ProductImages_variantId_fkey" FOREIG
 ALTER TABLE "ProductImages" ADD CONSTRAINT "ProductImages_fileId_fkey" FOREIGN KEY ("fileId") REFERENCES "Files"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Inventory" ADD CONSTRAINT "Inventory_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Products"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Inventory" ADD CONSTRAINT "Inventory_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Products"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Inventory" ADD CONSTRAINT "Inventory_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariants"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Inventory" ADD CONSTRAINT "Inventory_storeId_fkey" FOREIGN KEY ("storeId") REFERENCES "Stores"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InventoryReservations" ADD CONSTRAINT "InventoryReservations_inventoryId_fkey" FOREIGN KEY ("inventoryId") REFERENCES "Inventory"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InventoryReservations" ADD CONSTRAINT "InventoryReservations_buyerId_fkey" FOREIGN KEY ("buyerId") REFERENCES "Buyers"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InventoryReservations" ADD CONSTRAINT "InventoryReservations_cartId_fkey" FOREIGN KEY ("cartId") REFERENCES "Carts"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InventoryReservations" ADD CONSTRAINT "InventoryReservations_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Orders"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Payments" ADD CONSTRAINT "Payments_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Orders"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -1178,7 +1367,7 @@ ALTER TABLE "WishlistItems" ADD CONSTRAINT "WishlistItems_variantId_fkey" FOREIG
 ALTER TABLE "InventoryMovements" ADD CONSTRAINT "InventoryMovements_inventoryId_fkey" FOREIGN KEY ("inventoryId") REFERENCES "Inventory"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "InventoryMovements" ADD CONSTRAINT "InventoryMovements_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Products"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "InventoryMovements" ADD CONSTRAINT "InventoryMovements_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Products"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "InventoryMovements" ADD CONSTRAINT "InventoryMovements_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariants"("id") ON DELETE SET NULL ON UPDATE CASCADE;
