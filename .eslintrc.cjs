@@ -20,7 +20,7 @@ module.exports = {
       rules: { 'no-console': 'off' },
     },
     {
-      files: ['src/repositories/*.ts'],
+      files: ['src/modules/**/*.repository.ts'],
       rules: { 'no-return-await': 'off' },
     },
   ],

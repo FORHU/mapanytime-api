@@ -30,28 +30,34 @@ Don't worry — you don't need to use all of this on day one. Start with the bas
 
 ### If you're adding a new feature (e.g., "Products"):
 
-| File to create                           | Purpose              |
-| ---------------------------------------- | -------------------- |
-| `src/controllers/product.controller.ts`  | Handle HTTP requests |
-| `src/services/product.service.ts`        | Business logic       |
-| `src/repositories/product.repository.ts` | Database queries     |
-| `src/routes/product.route.ts`            | URL routing          |
+Everything for one feature lives in a single folder under `src/modules/`. Create
+`src/modules/products/` and put all four files in it:
 
-Then register the route in `src/routes/index.ts`:
+| File to create                                    | Purpose              |
+| ------------------------------------------------- | -------------------- |
+| `src/modules/products/product.controller.ts`      | Handle HTTP requests |
+| `src/modules/products/product.service.ts`         | Business logic       |
+| `src/modules/products/product.repository.ts`      | Database queries     |
+| `src/modules/products/product.route.ts`           | URL routing          |
+
+Folder names are plural where the domain is countable (`products`, `stores`,
+`users`) and singular otherwise (`auth`, `health`). File stems stay singular.
+
+Then register the route in `src/routes.ts`:
 
 ```typescript
-import productRoute from './product.route';
+import productRoute from './modules/products/product.route';
 router.use('/v1/products', productRoute);
 ```
 
 ### If you need a route, a Controller, and a Service:
 
-Follow the `user` pattern exactly — it's already set up as the reference implementation:
+Follow the `users` module exactly — it's the reference implementation:
 
-- [`src/controllers/user.controller.ts`](../src/controllers/user.controller.ts)
-- [`src/services/user.service.ts`](../src/services/user.service.ts)
-- [`src/repositories/user.repository.ts`](../src/repositories/user.repository.ts)
-- [`src/routes/user.route.ts`](../src/routes/user.route.ts)
+- [`src/modules/users/user.controller.ts`](../src/modules/users/user.controller.ts)
+- [`src/modules/users/user.service.ts`](../src/modules/users/user.service.ts)
+- [`src/modules/users/user.repository.ts`](../src/modules/users/user.repository.ts)
+- [`src/modules/users/user.route.ts`](../src/modules/users/user.route.ts)
 
 ---
 
