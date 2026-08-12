@@ -1244,3 +1244,58 @@ model AppRelease {
   @@index([isLatest])
 }
 
+
+// =========================================================================
+// 📊 FEATURE DOMAIN: MARKETPLACE ANALYTICS
+// =========================================================================
+
+enum ANALYTICSEVENTTYPE {
+  STORE_VIEW
+  PRODUCT_VIEW
+  PRODUCT_CLICK
+  SEARCH
+  ADD_TO_CART
+  ADD_TO_WISHLIST
+  CHECKOUT_STARTED
+  ORDER_COMPLETED
+}
+
+/// Append-only log of user interactions — the source of truth for rankings,
+/// search relevance and seller analytics. See docs/analytics-evaluation.md.
+///
+/// Deliberately carries **no foreign keys**, following AuditLogs. Two reasons:
+/// writes stay cheap with no constraint checks on the hot path, and an
+/// analytics row can never block deleting the product or store it references.
+/// The trade-off is that storeId/productId/categoryId may point at rows that no
+/// longer exist, so aggregation queries must tolerate dangling ids.
+///
+/// This table grows without bound. It is a plain table today; partitioning by
+/// range on occurredAt is the documented next step before volume gets real.
+model AnalyticsEvents {
+  id         String             @id @default(cuid())
+  eventType  ANALYTICSEVENTTYPE
+  /// Set when the request is authenticated; null for anonymous traffic.
+  userId     String?
+  /// Client-generated anonymous session id. Present on both authenticated and
+  /// anonymous events, which is what makes unique-visitor counts possible.
+  sessionId  String?
+  storeId    String?
+  productId  String?
+  categoryId String?
+  /// Event-shaped extras — search terms, result counts, cart quantity.
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  /// When the interaction happened. Distinct from createdAt, which is when the
+  /// worker persisted it — the gap between them is queue lag.
+  occurredAt DateTime
+  createdAt  DateTime           @default(now())
+
+  @@index([eventType, occurredAt])
+  @@index([storeId, occurredAt])
+  @@index([productId, occurredAt])
+  @@index([categoryId, occurredAt])
+  @@index([sessionId, occurredAt])
+  @@index([userId, occurredAt])
+  @@index([occurredAt])
+}

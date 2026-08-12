@@ -25,6 +25,7 @@ import {
   adminAppReleaseRouter,
 } from './modules/appRelease/app-release.route';
 import filesRoute from './modules/files/files.route';
+import analyticsRoute from './modules/analytics/analytics.route';
 
 const router = express.Router();
 
@@ -58,5 +59,6 @@ router.use('/v1/app', publicAppReleaseRouter);
 router.use('/v1/admin/app-releases', adminAppReleaseRouter);
 router.use('/v1/admin/approvals', adminApprovalRoute);
 router.use('/v1/properties', propertyRoute);
+router.use('/v1/analytics', analyticsRoute);
 
 export default router;
