@@ -33,9 +33,7 @@ export const requirePermission = (permissionCode: string) => {
       const isAdmin = user.roles.some((r) => ADMIN_ROLES.includes(r.roleName as SystemRole));
       const hasPermission =
         isAdmin ||
-        user.roles.some((r) =>
-          r.permissions.some((rp) => rp.permission?.code === permissionCode),
-        );
+        user.roles.some((r) => r.permissions.some((rp) => rp.permission?.code === permissionCode));
 
       if (!hasPermission) {
         return res.status(403).json({

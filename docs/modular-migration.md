@@ -74,19 +74,19 @@ together.
 
 ### Step 2 — 6 load-bearing shims rewritten and deleted
 
-| Shim | Importer | Rewritten to |
-| --- | --- | --- |
-| `services/category.service` | `modules/products/product.service.ts` | `../categories/category.service` |
-| `repositories/category.repository` | `modules/stores/store.service.ts` | `../categories/category.repository` |
-| `repositories/store.repository` | `modules/stores/store.service.ts` | `./store.repository` |
-| `repositories/product.repository` | `services/inventory.service.ts` | `../products/product.repository` |
-| `routes/category.route` | `routes/index.ts` | `../modules/categories/category.route` |
-| `services/store.service` | `tests/unit/store.service.test.ts` | `../../src/modules/stores/store.service` |
+| Shim                               | Importer                              | Rewritten to                             |
+| ---------------------------------- | ------------------------------------- | ---------------------------------------- |
+| `services/category.service`        | `modules/products/product.service.ts` | `../categories/category.service`         |
+| `repositories/category.repository` | `modules/stores/store.service.ts`     | `../categories/category.repository`      |
+| `repositories/store.repository`    | `modules/stores/store.service.ts`     | `./store.repository`                     |
+| `repositories/product.repository`  | `services/inventory.service.ts`       | `../products/product.repository`         |
+| `routes/category.route`            | `routes/index.ts`                     | `../modules/categories/category.route`   |
+| `services/store.service`           | `tests/unit/store.service.test.ts`    | `../../src/modules/stores/store.service` |
 
 `store.service.ts` had been reaching **outside its own module** for its own
 repository — a straight self-reference bug in the original migration.
 
-**Test coupling:** `tests/unit/store.service.test.ts` imported *and*
+**Test coupling:** `tests/unit/store.service.test.ts` imported _and_
 `jest.mock`d the legacy store paths. All three lines had to move together —
 otherwise the mock silently stops matching the module under test and the test
 passes against an unmocked repository.
@@ -133,7 +133,7 @@ tests, and dropping the `Array.isArray(permissionCodes)` validation in the
 controller fails 1.
 
 The service tests pin the behaviour that is easy to regress silently — that
-`updateRolePermissions` clears *before* it assigns, and that an empty or
+`updateRolePermissions` clears _before_ it assigns, and that an empty or
 unmatched code list still clears rather than becoming a no-op.
 
 `src/routes/index.ts` then moved to `src/routes.ts`, removing the last layered
@@ -164,7 +164,7 @@ layered folders; it resolved when taxation moved.
 ```bash
 npx tsc --noEmit     # clean
 npm run lint         # clean
-npm test             # 13 suites / 76 tests passing
+npm test             # 14 suites / 85 tests passing
 ```
 
 Use npm/npx here — not bun.
@@ -179,13 +179,48 @@ Stale `dist/` output can also contain references to the deleted layered paths.
 
 ---
 
+### Step 6 — what the migration broke, and a pre-existing hole
+
+A verification pass before merging found three things pointing at deleted
+folders. **None were caught by `tsc`, lint or the tests**, because all three are
+string paths resolved against the filesystem at runtime:
+
+- **swagger** globbed `./src/routes/*.ts`, `./src/controllers/*.ts` and
+  `./src/docs/*.yaml`. All three were dead — the first two removed here, and the
+  YAML had separately moved to `src/swagger/`. `swagger-jsdoc` fails silently on
+  a glob matching nothing, so `/api-docs` was serving **0 paths**. Now 26 paths /
+  31 operations.
+- **eslint**'s `no-return-await` override targeted `src/repositories/*.ts` and
+  silently stopped applying. Retargeted at `src/modules/**/*.repository.ts`.
+- **README and the beginner guide** still described the layered layout, with
+  four broken relative links.
+
+> The lesson generalises: a restructure is only as safe as the string paths
+> nobody type-checks. Grep for the old folder names in _every_ file type —
+> configs, globs, docs — not just imports.
+
+Separately, the pass found that **`/v1/rbac` had no authentication at all**. The
+router was mounted bare, so all four endpoints — including `POST /roles` and
+`PUT /roles/:roleId/permissions` — were reachable with no credentials. This
+predates the migration; the move only relocated the file. Now guarded at the
+router with `authenticate + requireAdmin`, covered by
+`tests/integration/rbac.auth.test.ts` (9 tests, mutation-checked).
+
+---
+
 ## Follow-ups
 
-None outstanding. Both items raised during the migration — rbac's missing test
-coverage and the single-file `src/routes/` folder — were closed in step 5.
+Open, in rough priority order:
 
-Worth knowing for future work: coverage across the codebase is still thin
-(13 suites for 23 modules). rbac, taxation, inventoryReservation, store and
-order have unit tests; most modules have none. Nothing about the migration made
-that worse — the shims never had tests either — but a module boundary is a
-natural place to add them.
+- **`requirePermission` is wired into zero routes.** The permission system is
+  administrable but unenforced; real authorization is the coarse `requireAdmin`
+  role check. The seed data already contains `users.roles` ("Manage Roles &
+  RBAC"), which is the natural gate for the rbac router itself. Deciding which
+  codes guard which endpoints is a policy call, not a refactor.
+- **Nothing guards the swagger globs.** They broke silently once and would again
+  on the next restructure. A test asserting the spec has more than 0 paths would
+  catch it.
+- **Coverage is thin** — 14 suites for 23 modules. rbac, taxation,
+  inventoryReservation, store and order have unit tests; most modules have none.
+  Nothing about the migration made that worse — the shims never had tests either
+  — but a module boundary is a natural place to add them.

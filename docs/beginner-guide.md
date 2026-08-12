@@ -33,12 +33,12 @@ Don't worry — you don't need to use all of this on day one. Start with the bas
 Everything for one feature lives in a single folder under `src/modules/`. Create
 `src/modules/products/` and put all four files in it:
 
-| File to create                                    | Purpose              |
-| ------------------------------------------------- | -------------------- |
-| `src/modules/products/product.controller.ts`      | Handle HTTP requests |
-| `src/modules/products/product.service.ts`         | Business logic       |
-| `src/modules/products/product.repository.ts`      | Database queries     |
-| `src/modules/products/product.route.ts`           | URL routing          |
+| File to create                               | Purpose              |
+| -------------------------------------------- | -------------------- |
+| `src/modules/products/product.controller.ts` | Handle HTTP requests |
+| `src/modules/products/product.service.ts`    | Business logic       |
+| `src/modules/products/product.repository.ts` | Database queries     |
+| `src/modules/products/product.route.ts`      | URL routing          |
 
 Folder names are plural where the domain is countable (`products`, `stores`,
 `users`) and singular otherwise (`auth`, `health`). File stems stay singular.
