@@ -47,10 +47,15 @@ export default class ProductController {
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       const { page, limit, skip, search } = parsePagination(req.query as Record<string, unknown>);
-      const categoryId = typeof req.query.categoryId === "string" ? req.query.categoryId : undefined;
+      const categoryId =
+        typeof req.query.categoryId === 'string' ? req.query.categoryId : undefined;
 
-      const data = await ProductService.getMyProducts(userId, storeId, { 
-        page, limit, skip, search, categoryId 
+      const data = await ProductService.getMyProducts(userId, storeId, {
+        page,
+        limit,
+        skip,
+        search,
+        categoryId,
       });
       return responseSuccess(res, 200, data);
     } catch (error) {
