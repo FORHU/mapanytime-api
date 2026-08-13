@@ -31,21 +31,52 @@ export default class ProductRepository {
     });
   }
 
-  static async getProductsByStoreId(storeId: string) {
-    const products = await prisma.products.findMany({
-      where: { storeId: storeId, isActive: true },
-      include: {
-        category: true,
-        tags: true,
-        inventory: true,
-        productImages: {
-          include: { file: { select: { path: true, bucket: true } } },
-          orderBy: { displayOrder: 'asc' },
-        },
-      },
-    });
+  static async getMyProducts(
+    storeId: string,
+    opts: {
+      skip: number;
+      take: number;
+      search?: string;
+      categoryId?: string;
+    } = { skip: 0, take: 100 },
+  ) {
+    const term = opts.search?.trim();
 
-    return Promise.all(
+    const where: Prisma.ProductsWhereInput = {
+      storeId,
+      isActive: true,
+      ...(opts.categoryId ? { categoryId: opts.categoryId } : {}),
+      ...(term
+        ? {
+            OR: [
+              { name: { contains: term, mode: 'insensitive' } },
+              { brand: { contains: term, mode: 'insensitive' } },
+              { description: { contains: term, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    const [products, total] = await Promise.all([
+      prisma.products.findMany({
+        where,
+        include: {
+          category: true,
+          tags: true,
+          inventory: true,
+          productImages: {
+            include: { file: { select: { path: true, bucket: true } } },
+            orderBy: { displayOrder: 'asc' },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: opts.skip,
+        take: opts.take,
+      }),
+      prisma.products.count({ where }),
+    ]);
+
+    const items = await Promise.all(
       products.map(async (product) => ({
         ...product,
         productImages: await Promise.all(
@@ -59,6 +90,8 @@ export default class ProductRepository {
         ),
       })),
     );
+
+    return { items, total };
   }
 
   static async getProductById(productId: string) {
