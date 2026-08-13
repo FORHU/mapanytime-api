@@ -65,38 +65,61 @@ The checksum mismatch that used to make `migrate deploy` fail from `main` is
 
 ---
 
-## Deploying
+## Deploying — use the workflow, not a shell
 
-Run from a shell pointed at staging, with the repo on the commit you intend to
-deploy.
+**`prisma migrate deploy` is already part of both deploy pipelines.** Do not
+SSH in and run it by hand: that migrates the database without shipping the code
+that matches it, which is the one ordering you never want.
 
-**1. See what is pending — this only reads.**
-
-```bash
-npx prisma migrate status
-```
-
-Expect it to list the four (or five, from this branch) migrations above as not
-yet applied. If it reports a _failed_ or _modified_ migration instead, stop and
-work that out first; `deploy` will not fix it.
-
-**2. Apply.**
+Both `.github/workflows/deploy-staging.yml` and `deploy-production.yml` run, on
+the EC2 host, before the app container is replaced:
 
 ```bash
-npx prisma migrate deploy
+docker run --rm --entrypoint npx \
+  --network mapanytime --env-file /home/ec2-user/mapanytime-api.env \
+  <image>:<sha> prisma migrate deploy
 ```
 
-`deploy` is the right verb for a shared database: it applies pending migrations
-in order and never prompts, never resets, and never generates new SQL. Do not
-substitute `migrate dev`.
+Three things that ordering buys:
 
-**3. Confirm.**
+- the migration runs from **the image being deployed**, so schema and code
+  always match
+- `DATABASE_URL` comes from the host's env file, never from a checkout
+- the script runs under `set -e`, so a failed migration **aborts the deploy**
+  and leaves the previous container serving
+
+### To deploy staging
+
+Run the **Deploy Staging** workflow with `workflow_dispatch`, giving it the ref
+you want (this branch, or `main`).
+
+> ⚠️ **The automatic staging trigger never fires.** It is wired to
+> `workflow_run` on branch `staging`, and **there is no `staging` branch on
+> origin** (`git ls-remote --heads origin staging` returns nothing). So merging
+> to `main` deploys nothing, and manual dispatch is currently the only path.
+> This is the likely reason staging is still sitting on `0_init`.
+>
+> The job's guard itself is correct —
+> `conclusion == 'success' && event == 'push'`, so it will not deploy a red CI
+> run once a `staging` branch exists.
+
+### To deploy production
+
+Run the **Deploy Production** workflow — it is `workflow_dispatch` only, with a
+`ref` input defaulting to `main`. Nothing deploys to production automatically.
+It targets `environment: production`, so any reviewer protection configured on
+that environment applies.
+
+### Checking by hand (read-only)
 
 ```bash
-npx prisma migrate status   # should report the schema up to date
+npx prisma migrate status   # what is pending / applied
 ```
 
-**4. Regenerate the client wherever the app runs.**
+If it reports a _failed_ or _modified_ migration, stop and resolve that first —
+`deploy` will not fix it, and the pipeline will abort on it.
+
+### Locally, after pulling schema changes
 
 ```bash
 npx prisma generate
@@ -104,7 +127,9 @@ npx prisma generate
 
 Symptom of skipping this: `tsc` complains about missing Prisma models
 (`merchantAds`, `primaryCategory`, `MERCHANTADKIND`, `analyticsEvents`,
-property types). The schema is fine; the generated client is stale.
+property types). The schema is fine; the generated client is stale. The
+deployed containers do not need this — `prisma generate` runs in the image
+build.
 
 ---
 
