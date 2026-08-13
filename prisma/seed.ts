@@ -3,24 +3,22 @@ import { seedUsers } from './seeders/users.seeder';
 import { seedRoles } from './seeders/roles.seeder';
 import { seedCategories } from './seeders/categories.seeder';
 import { seedMarketplaceData } from './seeders/marketplace_data.seeder';
-import { seedMerchantAds } from './seeders/merchant_ads.seeder';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Starting modular database seeding...');
+  console.log('Starting modular database seeding...');
 
   try {
     // Execution order matters due to foreign key constraints
     await seedRoles(prisma);
     await seedUsers(prisma);
     await seedCategories(prisma);
-    await seedMerchantAds(prisma);
     await seedMarketplaceData(prisma);
 
-    console.log('🎉 All seeder modules executed successfully!');
+    console.log('All seeder modules executed successfully!');
   } catch (error) {
-    console.error('❌ Seeding failed:', error);
+    console.error('Seeding failed:', error);
     process.exit(1);
   } finally {
     await prisma.$disconnect();

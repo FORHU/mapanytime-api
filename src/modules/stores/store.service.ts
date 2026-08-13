@@ -5,6 +5,13 @@ import { emitStoreUpserted } from '../../infrastructure/socket';
 import logger from '../../utils/logger';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
+import { S3_CDN_URL } from '../../config';
+import S3Util from '../../utils/s3.util';
+
+async function resolveImageUrl(file: { path: string; bucket?: string | null }): Promise<string> {
+  if (S3_CDN_URL) return `${S3_CDN_URL}/${file.path}`;
+  return S3Util.getFileUrl(file.path);
+}
 
 type MerchantAdWithProducts = Prisma.MerchantAdsGetPayload<{
   include: {
@@ -293,8 +300,19 @@ export default class StoreService {
     if (!store) throw { status: 404, message: 'Store not found.' };
 
     const { items, total } = await StoreRepository.getStoreProducts(storeId, limit, offset);
+    const resolved = await Promise.all(
+      items.map(async (product) => ({
+        ...product,
+        productImages: await Promise.all(
+          product.productImages.map(async (pi) => ({
+            ...pi,
+            file: { ...pi.file, url: await resolveImageUrl(pi.file) },
+          })),
+        ),
+      })),
+    );
     return {
-      items,
+      items: resolved,
       total,
       limit,
       offset,

@@ -220,6 +220,7 @@ export default class StoreRepository {
         orderBy: { createdAt: 'desc' },
         include: {
           category: true,
+          tags: { include: { tag: true } },
           productImages: {
             include: { file: true },
             orderBy: { displayOrder: 'asc' },
