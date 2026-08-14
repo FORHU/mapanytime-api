@@ -30,6 +30,32 @@ export default class InventoryController {
     }
   }
 
+  static async adjust(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({
+      targetQuantity: Joi.number().integer().min(0).required(),
+    });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
+      const productId = req.params.productId;
+
+      const data = await InventoryService.adjust(userId, productId, value.targetQuantity);
+      return responseSuccess(res, 200, data, 'Stock adjusted successfully');
+    } catch (error) {
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
+      next(error);
+    }
+  }
+
   static async getInventory(req: Request, res: Response, next: NextFunction) {
     try {
       const { productId } = req.params;

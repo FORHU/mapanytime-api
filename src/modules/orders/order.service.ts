@@ -4,6 +4,7 @@ import TaxationService from '../taxation/taxation.service';
 import { validateOrderTransition } from './order.state';
 import { prisma } from '../../utils/prisma';
 import { emitNotificationToUser } from '../../infrastructure/socket';
+import { buildPage } from '../../helpers/pagination.helper';
 import { PAYMENTMETHOD, FULLFILLMENTTYPE, ORDERSTATUS } from '@prisma/client';
 
 export default class OrderService {
@@ -359,7 +360,11 @@ export default class OrderService {
     return OrderRepository.getOrdersByBuyerId(buyer.id);
   }
 
-  static async getStoreOrders(userId: string, storeId?: string) {
+  /**
+   * Resolves which of the seller's stores a request may read, enforcing
+   * ownership. Shared by the paginated list and the stats endpoint.
+   */
+  private static async resolveSellerStoreIds(userId: string, storeId?: string) {
     const seller = await prisma.sellers.findUnique({
       where: { userId: userId },
       include: { stores: true },
@@ -372,14 +377,57 @@ export default class OrderService {
     const sellerStoreIds = seller.stores.map((s) => s.id);
 
     if (!storeId || storeId === 'ALL') {
-      return OrderRepository.getOrdersByStoreIds(sellerStoreIds);
+      return sellerStoreIds;
     }
 
     if (!sellerStoreIds.includes(storeId)) {
       throw { status: 403, message: 'Unauthorized store access.' };
     }
 
-    return OrderRepository.getOrdersByStoreId(storeId);
+    return [storeId];
+  }
+
+  static async getStoreOrders(
+    userId: string,
+    storeId: string | undefined,
+    query: {
+      status?: ORDERSTATUS;
+      search?: string;
+      sortOrder?: 'asc' | 'desc';
+      page: number;
+      limit: number;
+      skip: number;
+    },
+  ) {
+    const storeIds = await this.resolveSellerStoreIds(userId, storeId);
+
+    // Filtering, searching, sorting and pagination all run in the database —
+    // the client renders the page it asked for instead of post-processing
+    // the store's entire order history.
+    const { items, total } = await OrderRepository.getStoreOrdersPage(storeIds, {
+      status: query.status,
+      search: query.search,
+      sortOrder: query.sortOrder,
+      skip: query.skip,
+      take: query.limit,
+    });
+
+    return buildPage(items, total, { page: query.page, limit: query.limit });
+  }
+
+  static async getStoreOrderStats(userId: string, storeId?: string) {
+    const storeIds = await this.resolveSellerStoreIds(userId, storeId);
+
+    const { totalRevenue, statusCounts, lowStockCount } =
+      await OrderRepository.getStoreOrderStats(storeIds);
+
+    return {
+      totalRevenue,
+      pendingCount: statusCounts.PENDING + statusCounts.PROCESSING + statusCounts.READY_FOR_PICKUP,
+      fulfilledCount: statusCounts.COMPLETED,
+      statusCounts,
+      lowStockCount,
+    };
   }
 
   static async updateFulfillmentStatus(userId: string, orderId: string, inputStatus: string) {

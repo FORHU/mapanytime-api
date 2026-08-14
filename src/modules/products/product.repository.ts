@@ -38,6 +38,8 @@ export default class ProductRepository {
       take: number;
       search?: string;
       categoryId?: string;
+      sortBy?: 'price' | 'name' | 'createdAt';
+      sortOrder?: 'asc' | 'desc';
     } = { skip: 0, take: 100 },
   ) {
     const term = opts.search?.trim();
@@ -57,6 +59,13 @@ export default class ProductRepository {
         : {}),
     };
 
+    const SORTABLE = ['price', 'name', 'createdAt'] as const;
+    type SortableField = (typeof SORTABLE)[number];
+    const isSortable = (v: unknown): v is SortableField =>
+      typeof v === 'string' && (SORTABLE as readonly string[]).includes(v);
+    const sortField: SortableField = isSortable(opts.sortBy) ? opts.sortBy : 'createdAt';
+    const sortOrder: Prisma.SortOrder = opts.sortOrder === 'asc' ? 'asc' : 'desc';
+
     const [products, total] = await Promise.all([
       prisma.products.findMany({
         where,
@@ -69,7 +78,7 @@ export default class ProductRepository {
             orderBy: { displayOrder: 'asc' },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { [sortField]: sortOrder },
         skip: opts.skip,
         take: opts.take,
       }),
