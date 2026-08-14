@@ -5,9 +5,7 @@ jest.mock('../../src/modules/products/product.repository');
 
 type SellerRow = Awaited<ReturnType<typeof ProductRepository.getSellerByUserId>>;
 type StoreRow = Awaited<ReturnType<typeof ProductRepository.getStoreById>>;
-type ProductRow = Awaited<
-  ReturnType<typeof ProductRepository.getMyProducts>
->['items'][number];
+type ProductRow = Awaited<ReturnType<typeof ProductRepository.getMyProducts>>['items'][number];
 
 const mockedRepo = ProductRepository as unknown as {
   getSellerByUserId: jest.Mock<

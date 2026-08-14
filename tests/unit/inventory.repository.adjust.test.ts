@@ -40,8 +40,8 @@ describe('InventoryRepository.adjust', () => {
 
   it('increases stock and writes an ADJUSTMENT audit row', async () => {
     const tx = buildTx({ id: 'inv-1', storeId: 'store-1', quantityOnHand: 10 });
-    mockedPrisma.$transaction.mockImplementation(
-      async (fn: (tx: MockTx) => Promise<unknown>) => fn(tx),
+    mockedPrisma.$transaction.mockImplementation(async (fn: (tx: MockTx) => Promise<unknown>) =>
+      fn(tx),
     );
 
     const result = await InventoryRepository.adjust('product-1', 25, 'user-1');
@@ -68,8 +68,8 @@ describe('InventoryRepository.adjust', () => {
 
   it('decreases stock (floored at zero) and records a negative delta', async () => {
     const tx = buildTx({ id: 'inv-1', storeId: 'store-1', quantityOnHand: 10 });
-    mockedPrisma.$transaction.mockImplementation(
-      async (fn: (tx: MockTx) => Promise<unknown>) => fn(tx),
+    mockedPrisma.$transaction.mockImplementation(async (fn: (tx: MockTx) => Promise<unknown>) =>
+      fn(tx),
     );
 
     const result = await InventoryRepository.adjust('product-1', 3, 'user-1');
@@ -86,8 +86,8 @@ describe('InventoryRepository.adjust', () => {
 
   it('floors a negative target at zero', async () => {
     const tx = buildTx({ id: 'inv-1', storeId: 'store-1', quantityOnHand: 4 });
-    mockedPrisma.$transaction.mockImplementation(
-      async (fn: (tx: MockTx) => Promise<unknown>) => fn(tx),
+    mockedPrisma.$transaction.mockImplementation(async (fn: (tx: MockTx) => Promise<unknown>) =>
+      fn(tx),
     );
 
     const result = await InventoryRepository.adjust('product-1', -5, 'user-1');
@@ -101,8 +101,8 @@ describe('InventoryRepository.adjust', () => {
 
   it('no-ops when the target equals the current stock (no movement row)', async () => {
     const tx = buildTx({ id: 'inv-1', storeId: 'store-1', quantityOnHand: 7 });
-    mockedPrisma.$transaction.mockImplementation(
-      async (fn: (tx: MockTx) => Promise<unknown>) => fn(tx),
+    mockedPrisma.$transaction.mockImplementation(async (fn: (tx: MockTx) => Promise<unknown>) =>
+      fn(tx),
     );
 
     const result = await InventoryRepository.adjust('product-1', 7, 'user-1');
@@ -114,8 +114,8 @@ describe('InventoryRepository.adjust', () => {
 
   it('rejects with 404 when no inventory row exists for the product', async () => {
     const tx = buildTx(null);
-    mockedPrisma.$transaction.mockImplementation(
-      async (fn: (tx: MockTx) => Promise<unknown>) => fn(tx),
+    mockedPrisma.$transaction.mockImplementation(async (fn: (tx: MockTx) => Promise<unknown>) =>
+      fn(tx),
     );
 
     await expect(InventoryRepository.adjust('product-1', 10, 'user-1')).rejects.toMatchObject({
