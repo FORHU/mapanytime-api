@@ -25,6 +25,30 @@ export default class InventoryService {
     return InventoryRepository.restock(productId, addedQuantity);
   }
 
+  static async adjust(userId: string, productId: string, targetQuantity: number) {
+    // Verify the seller profile exists and is approved
+    const seller = await ProductRepository.getSellerByUserId(userId);
+    if (!seller || seller.applicationStatus !== 'APPROVED') {
+      throw { status: 403, message: 'User is not an approved seller profile.' };
+    }
+
+    // Verify the product exists
+    const product = await ProductRepository.getProductById(productId);
+    if (!product) {
+      throw { status: 404, message: 'Product not found.' };
+    }
+
+    // Verify the seller owns the store that this product belongs to
+    const store = await ProductRepository.getStoreById(product.storeId);
+    if (!store || store.sellerId !== seller.id) {
+      throw { status: 403, message: 'You do not have administrative access to this product.' };
+    }
+
+    // The delta is computed inside a transaction on the server; the client only
+    // sends the absolute target so stock can move up or down safely.
+    return InventoryRepository.adjust(productId, targetQuantity, userId);
+  }
+
   static async getInventory(productId: string) {
     const inventory = await InventoryRepository.getInventoryByProductId(productId);
     if (!inventory) {

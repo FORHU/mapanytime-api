@@ -36,11 +36,15 @@ export default class ProductController {
   }
 
   static async index(req: Request, res: Response, next: NextFunction) {
-    const storeId = req.query.storeId as string;
+    // Sorting is whitelisted here; page/limit/search pass through parsePagination.
+    const schema = Joi.object({
+      storeId: Joi.string().required(),
+      sortBy: Joi.string().valid('price', 'name', 'createdAt').optional(),
+      sortOrder: Joi.string().valid('asc', 'desc').optional(),
+    }).unknown(true);
 
-    if (!storeId) {
-      return responseError(res, 400, 'storeId query parameter is required');
-    }
+    const { error, value } = schema.validate(req.query);
+    if (error) return responseError(res, 400, error.message);
 
     try {
       const userId = (req.user as { id: string })?.id;
@@ -50,12 +54,14 @@ export default class ProductController {
       const categoryId =
         typeof req.query.categoryId === 'string' ? req.query.categoryId : undefined;
 
-      const data = await ProductService.getMyProducts(userId, storeId, {
+      const data = await ProductService.getMyProducts(userId, value.storeId, {
         page,
         limit,
         skip,
         search,
         categoryId,
+        sortBy: value.sortBy,
+        sortOrder: value.sortOrder,
       });
       return responseSuccess(res, 200, data);
     } catch (error) {

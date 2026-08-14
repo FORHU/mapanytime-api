@@ -3,6 +3,7 @@ import Joi from 'joi';
 import OrderService from './order.service';
 import CartService from '../cart/cart.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
+import { parsePagination } from '../../helpers/pagination.helper';
 import { prisma } from '../../utils/prisma';
 import RedisUtil from '../../utils/redis.util';
 import { PAYMENTMETHOD, FULLFILLMENTTYPE } from '@prisma/client';
@@ -179,14 +180,53 @@ export default class OrderController {
   }
 
   static async storeOrders(req: Request, res: Response, next: NextFunction) {
+    // page/limit/sortOrder are normalized by parsePagination; status/search
+    // are validated here. Unknown keys (e.g. page/limit) pass through.
+    const schema = Joi.object({
+      storeId: Joi.string().optional(),
+      status: Joi.string()
+        .valid('PENDING', 'PROCESSING', 'READY_FOR_PICKUP', 'COMPLETED', 'CANCELLED', 'FAILED')
+        .optional(),
+      search: Joi.string().trim().allow('').max(200).optional(),
+      sortOrder: Joi.string().valid('asc', 'desc').optional(),
+    }).unknown(true);
+
+    const { error, value } = schema.validate(req.query);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
+      const { page, limit, skip } = parsePagination(req.query as Record<string, unknown>);
+
+      const data = await OrderService.getStoreOrders(userId, value.storeId, {
+        status: value.status,
+        search: value.search,
+        sortOrder: value.sortOrder,
+        page,
+        limit,
+        skip,
+      });
+      return responseSuccess(res, 200, data, 'Store orders retrieved successfully');
+    } catch (error) {
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
+      next(error);
+    }
+  }
+
+  static async storeOrderStats(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized access.');
 
       const storeId = req.query.storeId as string | undefined;
 
-      const data = await OrderService.getStoreOrders(userId, storeId);
-      return responseSuccess(res, 200, data, 'Store orders retrieved successfully');
+      const data = await OrderService.getStoreOrderStats(userId, storeId);
+      return responseSuccess(res, 200, data, 'Store order stats retrieved successfully');
     } catch (error) {
       const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
       if (err.status) {

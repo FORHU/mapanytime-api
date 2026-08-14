@@ -90,6 +90,8 @@ export default class ProductService {
       skip: number;
       search?: string;
       categoryId?: string;
+      sortBy?: 'price' | 'name' | 'createdAt';
+      sortOrder?: 'asc' | 'desc';
     },
   ) {
     const seller = await ProductRepository.getSellerByUserId(userId);
@@ -111,6 +113,8 @@ export default class ProductService {
       take: opts.limit,
       search: opts.search,
       categoryId: opts.categoryId,
+      sortBy: opts.sortBy,
+      sortOrder: opts.sortOrder,
     });
 
     return buildPage(items, total, { page: opts.page, limit: opts.limit });

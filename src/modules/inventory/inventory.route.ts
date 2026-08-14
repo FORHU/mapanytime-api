@@ -9,6 +9,8 @@ const router = Router();
 router.get('/:productId', authenticate, InventoryController.getInventory);
 // Endpoint for sellers to add physical stock to their product
 router.patch('/:productId/restock', authenticate, InventoryController.restock);
+// Endpoint for sellers to set an absolute stock level (increase or decrease)
+router.patch('/:productId/adjust', authenticate, InventoryController.adjust);
 
 // Inventory Reservation endpoints
 router.post('/reserve', authenticate, InventoryReservationController.reserve);
