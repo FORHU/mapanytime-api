@@ -76,38 +76,43 @@ export default class OrderService {
         const itemTotal = numericPrice * item.quantity;
         subtotalAmount += itemTotal;
 
-        // Buy-X-take-Y (e.g. buy 1 take 1): find an active ad linking this
-        // product to a BOGO rule for this store, and give away the free
-        // units. variantId is left out — cart items are product-only today.
-        const bogoLink = await tx.merchantAdProducts.findFirst({
+        // Find an active discount ad (BOGO, % off, or fixed-amount off)
+        // linked to this product for this store. variantId is left out —
+        // cart items are product-only today.
+        const discountLink = await tx.merchantAdProducts.findFirst({
           where: {
             productId: item.productId,
             ad: {
               storeId: payload.storeId,
               isActive: true,
-              buyQuantity: { not: null },
-              freeQuantity: { not: null },
+              discountType: { not: null },
               OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
             },
           },
           include: { ad: true },
         });
-        const bogoAd = bogoLink?.ad;
+        const discountAd = discountLink?.ad;
 
         let itemDiscount = 0;
         let appliedAdId: string | null = null;
-        if (bogoAd && bogoAd.buyQuantity && bogoAd.freeQuantity) {
+        if (discountAd?.discountType === 'PERCENTAGE' && discountAd.discountValue) {
+          itemDiscount = itemTotal * (Number(discountAd.discountValue) / 100);
+          appliedAdId = discountAd.id;
+        } else if (discountAd?.discountType === 'FIXED_AMOUNT' && discountAd.discountValue) {
+          itemDiscount = Math.min(itemTotal, Number(discountAd.discountValue) * item.quantity);
+          appliedAdId = discountAd.id;
+        } else if (discountAd?.buyQuantity && discountAd?.freeQuantity) {
           // Bundle size is buy+free (e.g. "buy 1 take 1" = pay for 1, get 2
           // total per bundle) — dividing by buyQuantity alone would give
           // away a free unit for every single unit bought, not every pair.
-          const bundleSize = bogoAd.buyQuantity + bogoAd.freeQuantity;
+          const bundleSize = discountAd.buyQuantity + discountAd.freeQuantity;
           const freeUnits = Math.min(
             item.quantity,
-            Math.floor(item.quantity / bundleSize) * bogoAd.freeQuantity,
+            Math.floor(item.quantity / bundleSize) * discountAd.freeQuantity,
           );
           if (freeUnits > 0) {
             itemDiscount = freeUnits * numericPrice;
-            appliedAdId = bogoAd.id;
+            appliedAdId = discountAd.id;
           }
         }
         totalDiscount += itemDiscount;
