@@ -1,6 +1,7 @@
 import ProductRepository from './product.repository';
 import CategoryService from '../categories/category.service';
 import { prisma } from '../../utils/prisma';
+import { buildPage } from '../../helpers/pagination.helper';
 
 export default class ProductService {
   static async createProduct(
@@ -80,7 +81,17 @@ export default class ProductService {
     return newProduct;
   }
 
-  static async getMyProducts(userId: string, storeId: string) {
+  static async getMyProducts(
+    userId: string,
+    storeId: string,
+    opts: {
+      page: number;
+      limit: number;
+      skip: number;
+      search?: string;
+      categoryId?: string;
+    },
+  ) {
     const seller = await ProductRepository.getSellerByUserId(userId);
     if (!seller) {
       throw { status: 403, message: 'Only sellers can view store products.' };
@@ -95,7 +106,14 @@ export default class ProductService {
       throw { status: 403, message: 'You do not own this store.' };
     }
 
-    return ProductRepository.getProductsByStoreId(storeId);
+    const { items, total } = await ProductRepository.getMyProducts(storeId, {
+      skip: opts.skip,
+      take: opts.limit,
+      search: opts.search,
+      categoryId: opts.categoryId,
+    });
+
+    return buildPage(items, total, { page: opts.page, limit: opts.limit });
   }
 
   static async getAllProducts(filters: {
@@ -123,15 +141,7 @@ export default class ProductService {
       take: filters.limit,
     });
 
-    return {
-      items,
-      meta: {
-        total,
-        page: filters.page,
-        limit: filters.limit,
-        totalPages: Math.ceil(total / filters.limit) || 1,
-      },
-    };
+    return buildPage(items, total, { page: filters.page, limit: filters.limit });
   }
 
   static async updateProduct(
