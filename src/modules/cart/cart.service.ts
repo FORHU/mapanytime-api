@@ -1,5 +1,7 @@
 import RedisUtil from '../../utils/redis.util';
 import ProductRepository from '../products/product.repository';
+import TaxationService from '../taxation/taxation.service';
+import { computeItemDiscount } from '../orders/pricing.util';
 import { prisma } from '../../utils/prisma';
 
 interface CartItem {
@@ -117,5 +119,74 @@ export default class CartService {
   static async clearCart(userId: string) {
     await RedisUtil.client.del(`cart:${userId}`);
     return { message: 'Cart cleared successfully' };
+  }
+
+  /**
+   * Read-only pricing preview for the buyer's cart (or a selected subset of
+   * it) — subtotal, auto-applied discounts, tax, and total, computed with
+   * the exact same logic `OrderService.createOrder` uses so what's shown
+   * before checkout never drifts from what's actually charged.
+   */
+  static async previewPricing(userId: string, productIds?: string[]) {
+    const cart = await this.getCart(userId);
+    if (!cart.storeId || cart.items.length === 0) {
+      throw { status: 400, message: 'Your cart is empty.' };
+    }
+
+    let items = cart.items;
+    if (productIds && productIds.length > 0) {
+      const idSet = new Set(productIds);
+      items = items.filter((item) => idSet.has(item.productId));
+      if (items.length === 0) {
+        throw { status: 400, message: 'None of the selected items are currently in your cart.' };
+      }
+    }
+
+    let subtotalAmount = 0;
+    let totalDiscount = 0;
+    let primaryCategoryId: string | undefined;
+    const itemBreakdowns = [];
+
+    for (const item of items) {
+      const product = await ProductRepository.getProductById(item.productId);
+      if (!product || !product.isActive) continue;
+
+      if (!primaryCategoryId && product.categoryId) {
+        primaryCategoryId = product.categoryId;
+      }
+
+      const unitPrice = Number(product.price);
+      subtotalAmount += unitPrice * item.quantity;
+
+      const { itemDiscount, appliedAdId } = await computeItemDiscount(prisma, {
+        productId: item.productId,
+        quantity: item.quantity,
+        storeId: cart.storeId,
+        unitPrice,
+      });
+      totalDiscount += itemDiscount;
+
+      itemBreakdowns.push({
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice,
+        discountAmount: itemDiscount,
+        appliedAdId,
+      });
+    }
+
+    const financials = await TaxationService.calculateOrderFinancials({
+      subtotalAmount,
+      categoryId: primaryCategoryId,
+      discountAmount: totalDiscount,
+    });
+
+    return {
+      items: itemBreakdowns,
+      subtotalAmount: financials.subtotalAmount,
+      discountAmount: financials.discountAmount,
+      taxAmount: financials.taxAmount,
+      totalAmount: financials.totalAmount,
+    };
   }
 }
