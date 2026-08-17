@@ -17,6 +17,7 @@ jest.mock('../../src/utils/prisma', () => ({
   prisma: {
     stores: { findUnique: jest.fn() },
     inventory: { findFirst: jest.fn() },
+    merchantAdProducts: { findMany: jest.fn() },
   },
 }));
 
@@ -28,6 +29,7 @@ const redis = RedisUtil.client as unknown as {
 const mockGetProduct = ProductRepository.getProductById as jest.Mock;
 const mockStore = prisma.stores.findUnique as unknown as jest.Mock;
 const mockInventory = prisma.inventory.findFirst as unknown as jest.Mock;
+const mockMerchantAdProducts = prisma.merchantAdProducts.findMany as unknown as jest.Mock;
 
 const USER = 'user-1';
 const STORE = 'store-1';
@@ -55,6 +57,7 @@ beforeEach(() => {
     price: '49.99',
   });
   mockInventory.mockResolvedValue({ quantityOnHand: 10, quantityReserved: 2 });
+  mockMerchantAdProducts.mockResolvedValue([]);
 });
 
 describe('CartService.getCart', () => {
@@ -215,6 +218,42 @@ describe('CartService.addToCart', () => {
 
       const cart = await CartService.addToCart(USER, STORE, PRODUCT, 8);
       expect(cart.items[0].quantity).toBe(8);
+    });
+  });
+
+  describe('BOGO bonus', () => {
+    it('bumps the stored quantity with free units when a matching BOGO ad applies', async () => {
+      mockMerchantAdProducts.mockResolvedValue([
+        { ad: { buyQuantity: 2, freeQuantity: 1 } },
+      ]);
+
+      // Buyer asks to pay for 2; storing 2 alone would silently drop the
+      // free unit they earned — the whole point of this feature.
+      const cart = await CartService.addToCart(USER, STORE, PRODUCT, 2);
+
+      expect(cart.items[0].quantity).toBe(3);
+    });
+
+    it('leaves quantity unchanged when no BOGO ad is linked', async () => {
+      mockMerchantAdProducts.mockResolvedValue([]);
+
+      const cart = await CartService.addToCart(USER, STORE, PRODUCT, 2);
+
+      expect(cart.items[0].quantity).toBe(2);
+    });
+
+    it('caps the bump at available stock instead of rejecting the add', async () => {
+      // Buyer's paid quantity (2) fits in stock (2), but the full bonus
+      // bundle (2 paid + 1 free = 3) doesn't — the add must still succeed
+      // for the 2 they asked to pay for, just without the extra free unit.
+      mockInventory.mockResolvedValue({ quantityOnHand: 2, quantityReserved: 0 });
+      mockMerchantAdProducts.mockResolvedValue([
+        { ad: { buyQuantity: 2, freeQuantity: 1 } },
+      ]);
+
+      const cart = await CartService.addToCart(USER, STORE, PRODUCT, 2);
+
+      expect(cart.items[0].quantity).toBe(2);
     });
   });
 });

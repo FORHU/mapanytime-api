@@ -44,16 +44,18 @@ describe('OrderService.createOrder — BOGO discount', () => {
         }),
       },
       merchantAdProducts: {
-        findFirst: jest.fn().mockResolvedValue(
+        findMany: jest.fn().mockResolvedValue(
           bogoAd
-            ? {
-                ad: {
-                  id: 'ad-1',
-                  buyQuantity: bogoAd.buyQuantity,
-                  freeQuantity: bogoAd.freeQuantity,
+            ? [
+                {
+                  ad: {
+                    id: 'ad-1',
+                    buyQuantity: bogoAd.buyQuantity,
+                    freeQuantity: bogoAd.freeQuantity,
+                  },
                 },
-              }
-            : null,
+              ]
+            : [],
         ),
       },
       inventory: { update: jest.fn().mockResolvedValue({}) },
@@ -157,7 +159,7 @@ describe('OrderService.createOrder — percentage / fixed-amount discount', () =
         }),
       },
       merchantAdProducts: {
-        findFirst: jest.fn().mockResolvedValue(ad ? { ad } : null),
+        findMany: jest.fn().mockResolvedValue(ad ? [{ ad }] : []),
       },
       inventory: { update: jest.fn().mockResolvedValue({}) },
       inventoryReservations: {

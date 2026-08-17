@@ -1,7 +1,7 @@
 import RedisUtil from '../../utils/redis.util';
 import ProductRepository from '../products/product.repository';
 import TaxationService from '../taxation/taxation.service';
-import { computeItemDiscount } from '../orders/pricing.util';
+import { computeItemDiscount, applyBogoBonus } from '../orders/pricing.util';
 import { prisma } from '../../utils/prisma';
 
 interface CartItem {
@@ -86,13 +86,23 @@ export default class CartService {
 
     cart.storeId = storeId;
 
+    // Bumps the stored quantity to include any free BOGO bonus units the
+    // buyer's requested (paid) quantity earns — see applyBogoBonus for why
+    // this is the only place that needs to know about the bonus.
+    const storedQuantity = await applyBogoBonus(prisma, {
+      productId,
+      storeId,
+      quantity,
+      availableStock,
+    });
+
     const existingItemIndex = cart.items.findIndex(
       (item: CartItem) => item.productId === productId,
     );
     if (existingItemIndex >= 0) {
-      cart.items[existingItemIndex].quantity = quantity;
+      cart.items[existingItemIndex].quantity = storedQuantity;
     } else {
-      cart.items.push({ productId, quantity, unitPrice: Number(product.price) });
+      cart.items.push({ productId, quantity: storedQuantity, unitPrice: Number(product.price) });
     }
 
     await RedisUtil.client.setEx(`cart:${userId}`, 604800, JSON.stringify(cart));
@@ -158,7 +168,7 @@ export default class CartService {
       const unitPrice = Number(product.price);
       subtotalAmount += unitPrice * item.quantity;
 
-      const { itemDiscount, appliedAdId } = await computeItemDiscount(prisma, {
+      const { itemDiscount, appliedAdId, freeUnits } = await computeItemDiscount(prisma, {
         productId: item.productId,
         quantity: item.quantity,
         storeId: cart.storeId,
@@ -172,6 +182,7 @@ export default class CartService {
         unitPrice,
         discountAmount: itemDiscount,
         appliedAdId,
+        freeUnits,
       });
     }
 
