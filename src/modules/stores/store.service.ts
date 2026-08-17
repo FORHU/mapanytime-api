@@ -280,6 +280,100 @@ export default class StoreService {
     return StoreRepository.getStoresBySellerId(sellerId);
   }
 
+  /**
+   * Partial update of a store the given seller owns.
+   *
+   * Deliberately does NOT go through getStoreById — that helper 404s on an
+   * inactive store, which would make a deactivated store impossible to edit
+   * back into shape. Ownership is checked here rather than in the controller so
+   * every future caller inherits it.
+   */
+  static async updateStore(
+    storeId: string,
+    sellerId: string,
+    input: {
+      storeName?: string;
+      description?: string | null;
+      phone?: string | number;
+      email?: string;
+      categoryId?: string;
+      isActive?: boolean;
+      currentAddress?: string;
+      city?: string;
+      province?: string;
+      postalCode?: string | number;
+      country?: string;
+    },
+  ) {
+    const existing = await StoreRepository.getStoreById(storeId);
+    if (!existing) throw { status: 404, message: 'Store not found.' };
+    if (existing.sellerId !== sellerId) {
+      // 404 rather than 403: a seller has no business learning which store ids
+      // belong to other sellers.
+      throw { status: 404, message: 'Store not found.' };
+    }
+
+    const storeData: Prisma.StoresUpdateInput = {};
+    if (input.storeName !== undefined) storeData.storeName = input.storeName;
+    if (input.description !== undefined) storeData.description = input.description || null;
+    if (input.phone !== undefined) storeData.phone = String(input.phone) || null;
+    if (input.email !== undefined) storeData.email = input.email || null;
+    if (input.isActive !== undefined) storeData.isActive = input.isActive;
+    if (input.categoryId !== undefined) {
+      storeData.primaryCategory = { connect: { id: input.categoryId } };
+    }
+
+    const locationData: Prisma.StoreLocationsUpdateWithoutStoreInput = {};
+    if (input.currentAddress !== undefined) locationData.currentAddress = input.currentAddress;
+    if (input.city !== undefined) locationData.city = input.city;
+    if (input.province !== undefined) locationData.province = input.province;
+    if (input.postalCode !== undefined) locationData.zipCode = String(input.postalCode);
+    if (input.country !== undefined) locationData.country = input.country;
+
+    const hasLocationChanges = Object.keys(locationData).length > 0;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      if (Object.keys(storeData).length > 0) {
+        await tx.stores.update({ where: { id: storeId }, data: storeData });
+      }
+
+      // StoreLocations is optional on Stores, so a store onboarded without one
+      // has nothing to update. Skip rather than throwing — the store fields
+      // above are still a legitimate edit on their own.
+      if (hasLocationChanges && existing.storeLocations) {
+        await tx.storeLocations.update({
+          where: { storeId },
+          data: locationData,
+        });
+      }
+
+      return tx.stores.findUnique({
+        where: { id: storeId },
+        include: { storeLocations: true },
+      });
+    });
+
+    // Name, visibility and coordinates are all denormalised into the map
+    // viewport payload, so a stale cache would keep serving the old values.
+    try {
+      if (updated && updated.storeLocations) {
+        emitStoreUpserted({
+          id: updated.id,
+          storeName: updated.storeName,
+          isActive: updated.isActive,
+          coordinates: {
+            lat: updated.storeLocations.latitude,
+            lng: updated.storeLocations.longitude,
+          },
+        });
+      }
+    } catch (err) {
+      logger.warn(`[Socket] Failed to emit store:upserted for updated store ${storeId}.`);
+    }
+
+    return updated;
+  }
+
   static async getStoreById(id: string) {
     const store = await StoreRepository.getStoreById(id);
 
