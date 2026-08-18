@@ -13,7 +13,7 @@ async function resolveImageUrl(file: { path: string; bucket?: string | null }): 
   return S3Util.getFileUrl(file.path);
 }
 
-type MerchantAdWithProducts = Prisma.MerchantAdsGetPayload<{
+export type MerchantAdWithProducts = Prisma.MerchantAdsGetPayload<{
   include: {
     products: {
       include: {
@@ -28,7 +28,7 @@ type MerchantAdWithProducts = Prisma.MerchantAdsGetPayload<{
 // quantityOnHand - quantityReserved, not raw quantityOnHand, since Inventory
 // only decrements quantityOnHand at fulfillment — pending orders already
 // reserved units shouldn't still count as available here.
-function filterLiveAds(ads: MerchantAdWithProducts[]) {
+export function filterLiveAds(ads: MerchantAdWithProducts[]) {
   return ads.filter((ad) => {
     if (ad.products.length === 0) return true;
     const available = ad.products.reduce((sum, p) => {

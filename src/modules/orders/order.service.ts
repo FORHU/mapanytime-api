@@ -1,6 +1,7 @@
 import OrderRepository from './order.repository';
 import ProductRepository from '../products/product.repository';
 import TaxationService from '../taxation/taxation.service';
+import { computeItemDiscount } from './pricing.util';
 import { validateOrderTransition } from './order.state';
 import { prisma } from '../../utils/prisma';
 import { emitNotificationToUser } from '../../infrastructure/socket';
@@ -78,40 +79,16 @@ export default class OrderService {
         const itemTotal = numericPrice * item.quantity;
         subtotalAmount += itemTotal;
 
-        // Buy-X-take-Y (e.g. buy 1 take 1): find an active ad linking this
-        // product to a BOGO rule for this store, and give away the free
-        // units. variantId is left out — cart items are product-only today.
-        const bogoLink = await tx.merchantAdProducts.findFirst({
-          where: {
-            productId: item.productId,
-            ad: {
-              storeId: payload.storeId,
-              isActive: true,
-              buyQuantity: { not: null },
-              freeQuantity: { not: null },
-              OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-            },
-          },
-          include: { ad: true },
+        // Find an active discount ad (BOGO, % off, or fixed-amount off)
+        // linked to this product for this store. variantId is left out —
+        // cart items are product-only today. Shared with the cart pricing
+        // preview so what a buyer sees before checkout matches the charge.
+        const { itemDiscount, appliedAdId } = await computeItemDiscount(tx, {
+          productId: item.productId,
+          quantity: item.quantity,
+          storeId: payload.storeId,
+          unitPrice: numericPrice,
         });
-        const bogoAd = bogoLink?.ad;
-
-        let itemDiscount = 0;
-        let appliedAdId: string | null = null;
-        if (bogoAd && bogoAd.buyQuantity && bogoAd.freeQuantity) {
-          // Bundle size is buy+free (e.g. "buy 1 take 1" = pay for 1, get 2
-          // total per bundle) — dividing by buyQuantity alone would give
-          // away a free unit for every single unit bought, not every pair.
-          const bundleSize = bogoAd.buyQuantity + bogoAd.freeQuantity;
-          const freeUnits = Math.min(
-            item.quantity,
-            Math.floor(item.quantity / bundleSize) * bogoAd.freeQuantity,
-          );
-          if (freeUnits > 0) {
-            itemDiscount = freeUnits * numericPrice;
-            appliedAdId = bogoAd.id;
-          }
-        }
         totalDiscount += itemDiscount;
 
         orderItemsData.push({

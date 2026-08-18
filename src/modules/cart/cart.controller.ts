@@ -69,4 +69,28 @@ export default class CartController {
       next(error);
     }
   }
+
+  static async getPricing(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({
+      productIds: Joi.array().items(Joi.string()).min(1).optional(),
+    });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
+      const pricing = await CartService.previewPricing(userId, value.productIds);
+      return responseSuccess(res, 200, pricing, 'Pricing calculated successfully');
+    } catch (error) {
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
+      next(error);
+    }
+  }
 }
