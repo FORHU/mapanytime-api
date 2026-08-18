@@ -302,7 +302,8 @@ export default class AuthSvc {
       {
         userId: user.id,
         sessionId: newSession.id,
-        roles: (user as Users & { roles?: { roleName: string }[] }).roles?.map((r) => r.roleName) || [],
+        roles:
+          (user as Users & { roles?: { roleName: string }[] }).roles?.map((r) => r.roleName) || [],
       },
       ACCESS_TOKEN_SECRET,
       { expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] },
