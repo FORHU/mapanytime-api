@@ -42,6 +42,10 @@ export default class AuthSvc {
 
     // Use Prisma transaction to ensure all identity records succeed or fail together
     await prisma.$transaction(async (tx) => {
+      const rolesToConnect = data.roleName === 'SELLER' 
+        ? [{ roleName: 'SELLER' }, { roleName: 'BUYER' }] 
+        : [{ roleName: data.roleName }];
+
       const user = await tx.users.create({
         data: {
           email: data.email,
@@ -52,7 +56,7 @@ export default class AuthSvc {
           countryCode: data.countryCode,
           isEmailVerified: true,
           accountStatus: 'ACTIVE',
-          roles: { connect: { roleName: data.roleName } },
+          roles: { connect: rolesToConnect },
         },
       });
 
@@ -110,9 +114,17 @@ export default class AuthSvc {
       --- END ORIGINAL STRICT LOGIC --- */
 
       // --- START BYPASS LOGIC ---
+      const displayName =
+        [data.firstName, data.lastName].filter(Boolean).join(' ') || 'New User';
+        
       if (data.roleName === 'SELLER') {
         const seller = await tx.sellers.create({
           data: { userId: user.id },
+        });
+
+        // Also create a buyer profile for the seller
+        await tx.buyers.create({
+          data: { userId: user.id, displayName },
         });
 
         const docVerification = await tx.documentVerifications.create({
@@ -155,8 +167,6 @@ export default class AuthSvc {
           );
         }
       } else if (data.roleName === 'BUYER') {
-        const displayName =
-          [data.firstName, data.lastName].filter(Boolean).join(' ') || 'New Buyer';
         await tx.buyers.create({
           data: { userId: user.id, displayName },
         });
@@ -167,8 +177,8 @@ export default class AuthSvc {
     return null;
   }
 
-  static async login(data: { email: string; password: string }) {
-    logger.info(`[Auth] Login attempt for ${data.email}`);
+  static async login(data: { email: string; password: string; roleName?: string }) {
+    logger.info(`[Auth] Login attempt for ${data.email} as ${data.roleName || 'any'}`);
 
     const user = await AuthRepo.findUserByEmail(data.email);
     if (!user || !user.passwordHash) {
@@ -289,7 +299,11 @@ export default class AuthSvc {
     // The access token carries sessionId so authenticate() can tell a live session from a
     // superseded one without a second lookup.
     const accessToken = jwt.sign(
-      { userId: user.id, sessionId: newSession.id },
+      { 
+        userId: user.id, 
+        sessionId: newSession.id,
+        roles: (user as any).roles?.map((r: any) => r.roleName) || [],
+      },
       ACCESS_TOKEN_SECRET,
       { expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] },
     );
@@ -320,12 +334,18 @@ export default class AuthSvc {
 
     const { passwordHash: _passwordHash, ...safeUser } = user as Users & {
       passwordHash?: string;
+      roles?: { roleName: string }[];
+    };
+
+    const formattedUser = {
+      ...safeUser,
+      roles: safeUser.roles?.map(r => r.roleName) || [],
     };
 
     return {
       accessToken,
       refreshToken,
-      user: safeUser,
+      user: formattedUser,
       stores,
       seller: seller
         ? {

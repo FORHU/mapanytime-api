@@ -32,7 +32,8 @@ export default class ProductRepository {
   }
 
   static async getMyProducts(
-    storeId: string,
+    storeId: string | undefined,
+    sellerId: string,
     opts: {
       skip: number;
       take: number;
@@ -45,7 +46,7 @@ export default class ProductRepository {
     const term = opts.search?.trim();
 
     const where: Prisma.ProductsWhereInput = {
-      storeId,
+      ...(storeId ? { storeId } : { store: { sellerId } }),
       isActive: true,
       ...(opts.categoryId ? { categoryId: opts.categoryId } : {}),
       ...(term
@@ -73,6 +74,7 @@ export default class ProductRepository {
           category: true,
           tags: true,
           inventory: true,
+          store: { select: { storeName: true } },
           productImages: {
             include: { file: { select: { path: true, bucket: true } } },
             orderBy: { displayOrder: 'asc' },

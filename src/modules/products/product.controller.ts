@@ -38,7 +38,7 @@ export default class ProductController {
   static async index(req: Request, res: Response, next: NextFunction) {
     // Sorting is whitelisted here; page/limit/search pass through parsePagination.
     const schema = Joi.object({
-      storeId: Joi.string().required(),
+      storeId: Joi.string().optional().allow(null, ''),
       sortBy: Joi.string().valid('price', 'name', 'createdAt').optional(),
       sortOrder: Joi.string().valid('asc', 'desc').optional(),
     }).unknown(true);
