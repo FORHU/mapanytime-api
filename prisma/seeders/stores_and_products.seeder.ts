@@ -1,8 +1,4 @@
-import {
-  PrismaClient,
-  STOREAPPROVALSTATUS,
-  PRODUCTSTATUS,
-} from '@prisma/client';
+import { PrismaClient, STOREAPPROVALSTATUS, PRODUCTSTATUS } from '@prisma/client';
 
 interface ProductSpec {
   name: string;
@@ -48,7 +44,8 @@ const STORES_CATALOG: StoreSpec[] = [
   {
     slug: 'baguio-fresh-harvest',
     storeName: 'Baguio Fresh Harvest',
-    description: 'Farm-to-table organic vegetables, sweet strawberries, and high-altitude highland crops.',
+    description:
+      'Farm-to-table organic vegetables, sweet strawberries, and high-altitude highland crops.',
     categoryName: 'Food & Beverage',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'seller@example.com',
@@ -138,7 +135,8 @@ const STORES_CATALOG: StoreSpec[] = [
   {
     slug: 'cordillera-weaves-crafts',
     storeName: 'Cordillera Weaves & Crafts',
-    description: 'Authentic handwoven tribal fabrics, wooden carvings, and indigenous souvenirs from Benguet and Ifugao.',
+    description:
+      'Authentic handwoven tribal fabrics, wooden carvings, and indigenous souvenirs from Benguet and Ifugao.',
     categoryName: 'Shopping & Retail',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'seller@example.com',
@@ -156,7 +154,8 @@ const STORES_CATALOG: StoreSpec[] = [
       {
         name: 'Traditional Inabel Woven Blanket (Queen Size)',
         brand: 'Cordillera Heritage',
-        description: 'Handloomed thick cotton blanket featuring traditional geometric diamond patterns.',
+        description:
+          'Handloomed thick cotton blanket featuring traditional geometric diamond patterns.',
         price: 1450,
         quantityOnHand: 25,
       },
@@ -214,7 +213,8 @@ const STORES_CATALOG: StoreSpec[] = [
   {
     slug: 'pine-view-bakehouse',
     storeName: 'Pine View Bakehouse',
-    description: 'Freshly baked artisanal breads, pastries, ube treats, and Mountain Province tablea chocolate.',
+    description:
+      'Freshly baked artisanal breads, pastries, ube treats, and Mountain Province tablea chocolate.',
     categoryName: 'Food & Beverage',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'seller@example.com',
@@ -292,7 +292,8 @@ const STORES_CATALOG: StoreSpec[] = [
   {
     slug: 'electrico-industrial-supply',
     storeName: 'Electrico Industrial Supply',
-    description: 'Industrial-grade electrical components, wiring, circuit breakers, solar equipment, and smart LED fixtures.',
+    description:
+      'Industrial-grade electrical components, wiring, circuit breakers, solar equipment, and smart LED fixtures.',
     categoryName: 'Home & Living',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'seller.electrical@mapanytime.test',
@@ -382,7 +383,8 @@ const STORES_CATALOG: StoreSpec[] = [
   {
     slug: 'powertools-pro-shop',
     storeName: 'PowerTools Pro Shop',
-    description: 'Professional power tools, rotary hammers, angle grinders, circular saws, and workshop safety gear.',
+    description:
+      'Professional power tools, rotary hammers, angle grinders, circular saws, and workshop safety gear.',
     categoryName: 'Home & Living',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'seller.electrical@mapanytime.test',
@@ -428,7 +430,8 @@ const STORES_CATALOG: StoreSpec[] = [
       {
         name: 'Mechanics Tool Set 120-Piece Chrome Vanadium',
         brand: 'Stanley',
-        description: 'Complete socket wrench, ratchets, hex keys, and bit driver kit in blow-mold case.',
+        description:
+          'Complete socket wrench, ratchets, hex keys, and bit driver kit in blow-mold case.',
         price: 4950,
         quantityOnHand: 22,
       },
@@ -460,7 +463,8 @@ const STORES_CATALOG: StoreSpec[] = [
   {
     slug: 'northern-builders-depot',
     storeName: 'Northern Builders Depot',
-    description: 'Comprehensive construction materials, cement, structural steel rebars, waterproofing, paints, and lumber.',
+    description:
+      'Comprehensive construction materials, cement, structural steel rebars, waterproofing, paints, and lumber.',
     categoryName: 'Home & Living',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'seller.hardware@mapanytime.test',
@@ -485,7 +489,8 @@ const STORES_CATALOG: StoreSpec[] = [
       {
         name: 'Deformed Steel Rebar Grade 40 12mm x 6m',
         brand: 'SteelAsia',
-        description: 'Standard hot-rolled structural reinforcement steel bar for columns and beams.',
+        description:
+          'Standard hot-rolled structural reinforcement steel bar for columns and beams.',
         price: 365,
         quantityOnHand: 150,
       },
@@ -550,7 +555,8 @@ const STORES_CATALOG: StoreSpec[] = [
   {
     slug: 'city-glass-aluminum',
     storeName: 'City Glass & Aluminum Supply',
-    description: 'Architectural glass, tempered glass doors, aluminum window frames, silicone sealants, and fittings.',
+    description:
+      'Architectural glass, tempered glass doors, aluminum window frames, silicone sealants, and fittings.',
     categoryName: 'Home & Living',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'seller.hardware@mapanytime.test',
@@ -628,7 +634,8 @@ const STORES_CATALOG: StoreSpec[] = [
   {
     slug: 'session-brews-cafe',
     storeName: 'Session Brews & Cafe',
-    description: 'Specialty pour-over beans, barista tools, cold brew packs, and cafe lifestyle accessories.',
+    description:
+      'Specialty pour-over beans, barista tools, cold brew packs, and cafe lifestyle accessories.',
     categoryName: 'Food & Beverage',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'dual@example.com',
@@ -718,7 +725,8 @@ const STORES_CATALOG: StoreSpec[] = [
   {
     slug: 'urban-pulse-apparel',
     storeName: 'Urban Pulse Apparel',
-    description: 'Highland streetwear, oversized graphic hoodies, corduroy headwear, and weatherproof outerwear.',
+    description:
+      'Highland streetwear, oversized graphic hoodies, corduroy headwear, and weatherproof outerwear.',
     categoryName: 'Shopping & Retail',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'dual@example.com',
@@ -796,7 +804,8 @@ const STORES_CATALOG: StoreSpec[] = [
   {
     slug: 'apex-tech-solutions',
     storeName: 'Apex Tech & Gadget Hub',
-    description: 'Flagship mechanical keyboards, ergonomic workstation gear, 4K monitors, and smart lifestyle tech.',
+    description:
+      'Flagship mechanical keyboards, ergonomic workstation gear, 4K monitors, and smart lifestyle tech.',
     categoryName: 'Electronics',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'admin@example.com',
@@ -870,14 +879,16 @@ const STORES_CATALOG: StoreSpec[] = [
       {
         name: 'GaN Fast Charger 100W 4-Port USB-C Desktop Charging Station',
         brand: 'Voltix GaN',
-        description: 'Charges laptops, tablets, and phones simultaneously with dynamic power sharing.',
+        description:
+          'Charges laptops, tablets, and phones simultaneously with dynamic power sharing.',
         price: 2150,
         quantityOnHand: 30,
       },
       {
         name: 'Extended Anti-Fray Desk Pad Mat (900x400mm World Map)',
         brand: 'ApexTech Pro',
-        description: 'Smooth micro-weave surface with non-slip natural rubber base and stitched edges.',
+        description:
+          'Smooth micro-weave surface with non-slip natural rubber base and stitched edges.',
         price: 480,
         quantityOnHand: 60,
       },
@@ -888,7 +899,8 @@ const STORES_CATALOG: StoreSpec[] = [
   {
     slug: 'benguet-artisan-crafts',
     storeName: 'Benguet Artisan Crafts',
-    description: 'Eco-friendly sustainable crafts, handmade natural soaps, beeswax candles, and pottery.',
+    description:
+      'Eco-friendly sustainable crafts, handmade natural soaps, beeswax candles, and pottery.',
     categoryName: 'Shopping & Retail',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'support@mapanytime.test',
@@ -906,7 +918,8 @@ const STORES_CATALOG: StoreSpec[] = [
       {
         name: 'Pure Pine Forest Scented Natural Soy Wax Candle (200g)',
         brand: 'Tam-Awan Aromatics',
-        description: 'Infused with organic Benguet pine needle oil and cedarwood in amber glass jar.',
+        description:
+          'Infused with organic Benguet pine needle oil and cedarwood in amber glass jar.',
         price: 420,
         quantityOnHand: 45,
       },
@@ -955,7 +968,8 @@ const STORES_CATALOG: StoreSpec[] = [
       {
         name: 'Highland Essential Oil Roll-On Blend (Calm & Sleep 10ml)',
         brand: 'Tam-Awan Aromatics',
-        description: 'Lavender, pine, and chamomile pure essential oils diluted in sweet almond oil.',
+        description:
+          'Lavender, pine, and chamomile pure essential oils diluted in sweet almond oil.',
         price: 260,
         quantityOnHand: 50,
       },
@@ -980,7 +994,9 @@ export async function seedStoresAndProducts(prisma: PrismaClient) {
     });
 
     if (!user) {
-      console.log(`⚠️ User not found for email: ${storeSpec.ownerEmail}. Skipping store: ${storeSpec.storeName}`);
+      console.log(
+        `⚠️ User not found for email: ${storeSpec.ownerEmail}. Skipping store: ${storeSpec.storeName}`,
+      );
       continue;
     }
 
@@ -1149,7 +1165,9 @@ export async function seedStoresAndProducts(prisma: PrismaClient) {
       productCount++;
     }
 
-    console.log(`✅ Seeded store "${store.storeName}" (${storeSpec.slug}) with ${productCount} products.`);
+    console.log(
+      `✅ Seeded store "${store.storeName}" (${storeSpec.slug}) with ${productCount} products.`,
+    );
   }
 
   console.log('✅ All multi-user stores & product catalogs seeded successfully!');
