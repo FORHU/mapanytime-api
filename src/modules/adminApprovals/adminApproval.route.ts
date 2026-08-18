@@ -1,10 +1,19 @@
 import express from 'express';
 import AdminApprovalController from './adminApproval.controller';
+import AdminDashboardController from './adminDashboard.controller';
 import { authenticate } from '../../middleware/auth.middleware';
 import { requirePermission } from '../../middleware/permission.middleware';
 import { PERMISSIONS } from '../../constants/permissions.constant';
 
 const router = express.Router();
+
+// The dashboard metrics endpoint
+router.get(
+  '/dashboard',
+  authenticate,
+  requirePermission(PERMISSIONS.STORES_APPROVE),
+  AdminDashboardController.getDashboardMetrics,
+);
 
 // Approving or rejecting a store or property listing is exactly what
 // `stores.approve` describes. Administrator-only today; requirePermission lets
