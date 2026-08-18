@@ -76,6 +76,63 @@ export default class StoreController {
     }
   }
 
+  /**
+   * PATCH /v1/stores/:id — partial update of a seller's own store profile.
+   *
+   * Two field names differ between the wire contract and the schema, so they
+   * are translated in the service rather than leaking Prisma's names to the
+   * client: `categoryId` → `Stores.primaryCategoryId`, and `postalCode` →
+   * `StoreLocations.zipCode`.
+   *
+   * Every field is optional — this is a PATCH, and the web sends only what the
+   * form holds. `min(1)` on the whole object rejects an empty body rather than
+   * issuing a no-op UPDATE.
+   */
+  static async updateStore(req: Request, res: Response, next: NextFunction) {
+    const { id } = req.params;
+    if (!id) return responseError(res, 400, 'Store id is required.');
+
+    const schema = Joi.object({
+      storeName: Joi.string().trim().min(1).optional(),
+      description: Joi.string().allow('', null).optional(),
+      // Blank is how the form clears an optional contact field, so '' is
+      // allowed here and stored as null.
+      phone: Joi.alternatives(Joi.string().allow(''), Joi.number()).optional(),
+      email: Joi.alternatives(Joi.string().email(), Joi.string().valid('')).optional(),
+      categoryId: Joi.string().optional(),
+      isActive: Joi.boolean().optional(),
+
+      currentAddress: Joi.string().allow('').optional(),
+      city: Joi.string().allow('').optional(),
+      province: Joi.string().allow('').optional(),
+      postalCode: Joi.alternatives(Joi.string().allow(''), Joi.number()).optional(),
+      country: Joi.string().allow('').optional(),
+    })
+      .min(1)
+      .messages({ 'object.min': 'No fields to update.' });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const user = req.user as Users & { seller?: { id: string } };
+      const sellerId = user.seller?.id;
+
+      if (!sellerId) {
+        return responseError(res, 403, 'User is not registered as a seller.');
+      }
+
+      const updated = await StoreService.updateStore(id, sellerId, value);
+      return responseSuccess(res, 200, updated, 'Store updated successfully.');
+    } catch (error) {
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
+      next(error);
+    }
+  }
+
   static async getNearby(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
       north: Joi.number().required(),

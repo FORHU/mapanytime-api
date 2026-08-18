@@ -83,7 +83,7 @@ export default class ProductService {
 
   static async getMyProducts(
     userId: string,
-    storeId: string,
+    storeId: string | undefined,
     opts: {
       page: number;
       limit: number;
@@ -99,16 +99,18 @@ export default class ProductService {
       throw { status: 403, message: 'Only sellers can view store products.' };
     }
 
-    const store = await ProductRepository.getStoreById(storeId);
-    if (!store) {
-      throw { status: 404, message: 'Store not found.' };
+    if (storeId) {
+      const store = await ProductRepository.getStoreById(storeId);
+      if (!store) {
+        throw { status: 404, message: 'Store not found.' };
+      }
+
+      if (store.sellerId !== seller.id) {
+        throw { status: 403, message: 'You do not own this store.' };
+      }
     }
 
-    if (store.sellerId !== seller.id) {
-      throw { status: 403, message: 'You do not own this store.' };
-    }
-
-    const { items, total } = await ProductRepository.getMyProducts(storeId, {
+    const { items, total } = await ProductRepository.getMyProducts(storeId, seller.id, {
       skip: opts.skip,
       take: opts.limit,
       search: opts.search,
