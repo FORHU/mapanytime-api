@@ -1,28 +1,112 @@
 import { Request, Response, NextFunction } from 'express';
 import PaymentService from './payment.service';
-import { PAYMENTSTATUS } from '@prisma/client';
 
-export const getQrPayload = async (req: Request, res: Response, next: NextFunction) => {
+export const getActiveMethods = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const userId = req.user?.id;
-    const { orderId } = req.params;
-
-    if (!userId) {
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
-    }
-
-    const payload = await PaymentService.generateQrPayload(userId, orderId);
-
+    const providers = await PaymentService.getActivePaymentMethods();
     return res.status(200).json({
       success: true,
-      message: 'QR Payload generated successfully',
-      data: payload,
+      message: 'Active payment methods retrieved successfully.',
+      data: { providers },
     });
   } catch (error) {
     next(error);
   }
 };
 
+export const initiatePayment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { orderId } = req.params;
+    const { paymentMethodId, customer } = req.body;
+
+    if (!paymentMethodId) {
+      return res.status(400).json({ success: false, message: 'paymentMethodId is required.' });
+    }
+
+    const result = await PaymentService.initiateOrderPayment(
+      userId,
+      orderId,
+      paymentMethodId,
+      customer,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Payment session created successfully.',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getPaymentStatus = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { orderId } = req.params;
+    const status = await PaymentService.getPaymentStatusByOrderId(userId, orderId);
+
+    return res.status(200).json({
+      success: true,
+      data: status,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const handleProviderWebhook = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const provider = req.params.provider || 'paymongo';
+    const signature =
+      (req.headers['paymongo-signature'] as string) || (req.headers['x-signature'] as string) || '';
+
+    // app.ts captures the unparsed bytes via express.json({ verify }). Falling
+    // back to a re-serialised body would change key order and whitespace, and
+    // the provider HMAC is over the bytes as sent — so a missing rawBody is a
+    // verification failure, not something to paper over.
+    // See docs/payments-rework-review.md §7.
+    const rawBody = (req as Request & { rawBody?: Buffer | string }).rawBody;
+    if (!rawBody) {
+      return res.status(400).json({
+        success: false,
+        message: 'Raw request body unavailable; cannot verify webhook signature.',
+      });
+    }
+
+    const result = await PaymentService.processProviderWebhook(
+      provider,
+      rawBody,
+      signature,
+      req.body,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Webhook processed successfully.',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Development-only shortcut for driving a payment to COMPLETED without a
+ * gateway. MockProvider.verifyWebhook returns true unconditionally, so this
+ * route is an unauthenticated "mark any order paid" endpoint if it is ever
+ * reachable in production — hence both the guard here and the mount-time guard
+ * in payment.route.ts. See docs/payments-rework-review.md §2.
+ */
 export const mockWebhook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (process.env.NODE_ENV === 'production' && !req.headers['x-mock-secret']) {
@@ -31,53 +115,27 @@ export const mockWebhook = async (req: Request, res: Response, next: NextFunctio
         .json({ success: false, message: 'Mock payment webhook is disabled in production' });
     }
 
-    const { orderId, status, referenceNumber } = req.body;
-
-    if (!orderId || !status) {
-      return res.status(400).json({ success: false, message: 'orderId and status are required' });
-    }
-
-    const updatedPayment = await PaymentService.processMockWebhook(
-      orderId,
-      status as PAYMENTSTATUS,
-      referenceNumber,
-    );
+    const signature = 'mock_signature';
+    const rawBody = JSON.stringify(req.body);
+    const result = await PaymentService.processProviderWebhook('MOCK', rawBody, signature, {
+      data: {
+        id: req.body.referenceNumber || `mock_evt_${Date.now()}`,
+        type: req.body.status === 'COMPLETED' ? 'payment.paid' : 'payment.failed',
+        attributes: {
+          data: {
+            attributes: {
+              reference_number: req.body.orderId,
+            },
+          },
+        },
+      },
+    });
 
     return res.status(200).json({
       success: true,
-      message: `Mock webhook processed: ${status}`,
-      data: updatedPayment,
+      message: `Mock webhook processed`,
+      data: result,
     });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const paymongoWebhook = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const signature = req.headers['paymongo-signature'] as string;
-    if (!signature) {
-      return res.status(400).json({ success: false, message: 'Missing PayMongo signature' });
-    }
-
-    const { PayMongoProvider } = await import('./providers/paymongo.provider');
-    const provider = new PayMongoProvider();
-
-    if (!provider.verifyWebhook(req.body, signature)) {
-      return res.status(400).json({ success: false, message: 'Invalid webhook signature' });
-    }
-
-    const event = req.body.data;
-    if (event.type === 'link.payment.paid') {
-      const attributes = event.attributes.data.attributes;
-      const orderId = attributes.reference_number || attributes.remarks?.replace('Order ID: ', '');
-      
-      if (orderId) {
-        await PaymentService.processMockWebhook(orderId, 'COMPLETED', event.id);
-      }
-    }
-
-    return res.status(200).send('Webhook processed');
   } catch (error) {
     next(error);
   }

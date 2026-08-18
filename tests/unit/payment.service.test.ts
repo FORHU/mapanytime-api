@@ -5,7 +5,13 @@ import { emitNotificationToUser } from '../../src/infrastructure/socket';
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
     $transaction: jest.fn(),
-    orders: { findUnique: jest.fn() },
+    orders: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+    payments: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
+    paymentProviders: { findMany: jest.fn(), findUnique: jest.fn() },
+    paymentMethods: { findMany: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn() },
+    paymentWebhookEvents: { findUnique: jest.fn(), upsert: jest.fn() },
+    inventory: { updateMany: jest.fn() },
+    inventoryReservations: { updateMany: jest.fn() },
   },
 }));
 
@@ -13,191 +19,320 @@ jest.mock('../../src/infrastructure/socket', () => ({
   emitNotificationToUser: jest.fn(),
 }));
 
-jest.mock('../../src/modules/payments/payment.repository', () => ({
-  __esModule: true,
-  default: { getPaymentByOrderId: jest.fn() },
-}));
-
-jest.mock('../../src/modules/products/product.repository', () => ({
-  __esModule: true,
-  default: { getSellerByUserId: jest.fn(), getStoreById: jest.fn() },
-}));
-
 const mockTransaction = prisma.$transaction as unknown as jest.Mock;
 const mockOrdersFindUnique = prisma.orders.findUnique as unknown as jest.Mock;
+const mockPaymentProvidersFindUnique = prisma.paymentProviders.findUnique as unknown as jest.Mock;
+const mockPaymentWebhookEventsFindUnique = prisma.paymentWebhookEvents
+  .findUnique as unknown as jest.Mock;
 const mockEmit = emitNotificationToUser as jest.Mock;
 
 const ORDER_ID = 'order-1';
 
-/** The `tx` handle the service receives inside prisma.$transaction. */
 const makeTx = () => ({
-  payments: { findFirst: jest.fn(), update: jest.fn() },
+  payments: { findFirst: jest.fn(), update: jest.fn(), create: jest.fn() },
   orders: { updateMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
   inventory: { updateMany: jest.fn() },
+  inventoryReservations: { updateMany: jest.fn() },
+  paymentWebhookEvents: { upsert: jest.fn() },
 });
 
 let tx: ReturnType<typeof makeTx>;
 
-const amount = (value: number) => ({ toLocaleString: () => String(value) }) as unknown as number;
-
 beforeEach(() => {
   jest.clearAllMocks();
   tx = makeTx();
-  // Run the service's callback against the fake tx handle.
   mockTransaction.mockImplementation(async (cb: (t: typeof tx) => unknown) => cb(tx));
   mockOrdersFindUnique.mockResolvedValue(null);
 });
 
-describe('PaymentService.processMockWebhook', () => {
-  it('rejects an unknown order', async () => {
-    tx.payments.findFirst.mockResolvedValue(null);
+describe('PaymentService — Dynamic Payment Architecture', () => {
+  describe('getActivePaymentMethods', () => {
+    it('returns active providers and their active methods', async () => {
+      (prisma.paymentProviders.findMany as jest.Mock).mockResolvedValue([
+        {
+          id: 'prov-1',
+          code: 'PAYMONGO',
+          name: 'PayMongo',
+          description: 'Gateway',
+          methods: [
+            { id: 'meth-1', code: 'GCASH', name: 'GCash', type: 'E_WALLET', description: null },
+          ],
+        },
+      ]);
 
-    await expect(
-      PaymentService.processMockWebhook(ORDER_ID, 'COMPLETED', 'ref'),
-    ).rejects.toMatchObject({ status: 404 });
-  });
-
-  describe('when the payment is already COMPLETED', () => {
-    const completed = { id: 'pay-1', status: 'COMPLETED', amount: amount(500) };
-
-    beforeEach(() => tx.payments.findFirst.mockResolvedValue(completed));
-
-    it('does not write again', async () => {
-      const result = await PaymentService.processMockWebhook(ORDER_ID, 'COMPLETED', 'ref-2');
-
-      // Gateways retry webhooks. A second COMPLETED must not re-run the side
-      // effects — re-notifying the buyer or re-advancing the order.
-      expect(result).toBe(completed);
-      expect(tx.payments.update).not.toHaveBeenCalled();
-      expect(tx.orders.updateMany).not.toHaveBeenCalled();
-    });
-
-    it('does not re-notify anyone', async () => {
-      await PaymentService.processMockWebhook(ORDER_ID, 'COMPLETED', 'ref-2');
-      expect(mockEmit).not.toHaveBeenCalled();
-    });
-
-    it('cannot be moved back to FAILED', async () => {
-      const result = await PaymentService.processMockWebhook(ORDER_ID, 'FAILED');
-
-      expect(result).toBe(completed);
-      expect(tx.inventory.updateMany).not.toHaveBeenCalled();
+      const result = await PaymentService.getActivePaymentMethods();
+      expect(result).toHaveLength(1);
+      expect(result[0].code).toBe('PAYMONGO');
+      expect(result[0].methods).toHaveLength(1);
+      expect(result[0].methods[0].code).toBe('GCASH');
     });
   });
 
-  describe('COMPLETED', () => {
+  describe('processProviderWebhook', () => {
+    const provider = { id: 'prov-1', code: 'MOCK', name: 'Mock Gateway', isActive: true };
+
     beforeEach(() => {
-      tx.payments.findFirst.mockResolvedValue({ id: 'pay-1', status: 'PENDING' });
-      tx.payments.update.mockResolvedValue({
-        id: 'pay-1',
-        status: 'COMPLETED',
-        amount: amount(500),
-      });
+      mockPaymentProvidersFindUnique.mockResolvedValue(provider);
+      mockPaymentWebhookEventsFindUnique.mockResolvedValue(null);
     });
 
-    it('requires a reference number', async () => {
-      await expect(PaymentService.processMockWebhook(ORDER_ID, 'COMPLETED')).rejects.toMatchObject({
-        status: 400,
-      });
-      expect(tx.payments.update).not.toHaveBeenCalled();
+    it('refuses the MOCK provider in production, whatever route reached it', async () => {
+      // MockProvider.verifyWebhook accepts any signature, so /webhook/mock was
+      // still an unauthenticated "mark any order paid" endpoint even after the
+      // /mock-webhook route was gated. See docs/payments-rework-review.md §2.
+      const previous = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+
+      try {
+        await expect(
+          PaymentService.processProviderWebhook('MOCK', '{}', 'sig', {
+            data: { id: 'evt-prod', type: 'payment.paid' },
+          }),
+        ).rejects.toMatchObject({ status: 403 });
+        expect(mockTransaction).not.toHaveBeenCalled();
+      } finally {
+        process.env.NODE_ENV = previous;
+      }
     });
 
-    it('stores the reference and a paidAt stamp', async () => {
-      await PaymentService.processMockWebhook(ORDER_ID, 'COMPLETED', 'ref-1');
+    it('rejects an unknown provider', async () => {
+      mockPaymentProvidersFindUnique.mockResolvedValue(null);
 
+      await expect(
+        PaymentService.processProviderWebhook('UNKNOWN', '{}', 'sig', {}),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+
+    it('idempotently skips already processed webhook events', async () => {
+      mockPaymentWebhookEventsFindUnique.mockResolvedValue({
+        id: 'evt-rec-1',
+        processed: true,
+      });
+
+      const result = await PaymentService.processProviderWebhook('MOCK', '{}', 'sig', {
+        data: { id: 'evt-dup-1', type: 'payment.paid' },
+      });
+
+      expect(result.status).toBe('already_processed');
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
+
+    it('successfully processes payment confirmation and consumes inventory reservations', async () => {
+      const pendingPayment = { id: 'pay-1', orderId: ORDER_ID, status: 'PENDING', amount: 500 };
+      tx.payments.findFirst.mockResolvedValue(pendingPayment);
+      tx.payments.update.mockResolvedValue({ ...pendingPayment, status: 'COMPLETED' });
+
+      mockOrdersFindUnique.mockResolvedValue({
+        id: ORDER_ID,
+        buyer: { userId: 'buyer-user' },
+        store: { storeName: 'Flagship Store', seller: { userId: 'seller-user' } },
+      });
+
+      const payload = {
+        data: {
+          id: 'evt-123',
+          type: 'payment.paid',
+          attributes: {
+            data: {
+              id: 'pay_ref_123',
+              attributes: {
+                reference_number: ORDER_ID,
+              },
+            },
+          },
+        },
+      };
+
+      const result = await PaymentService.processProviderWebhook(
+        'MOCK',
+        JSON.stringify(payload),
+        'sig',
+        payload,
+      );
+
+      expect(result.status).toBe('processed');
+      expect(tx.paymentWebhookEvents.upsert).toHaveBeenCalled();
       expect(tx.payments.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ status: 'COMPLETED', referenceNumber: 'ref-1' }),
+          data: expect.objectContaining({ status: 'COMPLETED' }),
         }),
       );
-      expect(tx.payments.update.mock.calls[0][0].data.paidAt).toBeInstanceOf(Date);
-    });
-
-    it('advances the order only while it is still PENDING', async () => {
-      await PaymentService.processMockWebhook(ORDER_ID, 'COMPLETED', 'ref-1');
-
-      // The status:'PENDING' filter is what stops a late webhook from dragging
-      // an already-shipped order back to PROCESSING.
       expect(tx.orders.updateMany).toHaveBeenCalledWith({
         where: { id: ORDER_ID, status: 'PENDING' },
         data: { status: 'PROCESSING' },
       });
+      expect(tx.inventoryReservations.updateMany).toHaveBeenCalledWith({
+        where: { orderId: ORDER_ID, status: 'RESERVED' },
+        data: { status: 'CONSUMED' },
+      });
+      expect(mockEmit).toHaveBeenCalledTimes(2);
     });
 
-    it('notifies both the buyer and the seller', async () => {
-      mockOrdersFindUnique.mockResolvedValue({
+    it('handles payment failure by releasing inventory reservations', async () => {
+      const pendingPayment = { id: 'pay-1', orderId: ORDER_ID, status: 'PENDING', amount: 500 };
+      tx.payments.findFirst.mockResolvedValue(pendingPayment);
+      tx.payments.update.mockResolvedValue({ ...pendingPayment, status: 'FAILED' });
+      tx.orders.findUnique.mockResolvedValue({
         id: ORDER_ID,
-        buyer: { userId: 'buyer-user' },
-        store: { storeName: 'Shoe Shop', seller: { userId: 'seller-user' } },
+        status: 'PENDING',
+        orderitems: [{ productId: 'prod-1', quantity: 2 }],
       });
 
-      await PaymentService.processMockWebhook(ORDER_ID, 'COMPLETED', 'ref-1');
+      const payload = {
+        data: {
+          id: 'evt-fail-1',
+          type: 'payment.failed',
+          attributes: {
+            data: {
+              attributes: {
+                reference_number: ORDER_ID,
+                failure_reason: 'Insufficient funds',
+              },
+            },
+          },
+        },
+      };
 
-      expect(mockEmit).toHaveBeenCalledTimes(2);
-      expect(mockEmit.mock.calls[0][0]).toBe('buyer-user');
-      expect(mockEmit.mock.calls[1][0]).toBe('seller-user');
+      const result = await PaymentService.processProviderWebhook(
+        'MOCK',
+        JSON.stringify(payload),
+        'sig',
+        payload,
+      );
+
+      expect(result.status).toBe('processed');
+      expect(tx.payments.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'FAILED' }),
+        }),
+      );
+      expect(tx.inventoryReservations.updateMany).toHaveBeenCalledWith({
+        where: { orderId: ORDER_ID, status: 'RESERVED' },
+        data: { status: 'RELEASED' },
+      });
+      expect(tx.inventory.updateMany).toHaveBeenCalledWith({
+        where: { productId: 'prod-1' },
+        data: { quantityReserved: { decrement: 2 } },
+      });
+    });
+  });
+  describe('COMPLETED is terminal', () => {
+    // Regression for docs/payments-rework-review.md §5. The pre-rework code had
+    // one guard covering every status; the rework moved it inside the success
+    // branch, so a late payment.failed could walk a settled payment backwards.
+    const completed = {
+      id: 'pay-1',
+      orderId: ORDER_ID,
+      status: 'COMPLETED',
+      amount: 500,
+    };
+
+    const failedPayload = {
+      data: {
+        id: 'evt-late-fail',
+        type: 'payment.failed',
+        attributes: { data: { attributes: { reference_number: ORDER_ID } } },
+      },
+    };
+
+    beforeEach(() => {
+      mockPaymentProvidersFindUnique.mockResolvedValue({
+        id: 'prov-1',
+        code: 'MOCK',
+        name: 'Mock Gateway',
+        isActive: true,
+      });
+      mockPaymentWebhookEventsFindUnique.mockResolvedValue(null);
+      tx.payments.findFirst.mockResolvedValue(completed);
     });
 
-    it('still returns the payment when notification delivery throws', async () => {
-      mockOrdersFindUnique.mockRejectedValue(new Error('socket gone'));
+    it('does not move a COMPLETED payment to FAILED', async () => {
+      await PaymentService.processProviderWebhook(
+        'MOCK',
+        JSON.stringify(failedPayload),
+        'sig',
+        failedPayload,
+      );
 
-      // Notifications are best-effort; a failure there must not turn a
-      // successful payment into an error the gateway will retry.
-      await expect(
-        PaymentService.processMockWebhook(ORDER_ID, 'COMPLETED', 'ref-1'),
-      ).resolves.toMatchObject({ status: 'COMPLETED' });
+      expect(tx.payments.update).not.toHaveBeenCalled();
+    });
+
+    it('does not release inventory for a payment that already settled', async () => {
+      await PaymentService.processProviderWebhook(
+        'MOCK',
+        JSON.stringify(failedPayload),
+        'sig',
+        failedPayload,
+      );
+
+      expect(tx.inventoryReservations.updateMany).not.toHaveBeenCalled();
+      expect(tx.inventory.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does not re-notify on a repeat success', async () => {
+      const paidPayload = {
+        data: {
+          id: 'evt-dup-paid',
+          type: 'payment.paid',
+          attributes: { data: { attributes: { reference_number: ORDER_ID } } },
+        },
+      };
+
+      await PaymentService.processProviderWebhook(
+        'MOCK',
+        JSON.stringify(paidPayload),
+        'sig',
+        paidPayload,
+      );
+
+      expect(tx.payments.update).not.toHaveBeenCalled();
+      expect(mockEmit).not.toHaveBeenCalled();
     });
   });
 
-  describe('FAILED', () => {
-    beforeEach(() => {
-      tx.payments.findFirst.mockResolvedValue({ id: 'pay-1', status: 'PENDING' });
-      tx.payments.update.mockResolvedValue({ id: 'pay-1', status: 'FAILED', amount: amount(500) });
+  describe('resolvePaymentMethod', () => {
+    // Regression for docs/payments-rework-review.md §1 — the arbitrary
+    // "any active method" fallback resolved a buyer's cash choice to whichever
+    // row Postgres returned first.
+    const client = { paymentMethods: prisma.paymentMethods } as never;
+
+    it('aliases the legacy CASH_ON_DELIVERY onto the seeded COD code', async () => {
+      const cod = {
+        id: 'meth-cod',
+        code: 'COD',
+        isActive: true,
+        provider: { code: 'CASH', isActive: true },
+      };
+      (prisma.paymentMethods.findFirst as jest.Mock).mockResolvedValue(cod);
+
+      const result = await PaymentService.resolvePaymentMethod(client, {
+        paymentMethod: 'CASH_ON_DELIVERY',
+      });
+
+      expect(result).toBe(cod);
+      expect(prisma.paymentMethods.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ code: 'COD' }) }),
+      );
     });
 
-    it('releases the reserved stock for every order item', async () => {
-      tx.orders.findUnique.mockResolvedValue({
-        status: 'PENDING',
-        orderitems: [
-          { productId: 'p1', quantity: 2 },
-          { productId: 'p2', quantity: 3 },
-        ],
-      });
+    it('rejects an unknown method instead of substituting one', async () => {
+      (prisma.paymentMethods.findFirst as jest.Mock).mockResolvedValue(null);
 
-      await PaymentService.processMockWebhook(ORDER_ID, 'FAILED');
-
-      // Not releasing here leaks reservations: the stock stays invisible to
-      // every other buyer until someone notices by hand.
-      expect(tx.inventory.updateMany).toHaveBeenCalledTimes(2);
-      expect(tx.inventory.updateMany).toHaveBeenCalledWith({
-        where: { productId: 'p1' },
-        data: { quantityReserved: { decrement: 2 } },
-      });
-      expect(tx.orders.update).toHaveBeenCalledWith({
-        where: { id: ORDER_ID },
-        data: { status: 'FAILED' },
-      });
+      await expect(
+        PaymentService.resolvePaymentMethod(client, { paymentMethod: 'DOGECOIN' }),
+      ).rejects.toMatchObject({ status: 400 });
     });
 
-    it('leaves stock alone when the order has already moved on', async () => {
-      tx.orders.findUnique.mockResolvedValue({
-        status: 'SHIPPED',
-        orderitems: [{ productId: 'p1', quantity: 2 }],
+    it('rejects an inactive method addressed by id', async () => {
+      (prisma.paymentMethods.findUnique as jest.Mock).mockResolvedValue({
+        id: 'meth-off',
+        isActive: false,
+        provider: { isActive: true },
       });
 
-      await PaymentService.processMockWebhook(ORDER_ID, 'FAILED');
-
-      // A shipped order's reservation was already consumed; decrementing again
-      // would credit back stock that physically left the store.
-      expect(tx.inventory.updateMany).not.toHaveBeenCalled();
-      expect(tx.orders.update).not.toHaveBeenCalled();
-    });
-
-    it('sends no notifications', async () => {
-      tx.orders.findUnique.mockResolvedValue({ status: 'PENDING', orderitems: [] });
-
-      await PaymentService.processMockWebhook(ORDER_ID, 'FAILED');
-      expect(mockEmit).not.toHaveBeenCalled();
+      await expect(
+        PaymentService.resolvePaymentMethod(client, { paymentMethodId: 'meth-off' }),
+      ).rejects.toMatchObject({ status: 400 });
     });
   });
 });

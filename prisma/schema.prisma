@@ -832,6 +832,10 @@ model InventoryReservations {
   order     Orders?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
   @@index([inventoryId, status])
+  // Both back live queries: the TTL sweep filters on (status, expiresAt) and
+  // findActiveReservationsByBuyer on (buyerId, status, expiresAt). They were
+  // dropped in the payments rework by accident.
+  // See docs/payments-rework-review.md §11.
   @@index([expiresAt, status])
   @@index([buyerId, status])
   @@index([orderId])
@@ -842,34 +846,124 @@ model InventoryReservations {
 // 💳 FEATURE DOMAIN: PAYMENTS, SETTLEMENTS & FINANCIAL LEDGER
 // =========================================================================
 
-model Payments {
-  id               String        @id @default(cuid())
-  orderId          String
-  amount           Decimal       @db.Decimal(12, 2)
-  paymentMethod    PAYMENTMETHOD
-  status           PAYMENTSTATUS @default(PENDING)
-  referenceNumber  String?       @unique
-  gateway          String?
-  gatewayReference String?
-  checkoutUrl      String?
-  gatewayFee       Decimal       @default(0) @db.Decimal(12, 2)
-  currency         String        @default("PHP")
-  rawResponse      Json?
-  failureReason    String?
-  paidAt           DateTime?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  deletedAt        DateTime?
+// Migration: 20260818T000000_payments_provider_registry — hand-written, because it
+// backfills Payments onto the new provider/method rows before dropping paymentMethod,
+// gateway, gatewayReference and the PAYMENTMETHOD enum. NOT YET APPLIED to any
+// database. See docs/payments-rework-review.md §3.
+model PaymentProviders {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
 
-  order Orders @relation(fields: [orderId], references: [id])
+  isActive    Boolean  @default(false)
+  priority    Int      @default(0)
 
-  @@index([orderId])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  methods       PaymentMethods[]
+  payments      Payments[]
+  webhookEvents PaymentWebhookEvents[]
+
+  @@index([isActive])
+  @@index([priority])
 }
 
-enum PAYMENTMETHOD {
-  BANK
+enum PAYMENTMETHODTYPE {
+  CARD
   E_WALLET
-  CASH_ON_DELIVERY
+  BANK
+  QR
+  CASH
+  OTHER
+}
+
+model PaymentMethods {
+  id          String            @id @default(cuid())
+  providerId  String
+
+  code        String
+  name        String
+  description String?
+
+  type        PAYMENTMETHODTYPE
+
+  isActive    Boolean           @default(false)
+  priority    Int               @default(0)
+
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  provider    PaymentProviders  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  payments    Payments[]
+
+  @@unique([providerId, code])
+  @@index([providerId])
+  @@index([isActive])
+  @@index([type])
+}
+
+model PaymentWebhookEvents {
+  id          String    @id @default(cuid())
+  providerId  String
+  eventId     String
+  eventType   String
+
+  payload     Json
+
+  processed   Boolean   @default(false)
+  processedAt DateTime?
+
+  createdAt   DateTime  @default(now())
+
+  provider    PaymentProviders @relation(fields: [providerId], references: [id])
+
+  @@unique([providerId, eventId])
+  @@index([eventType])
+  @@index([processed])
+}
+
+model Payments {
+  id                String        @id @default(cuid())
+  orderId           String
+
+  amount            Decimal       @db.Decimal(12, 2)
+  currency          String        @default("PHP")
+
+  providerId        String?
+  paymentMethodId   String?
+
+  status            PAYMENTSTATUS @default(PENDING)
+
+  referenceNumber   String?       @unique
+
+  providerReference String?
+  checkoutSessionId String?
+  paymentIntentId   String?
+
+  checkoutUrl       String?
+
+  gatewayFee        Decimal       @default(0) @db.Decimal(12, 2)
+
+  rawResponse       Json?
+  failureReason     String?
+
+  paidAt            DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deletedAt         DateTime?
+
+  order             Orders            @relation(fields: [orderId], references: [id])
+  provider          PaymentProviders? @relation(fields: [providerId], references: [id])
+  paymentMethod     PaymentMethods?   @relation(fields: [paymentMethodId], references: [id])
+
+  @@index([orderId])
+  @@index([providerId])
+  @@index([paymentMethodId])
+  @@index([status])
+  @@index([providerReference])
+  @@index([checkoutSessionId])
 }
 
 enum PAYMENTSTATUS {
@@ -1251,6 +1345,7 @@ model AppRelease {
 // =========================================================================
 
 enum ANALYTICSEVENTTYPE {
+  PAGE_VIEW
   STORE_VIEW
   PRODUCT_VIEW
   PRODUCT_CLICK
