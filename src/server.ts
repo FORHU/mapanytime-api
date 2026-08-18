@@ -7,6 +7,7 @@ import logger from './utils/logger';
 import { PORT, NODE_ENV } from './config';
 import { prisma } from './utils/prisma';
 import { redis } from './infrastructure/redis';
+import { rabbitmq } from './infrastructure/rabbitmq';
 import { initSocket } from './infrastructure/socket';
 import RedisUtil from './utils/redis.util';
 
@@ -18,8 +19,9 @@ initSocket(server);
 // Wrap the server startup in an async function to await infrastructure initialization
 const startServer = async () => {
   try {
-    // Initialize the Redis Utility before opening the port to traffic
+    // Initialize infrastructure before opening the port to traffic
     await RedisUtil.initialize();
+    await rabbitmq.connect();
 
     server.listen(Number(PORT), '0.0.0.0', () => {
       logger.info(`Server running on port ${PORT} in ${NODE_ENV} mode`);
@@ -44,6 +46,7 @@ const gracefulShutdown = async (signal: string) => {
 
     try {
       // Disconnect from all infrastructure
+      await rabbitmq.close();
       await redis.close();
       await prisma.$disconnect();
 
