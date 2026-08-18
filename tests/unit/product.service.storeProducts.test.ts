@@ -42,7 +42,7 @@ describe('ProductService.getMyProducts — server-side sorting', () => {
       sortOrder: 'asc',
     });
 
-    expect(mockedRepo.getMyProducts).toHaveBeenCalledWith('store-1', {
+    expect(mockedRepo.getMyProducts).toHaveBeenCalledWith('store-1', 'seller-1', {
       skip: 0,
       take: 10,
       search: undefined,
@@ -55,7 +55,7 @@ describe('ProductService.getMyProducts — server-side sorting', () => {
   it('omits sort params when not requested (defaults to createdAt desc in repo)', async () => {
     await ProductService.getMyProducts('user-1', 'store-1', base);
 
-    expect(mockedRepo.getMyProducts).toHaveBeenCalledWith('store-1', {
+    expect(mockedRepo.getMyProducts).toHaveBeenCalledWith('store-1', 'seller-1', {
       skip: 0,
       take: 10,
       search: undefined,
