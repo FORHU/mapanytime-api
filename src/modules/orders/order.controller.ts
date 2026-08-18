@@ -6,7 +6,7 @@ import { responseSuccess, responseError } from '../../helpers/response.helper';
 import { parsePagination } from '../../helpers/pagination.helper';
 import { prisma } from '../../utils/prisma';
 import RedisUtil from '../../utils/redis.util';
-import { PAYMENTMETHOD, FULLFILLMENTTYPE } from '@prisma/client';
+import { FULLFILLMENTTYPE } from '@prisma/client';
 
 export default class OrderController {
   static async create(req: Request, res: Response, next: NextFunction) {
@@ -32,9 +32,8 @@ export default class OrderController {
       type: Joi.string()
         .valid(...Object.values(FULLFILLMENTTYPE))
         .required(),
-      paymentMethod: Joi.string()
-        .valid(...Object.values(PAYMENTMETHOD))
-        .required(),
+      paymentMethod: Joi.string().optional(),
+      paymentMethodId: Joi.string().optional(),
       productIds: Joi.array().items(Joi.string()).min(1).optional(),
       pickupAt: Joi.date()
         .iso()

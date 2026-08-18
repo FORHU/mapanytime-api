@@ -5,14 +5,16 @@ import { validateOrderTransition } from './order.state';
 import { prisma } from '../../utils/prisma';
 import { emitNotificationToUser } from '../../infrastructure/socket';
 import { buildPage } from '../../helpers/pagination.helper';
-import { PAYMENTMETHOD, FULLFILLMENTTYPE, ORDERSTATUS } from '@prisma/client';
+import { FULLFILLMENTTYPE, ORDERSTATUS, PAYMENTMETHODTYPE, Prisma } from '@prisma/client';
+import PaymentService from '../payments/payment.service';
 
 export default class OrderService {
   static async createOrder(payload: {
     buyerId: string;
     storeId: string;
     type: FULLFILLMENTTYPE;
-    paymentMethod: PAYMENTMETHOD;
+    paymentMethod?: string;
+    paymentMethodId?: string;
     pickupAt?: Date;
     items: { productId: string; quantity: number }[];
   }) {
@@ -146,7 +148,14 @@ export default class OrderService {
         discountAmount: totalDiscount,
       });
 
-      const orderData = {
+      // Throws a 400 when the method is unknown or inactive rather than
+      // substituting an arbitrary one. See docs/payments-rework-review.md §1.
+      const method = await PaymentService.resolvePaymentMethod(tx, {
+        paymentMethodId: payload.paymentMethodId,
+        paymentMethod: payload.paymentMethod,
+      });
+
+      const orderData: Prisma.OrdersUncheckedCreateInput = {
         buyerId: payload.buyerId,
         storeId: payload.storeId,
         storeName: store.storeName,
@@ -168,7 +177,8 @@ export default class OrderService {
         payment: {
           create: {
             amount: financials.totalAmount,
-            paymentMethod: payload.paymentMethod,
+            providerId: method.providerId,
+            paymentMethodId: method.id,
             status: 'PENDING' as const,
           },
         },
@@ -176,33 +186,33 @@ export default class OrderService {
 
       const createdOrder = await OrderRepository.insertOrder(orderData, tx);
 
-      let provider;
-      if (process.env.PAYMONGO_SECRET_KEY && (payload.paymentMethod === 'E_WALLET' || payload.paymentMethod === 'BANK')) {
-        const { PayMongoProvider } = await import('../payments/providers/paymongo.provider');
-        provider = new PayMongoProvider();
-      } else {
-        const { MockProvider } = await import('../payments/providers/mock.provider');
-        provider = new MockProvider();
-      }
+      const providerCode = method.provider.code;
+      const provider = PaymentService.getProviderAdapter(providerCode);
 
-      const intent = await provider.createPaymentIntent(
-        createdOrder,
-        Number(financials.totalAmount),
-        payload.paymentMethod,
-        `Payment for Order ${createdOrder.id}`
-      );
+      const amountInCentavos = Math.round(Number(financials.totalAmount) * 100);
+      const lineItems = orderItemsData.map((item) => ({
+        name: `Product #${item.productId}`,
+        quantity: item.quantity,
+        amount: Math.round(Number(item.unitPrice) * 100),
+        currency: 'PHP',
+      }));
+
+      const checkoutResult = await provider.createCheckoutSession({
+        orderId: createdOrder.id,
+        amountInCentavos,
+        currency: 'PHP',
+        description: `Payment for Order ${createdOrder.id}`,
+        lineItems,
+      });
 
       await tx.payments.updateMany({
         where: { orderId: createdOrder.id },
         data: {
-          gateway: provider.constructor.name === 'PayMongoProvider' ? 'PAYMONGO' : 'MOCK',
-          gatewayReference: intent.externalId,
-          checkoutUrl: intent.checkoutUrl,
-        }
+          checkoutSessionId: checkoutResult.checkoutSessionId,
+          checkoutUrl: checkoutResult.checkoutUrl,
+          paymentIntentId: checkoutResult.paymentIntentId,
+        },
       });
-
-      // Inject checkoutUrl so controller can return it
-      (createdOrder as any).checkoutUrl = intent.checkoutUrl;
 
       // Link newly created reservations to the order
       await tx.inventoryReservations.updateMany({
@@ -216,7 +226,10 @@ export default class OrderService {
         },
       });
 
-      return createdOrder;
+      return {
+        ...createdOrder,
+        checkoutUrl: checkoutResult.checkoutUrl,
+      };
     });
 
     try {
@@ -279,16 +292,30 @@ export default class OrderService {
       const payment = await tx.payments.findFirst({
         where: { orderId: orderId },
         orderBy: { createdAt: 'desc' },
+        include: { paymentMethod: { select: { type: true } } },
       });
 
       if (!payment) {
         throw new Error('No payment record found for this order.');
       }
 
-      if (payment.status !== 'COMPLETED' && payment.paymentMethod !== 'CASH_ON_DELIVERY') {
+      // Only cash is settled by the seller handing the goods over — that is the
+      // moment the money actually changes hands, and no gateway will ever send
+      // a webhook for it. For every other method the gateway is the authority,
+      // so completing the order must not fabricate a payment confirmation.
+      // See docs/payments-rework-review.md §6.
+      if (payment.status !== 'COMPLETED') {
+        if (payment.paymentMethod?.type !== PAYMENTMETHODTYPE.CASH) {
+          throw {
+            status: 400,
+            message:
+              'This order cannot be completed until its payment is confirmed by the payment provider.',
+          };
+        }
+
         await tx.payments.update({
           where: { id: payment.id },
-          data: { status: 'COMPLETED' },
+          data: { status: 'COMPLETED', paidAt: new Date() },
         });
       }
 
