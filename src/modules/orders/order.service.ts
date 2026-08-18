@@ -176,6 +176,34 @@ export default class OrderService {
 
       const createdOrder = await OrderRepository.insertOrder(orderData, tx);
 
+      let provider;
+      if (process.env.PAYMONGO_SECRET_KEY && (payload.paymentMethod === 'E_WALLET' || payload.paymentMethod === 'BANK')) {
+        const { PayMongoProvider } = await import('../payments/providers/paymongo.provider');
+        provider = new PayMongoProvider();
+      } else {
+        const { MockProvider } = await import('../payments/providers/mock.provider');
+        provider = new MockProvider();
+      }
+
+      const intent = await provider.createPaymentIntent(
+        createdOrder,
+        Number(financials.totalAmount),
+        payload.paymentMethod,
+        `Payment for Order ${createdOrder.id}`
+      );
+
+      await tx.payments.updateMany({
+        where: { orderId: createdOrder.id },
+        data: {
+          gateway: provider.constructor.name === 'PayMongoProvider' ? 'PAYMONGO' : 'MOCK',
+          gatewayReference: intent.externalId,
+          checkoutUrl: intent.checkoutUrl,
+        }
+      });
+
+      // Inject checkoutUrl so controller can return it
+      (createdOrder as any).checkoutUrl = intent.checkoutUrl;
+
       // Link newly created reservations to the order
       await tx.inventoryReservations.updateMany({
         where: {

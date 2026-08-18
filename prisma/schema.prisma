@@ -851,6 +851,7 @@ model Payments {
   referenceNumber  String?       @unique
   gateway          String?
   gatewayReference String?
+  checkoutUrl      String?
   gatewayFee       Decimal       @default(0) @db.Decimal(12, 2)
   currency         String        @default("PHP")
   rawResponse      Json?

@@ -52,3 +52,33 @@ export const mockWebhook = async (req: Request, res: Response, next: NextFunctio
     next(error);
   }
 };
+
+export const paymongoWebhook = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const signature = req.headers['paymongo-signature'] as string;
+    if (!signature) {
+      return res.status(400).json({ success: false, message: 'Missing PayMongo signature' });
+    }
+
+    const { PayMongoProvider } = await import('./providers/paymongo.provider');
+    const provider = new PayMongoProvider();
+
+    if (!provider.verifyWebhook(req.body, signature)) {
+      return res.status(400).json({ success: false, message: 'Invalid webhook signature' });
+    }
+
+    const event = req.body.data;
+    if (event.type === 'link.payment.paid') {
+      const attributes = event.attributes.data.attributes;
+      const orderId = attributes.reference_number || attributes.remarks?.replace('Order ID: ', '');
+      
+      if (orderId) {
+        await PaymentService.processMockWebhook(orderId, 'COMPLETED', event.id);
+      }
+    }
+
+    return res.status(200).send('Webhook processed');
+  } catch (error) {
+    next(error);
+  }
+};
