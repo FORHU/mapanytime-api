@@ -435,22 +435,30 @@ enum MERCHANTADKIND {
   EVENT
 }
 
+enum MERCHANTDISCOUNTTYPE {
+  BOGO
+  PERCENTAGE
+  FIXED_AMOUNT
+}
+
 model MerchantAds {
-  id           String         @id @default(cuid())
-  storeId      String
-  kind         MERCHANTADKIND
-  title        String
-  description  String
-  imageUrl     String?
-  badgeLabel   String?
-  ctaLabel     String?
-  salaryLabel  String?
-  buyQuantity  Int?
-  freeQuantity Int?
-  isActive     Boolean        @default(true)
-  expiresAt    DateTime?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id            String                 @id @default(cuid())
+  storeId       String
+  kind          MERCHANTADKIND
+  title         String
+  description   String
+  imageUrl      String?
+  badgeLabel    String?
+  ctaLabel      String?
+  salaryLabel   String?
+  buyQuantity   Int?
+  freeQuantity  Int?
+  discountType  MERCHANTDISCOUNTTYPE?
+  discountValue Decimal?               @db.Decimal(12, 2)
+  isActive      Boolean                @default(true)
+  expiresAt     DateTime?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
 
   store      Stores               @relation(fields: [storeId], references: [id])
   products   MerchantAdProducts[]

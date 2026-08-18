@@ -176,6 +176,17 @@ export default class ProductRepository {
             include: { file: { select: { path: true, bucket: true } } },
             take: 1,
           },
+          merchantAdLinks: {
+            where: {
+              ad: {
+                isActive: true,
+                discountType: { not: null },
+                OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+              },
+            },
+            include: { ad: true },
+            take: 1,
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip,
@@ -185,18 +196,22 @@ export default class ProductRepository {
     ]);
 
     const resolved = await Promise.all(
-      items.map(async (product) => ({
-        ...product,
-        productImages: await Promise.all(
-          product.productImages.map(async (pi) => ({
-            ...pi,
-            file: {
-              ...pi.file,
-              url: await resolveImageUrl(pi.file),
-            },
-          })),
-        ),
-      })),
+      items.map(async (product) => {
+        const { merchantAdLinks, ...rest } = product;
+        return {
+          ...rest,
+          activeAd: merchantAdLinks[0]?.ad ?? null,
+          productImages: await Promise.all(
+            product.productImages.map(async (pi) => ({
+              ...pi,
+              file: {
+                ...pi.file,
+                url: await resolveImageUrl(pi.file),
+              },
+            })),
+          ),
+        };
+      }),
     );
 
     return { items: resolved, total };
