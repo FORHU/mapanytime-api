@@ -11,8 +11,7 @@ import { PAYMENTMETHOD, FULLFILLMENTTYPE } from '@prisma/client';
 export default class OrderController {
   static async create(req: Request, res: Response, next: NextFunction) {
     const idempotencyKey = (req.headers['idempotency-key'] || req.headers['idempotency_key']) as
-      | string
-      | undefined;
+      string | undefined;
     if (idempotencyKey && RedisUtil.client?.isOpen) {
       try {
         const cachedOrder = await RedisUtil.client.get(`idempotency:order:${idempotencyKey}`);
