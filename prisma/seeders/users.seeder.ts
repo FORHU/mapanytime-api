@@ -100,21 +100,30 @@ export async function seedUsers(prisma: PrismaClient) {
       isEmailVerified: true,
       countryCode: 'PH',
     },
+    {
+      email: 'seller.multistore@mapanytime.test',
+      firstName: 'Marco',
+      lastName: 'Cordillera',
+      roles: ['SELLER', 'BUYER'],
+      passwordRaw: 'Seller123',
+      isEmailVerified: true,
+      countryCode: 'PH',
+    },
   ];
 
   for (const userData of usersToCreate) {
     const { passwordRaw, roles, ...rest } = userData;
 
-    const existingUser = await prisma.users.findUnique({
+    let user = await prisma.users.findUnique({
       where: { email: rest.email },
     });
 
-    if (!existingUser) {
+    if (!user) {
       const salt = crypto.randomBytes(16).toString('hex');
       const hash = crypto.pbkdf2Sync(passwordRaw, salt, 1000, 64, 'sha512').toString('hex');
       const hashedPassword = `${salt}:${hash}`;
 
-      await prisma.users.create({
+      user = await prisma.users.create({
         data: {
           ...rest,
           passwordHash: hashedPassword,
@@ -127,7 +136,37 @@ export async function seedUsers(prisma: PrismaClient) {
     } else {
       console.log(`ℹ️  User already exists: ${rest.email}`);
     }
+
+    // Ensure Buyer record exists for user
+    await prisma.buyers.upsert({
+      where: { userId: user.id },
+      update: {},
+      create: {
+        userId: user.id,
+        displayName: `${user.firstName} ${user.lastName}`.trim() || user.email,
+      },
+    });
+
+    // Ensure Seller record exists for seller/admin roles
+    const isSeller = roles.some((r) =>
+      ['SELLER', 'ADMIN', 'SUPER_ADMIN', 'SUPPORT_AGENT'].includes(r),
+    );
+    if (isSeller) {
+      await prisma.sellers.upsert({
+        where: { userId: user.id },
+        update: {
+          applicationStatus: 'APPROVED',
+          onboardingStep: 4,
+        },
+        create: {
+          userId: user.id,
+          applicationStatus: 'APPROVED',
+          onboardingStep: 4,
+          sellerPlan: 'PRO',
+        },
+      });
+    }
   }
 
-  console.log('✅ Base users seeded!');
+  console.log('✅ Base users, buyers, and sellers seeded!');
 }
