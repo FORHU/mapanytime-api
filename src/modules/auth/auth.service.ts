@@ -42,9 +42,10 @@ export default class AuthSvc {
 
     // Use Prisma transaction to ensure all identity records succeed or fail together
     await prisma.$transaction(async (tx) => {
-      const rolesToConnect = data.roleName === 'SELLER' 
-        ? [{ roleName: 'SELLER' }, { roleName: 'BUYER' }] 
-        : [{ roleName: data.roleName }];
+      const rolesToConnect =
+        data.roleName === 'SELLER'
+          ? [{ roleName: 'SELLER' }, { roleName: 'BUYER' }]
+          : [{ roleName: data.roleName }];
 
       const user = await tx.users.create({
         data: {
@@ -114,9 +115,8 @@ export default class AuthSvc {
       --- END ORIGINAL STRICT LOGIC --- */
 
       // --- START BYPASS LOGIC ---
-      const displayName =
-        [data.firstName, data.lastName].filter(Boolean).join(' ') || 'New User';
-        
+      const displayName = [data.firstName, data.lastName].filter(Boolean).join(' ') || 'New User';
+
       if (data.roleName === 'SELLER') {
         const seller = await tx.sellers.create({
           data: { userId: user.id },
@@ -299,10 +299,10 @@ export default class AuthSvc {
     // The access token carries sessionId so authenticate() can tell a live session from a
     // superseded one without a second lookup.
     const accessToken = jwt.sign(
-      { 
-        userId: user.id, 
+      {
+        userId: user.id,
         sessionId: newSession.id,
-        roles: (user as any).roles?.map((r: any) => r.roleName) || [],
+        roles: (user as Users & { roles?: { roleName: string }[] }).roles?.map((r) => r.roleName) || [],
       },
       ACCESS_TOKEN_SECRET,
       { expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] },
@@ -339,7 +339,7 @@ export default class AuthSvc {
 
     const formattedUser = {
       ...safeUser,
-      roles: safeUser.roles?.map(r => r.roleName) || [],
+      roles: safeUser.roles?.map((r) => r.roleName) || [],
     };
 
     return {
