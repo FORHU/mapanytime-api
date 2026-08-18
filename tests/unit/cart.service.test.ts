@@ -223,9 +223,7 @@ describe('CartService.addToCart', () => {
 
   describe('BOGO bonus', () => {
     it('bumps the stored quantity with free units when a matching BOGO ad applies', async () => {
-      mockMerchantAdProducts.mockResolvedValue([
-        { ad: { buyQuantity: 2, freeQuantity: 1 } },
-      ]);
+      mockMerchantAdProducts.mockResolvedValue([{ ad: { buyQuantity: 2, freeQuantity: 1 } }]);
 
       // Buyer asks to pay for 2; storing 2 alone would silently drop the
       // free unit they earned — the whole point of this feature.
@@ -247,9 +245,7 @@ describe('CartService.addToCart', () => {
       // bundle (2 paid + 1 free = 3) doesn't — the add must still succeed
       // for the 2 they asked to pay for, just without the extra free unit.
       mockInventory.mockResolvedValue({ quantityOnHand: 2, quantityReserved: 0 });
-      mockMerchantAdProducts.mockResolvedValue([
-        { ad: { buyQuantity: 2, freeQuantity: 1 } },
-      ]);
+      mockMerchantAdProducts.mockResolvedValue([{ ad: { buyQuantity: 2, freeQuantity: 1 } }]);
 
       const cart = await CartService.addToCart(USER, STORE, PRODUCT, 2);
 

@@ -116,7 +116,8 @@ export default class MerchantAdsService {
     if (orderItemCount > 0) {
       throw {
         status: 409,
-        message: 'This ad has been applied to past orders and cannot be deleted. Disable it instead.',
+        message:
+          'This ad has been applied to past orders and cannot be deleted. Disable it instead.',
       };
     }
 

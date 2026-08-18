@@ -125,8 +125,8 @@ describe('CartService.previewPricing', () => {
   it('rejects when none of the requested productIds are in the cart', async () => {
     mockCart([{ productId: 'product-1', quantity: 1, unitPrice: PRICE }]);
 
-    await expect(
-      CartService.previewPricing('user-1', ['product-missing']),
-    ).rejects.toMatchObject({ status: 400 });
+    await expect(CartService.previewPricing('user-1', ['product-missing'])).rejects.toMatchObject({
+      status: 400,
+    });
   });
 });

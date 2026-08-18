@@ -17,7 +17,11 @@ describe('MerchantAdsService.updateAd', () => {
     (MerchantAdsRepository.getAdById as jest.Mock).mockResolvedValue(null);
 
     await expect(
-      MerchantAdsService.updateAd('user-1', 'ad-1', { kind: 'PROMO', title: 't', description: 'd' } as never),
+      MerchantAdsService.updateAd('user-1', 'ad-1', {
+        kind: 'PROMO',
+        title: 't',
+        description: 'd',
+      } as never),
     ).rejects.toMatchObject({ status: 404 });
   });
 
@@ -27,7 +31,11 @@ describe('MerchantAdsService.updateAd', () => {
     (MerchantAdsRepository.getStoreById as jest.Mock).mockResolvedValue(otherStore);
 
     await expect(
-      MerchantAdsService.updateAd('user-1', 'ad-1', { kind: 'PROMO', title: 't', description: 'd' } as never),
+      MerchantAdsService.updateAd('user-1', 'ad-1', {
+        kind: 'PROMO',
+        title: 't',
+        description: 'd',
+      } as never),
     ).rejects.toMatchObject({ status: 403 });
   });
 
@@ -59,7 +67,9 @@ describe('MerchantAdsService.deleteAd', () => {
   it('rejects when the ad does not exist', async () => {
     (MerchantAdsRepository.getAdById as jest.Mock).mockResolvedValue(null);
 
-    await expect(MerchantAdsService.deleteAd('user-1', 'ad-1')).rejects.toMatchObject({ status: 404 });
+    await expect(MerchantAdsService.deleteAd('user-1', 'ad-1')).rejects.toMatchObject({
+      status: 404,
+    });
   });
 
   it('rejects when the requesting user does not own the store', async () => {
@@ -67,7 +77,9 @@ describe('MerchantAdsService.deleteAd', () => {
     (MerchantAdsRepository.getSellerByUserId as jest.Mock).mockResolvedValue(seller);
     (MerchantAdsRepository.getStoreById as jest.Mock).mockResolvedValue(otherStore);
 
-    await expect(MerchantAdsService.deleteAd('user-1', 'ad-1')).rejects.toMatchObject({ status: 403 });
+    await expect(MerchantAdsService.deleteAd('user-1', 'ad-1')).rejects.toMatchObject({
+      status: 403,
+    });
   });
 
   it('blocks deletion once the ad has been applied to a past order', async () => {
@@ -76,7 +88,9 @@ describe('MerchantAdsService.deleteAd', () => {
     (MerchantAdsRepository.getStoreById as jest.Mock).mockResolvedValue(store);
     (MerchantAdsRepository.countOrderItemsByAdId as jest.Mock).mockResolvedValue(3);
 
-    await expect(MerchantAdsService.deleteAd('user-1', 'ad-1')).rejects.toMatchObject({ status: 409 });
+    await expect(MerchantAdsService.deleteAd('user-1', 'ad-1')).rejects.toMatchObject({
+      status: 409,
+    });
     expect(MerchantAdsRepository.deleteAd).not.toHaveBeenCalled();
   });
 
