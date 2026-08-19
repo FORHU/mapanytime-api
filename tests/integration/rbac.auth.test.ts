@@ -68,7 +68,8 @@ describe('RBAC endpoint authorization', () => {
   describe('with a malformed token', () => {
     endpoints.forEach(({ method, path }) => {
       it(`${method.toUpperCase()} ${path} is rejected`, async () => {
-        const res = await request(app)[method](path)
+        const res = await request(app)
+          [method](path)
           .set('Authorization', 'Bearer not-a-real-token')
           .send({});
         expect(res.status).toBe(401);
