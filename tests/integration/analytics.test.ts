@@ -3,6 +3,15 @@ import app from '../../src/app';
 import { rabbitmq } from '../../src/infrastructure/rabbitmq';
 
 /**
+ * Infrastructure is mocked below, so the cost here is compiling the app's import
+ * graph, which lands on whichever test runs first. Under a loaded full suite that
+ * has overrun the default while the suite passes in ~7s alone; `maxWorkers` in
+ * jest.config.ts is the actual remedy. Assertions are unchanged — only the budget
+ * is raised, so a real hang still fails.
+ */
+jest.setTimeout(20000);
+
+/**
  * Ingestion has to work for signed-out visitors — most marketplace browsing
  * happens before anyone logs in, and rejecting it would bias every ranking
  * built on this data toward authenticated users.

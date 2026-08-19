@@ -17,7 +17,7 @@ router.get('/methods', getActiveMethods);
 
 // Order payment initiation and polling. `authenticate` only says who the caller
 // is — the service additionally asserts they are a party to the order.
-// See docs/payments-rework-review.md §4.
+// See FLAGS.md.
 router.post('/orders/:orderId/payment', authenticate, initiatePayment);
 router.get('/orders/:orderId/payment', authenticate, getPaymentStatus);
 
@@ -27,7 +27,7 @@ router.post('/webhook/:provider', handleProviderWebhook);
 
 // Mock payment routes never exist in production: MockProvider accepts any
 // signature, so a reachable mock webhook is an open "mark any order paid"
-// endpoint. See docs/payments-rework-review.md §2.
+// endpoint. See FLAGS.md.
 if (!isProduction) {
   router.post('/mock-webhook', mockWebhook);
 }

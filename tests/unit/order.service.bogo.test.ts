@@ -184,6 +184,22 @@ describe('OrderService.createOrder — percentage / fixed-amount discount', () =
         create: jest.fn().mockResolvedValue({}),
         updateMany: jest.fn().mockResolvedValue({}),
       },
+      payments: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      // Same reason as buildTx above: createOrder resolves the payment method
+      // inside the transaction, so the handle has to carry the stub.
+      paymentMethods: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'meth-cod',
+          code: 'COD',
+          type: 'CASH',
+          isActive: true,
+          providerId: 'prov-cash',
+          provider: { id: 'prov-cash', code: 'CASH', isActive: true },
+        }),
+      },
     };
   }
 

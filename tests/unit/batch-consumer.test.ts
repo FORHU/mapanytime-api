@@ -10,6 +10,14 @@ jest.mock('../../src/infrastructure/rabbitmq/exchanges', () => ({
   DLX_EXCHANGE: 'app.dlx',
 }));
 
+/**
+ * These drive fake timers through `jest.runAllTimersAsync()`, which is cheap on
+ * its own but has repeatedly blown the 5s default when the full suite runs the
+ * machine's cores flat. Every assertion below is unchanged — only the budget is
+ * raised, so a genuine hang still fails rather than hiding.
+ */
+jest.setTimeout(20000);
+
 type Deliver = (msg: unknown) => void;
 
 /** A fake channel that captures the consume callback so tests can push messages. */

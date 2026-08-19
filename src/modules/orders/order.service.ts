@@ -6,8 +6,17 @@ import { validateOrderTransition } from './order.state';
 import { prisma } from '../../utils/prisma';
 import { emitNotificationToUser } from '../../infrastructure/socket';
 import { buildPage } from '../../helpers/pagination.helper';
-import { FULLFILLMENTTYPE, ORDERSTATUS, PAYMENTMETHODTYPE, Prisma } from '@prisma/client';
+import {
+  CHARGEBENEFICIARY,
+  CHARGEPAYER,
+  FULLFILLMENTTYPE,
+  ORDERCHARGETYPE,
+  ORDERSTATUS,
+  PAYMENTMETHODTYPE,
+  Prisma,
+} from '@prisma/client';
 import PaymentService from '../payments/payment.service';
+import PricingEngineService from '../pricing/pricing-engine.service';
 
 export default class OrderService {
   static async createOrder(payload: {
@@ -118,19 +127,95 @@ export default class OrderService {
         });
       }
 
-      // Calculate taxation, commission, and financial breakdown
-      const financials = await TaxationService.calculateOrderFinancials({
-        subtotalAmount,
-        categoryId: primaryCategoryId,
-        discountAmount: totalDiscount,
-      });
-
+      // 1. Resolve payment provider and method
       // Throws a 400 when the method is unknown or inactive rather than
-      // substituting an arbitrary one. See docs/payments-rework-review.md §1.
+      // substituting an arbitrary one. See FLAGS.md.
       const method = await PaymentService.resolvePaymentMethod(tx, {
         paymentMethodId: payload.paymentMethodId,
         paymentMethod: payload.paymentMethod,
       });
+
+      // 2. Dynamically calculate order pricing, provider processing fee, payer policy, and marketplace commission
+      const taxAmount = TaxationService.calculateTax(subtotalAmount);
+
+      const pricingResult = await PricingEngineService.calculateOrderPricing({
+        subtotalAmount,
+        discountAmount: totalDiscount,
+        taxAmount,
+        storeId: payload.storeId,
+        sellerId: store.sellerId,
+        categoryId: primaryCategoryId,
+        providerId: method.providerId,
+        paymentMethodId: method.id,
+        paymentMethodCode: method.code,
+      });
+
+      const charges: Prisma.OrderChargesUncheckedCreateWithoutOrderInput[] = [
+        {
+          type: ORDERCHARGETYPE.PRODUCT,
+          source: 'Cart Items Subtotal',
+          amount: pricingResult.subtotalAmount,
+          payer: CHARGEPAYER.BUYER,
+          beneficiary: CHARGEBENEFICIARY.SELLER,
+        },
+        ...(pricingResult.shippingAmount > 0
+          ? [
+              {
+                type: ORDERCHARGETYPE.SHIPPING,
+                source: 'Delivery Fee',
+                amount: pricingResult.shippingAmount,
+                payer: CHARGEPAYER.BUYER,
+                beneficiary: CHARGEBENEFICIARY.COURIER,
+              },
+            ]
+          : []),
+        ...(pricingResult.taxAmount > 0
+          ? [
+              {
+                type: ORDERCHARGETYPE.TAX,
+                source: 'VAT (12%)',
+                amount: pricingResult.taxAmount,
+                payer: CHARGEPAYER.BUYER,
+                beneficiary: CHARGEBENEFICIARY.GOVERNMENT,
+              },
+            ]
+          : []),
+        ...(pricingResult.discountAmount > 0
+          ? [
+              {
+                type: ORDERCHARGETYPE.DISCOUNT,
+                source: 'Store / Item Promotion',
+                amount: pricingResult.discountAmount,
+                payer: CHARGEPAYER.SELLER,
+                beneficiary: CHARGEBENEFICIARY.BUYER,
+              },
+            ]
+          : []),
+        {
+          type: ORDERCHARGETYPE.BUYER_TRANSACTION_FEE,
+          source: 'Buyer Handling Fee',
+          rate: pricingResult.buyerTransactionFee.effectiveRatePercentage,
+          amount: pricingResult.buyerTransactionFee.totalBuyerFeeAmount,
+          payer: CHARGEPAYER.BUYER,
+          beneficiary: CHARGEBENEFICIARY.PLATFORM,
+        },
+        {
+          type: ORDERCHARGETYPE.SELLER_MARKETPLACE_FEE,
+          source: `MapAnytime Marketplace Commission (${(pricingResult.sellerMarketplaceCommission.rate * 100).toFixed(2)}%)`,
+          rate: pricingResult.sellerMarketplaceCommission.rate,
+          amount: pricingResult.sellerMarketplaceCommission.amount,
+          payer: CHARGEPAYER.SELLER,
+          beneficiary: CHARGEBENEFICIARY.PLATFORM,
+        },
+        {
+          type: ORDERCHARGETYPE.PAYMENT_PROCESSING_FEE,
+          source: `${method.provider.name || 'Payment'} Gateway Cost`,
+          rate: pricingResult.paymentProcessingCost.ratePercentage,
+          amount: pricingResult.paymentProcessingCost.calculatedCost,
+          payer: CHARGEPAYER.PLATFORM,
+          beneficiary: CHARGEBENEFICIARY.PAYMENT_PROVIDER,
+        },
+      ];
 
       const orderData: Prisma.OrdersUncheckedCreateInput = {
         buyerId: payload.buyerId,
@@ -139,12 +224,28 @@ export default class OrderService {
         storeAddressSnapshot,
         sellerPhoneSnapshot,
         storeEmailSnapshot,
-        totalAmount: financials.totalAmount,
-        subtotalAmount: financials.subtotalAmount,
-        discountAmount: financials.discountAmount,
-        taxAmount: financials.taxAmount,
-        marketplaceFeeAmount: financials.marketplaceFeeAmount,
-        sellerNetAmount: financials.sellerNetAmount,
+        totalAmount: pricingResult.buyerTotalAmount,
+        subtotalAmount: pricingResult.subtotalAmount,
+        discountAmount: pricingResult.discountAmount,
+        taxAmount: pricingResult.taxAmount,
+        marketplaceFeeAmount: pricingResult.sellerMarketplaceCommission.amount,
+        sellerNetAmount: pricingResult.sellerNetAmount,
+
+        // ── Immutable Financial Accounting & Fee Snapshots ─────────────
+        // 1. Marketplace Commission (MapAnytime Revenue)
+        sellerMarketplaceFeeRate: pricingResult.sellerMarketplaceCommission.rate,
+        sellerMarketplaceFeeAmount: pricingResult.sellerMarketplaceCommission.amount,
+
+        // 2. Payment Provider Processing Cost (Actual cost charged by PayMongo/Bank/etc.)
+        paymentProviderFeeRate: pricingResult.paymentProcessingCost.ratePercentage,
+        paymentProviderFixedFee: pricingResult.paymentProcessingCost.fixedAmount,
+        paymentProviderFeeAmount: pricingResult.paymentProcessingCost.calculatedCost,
+
+        // 3. Buyer Transaction Fee (Amount charged to buyer based on PAYMENTFEEPAYER policy)
+        buyerTransactionFeeRate: pricingResult.buyerTransactionFee.effectiveRatePercentage,
+        buyerTransactionFeeAmount: pricingResult.buyerTransactionFee.totalBuyerFeeAmount,
+        paymentFeePayer: pricingResult.buyerTransactionFee.payerPolicy,
+
         type: payload.type,
         pickupAt: payload.pickupAt ?? null,
         status: 'PENDING' as const,
@@ -153,12 +254,13 @@ export default class OrderService {
         },
         payment: {
           create: {
-            amount: financials.totalAmount,
+            amount: pricingResult.buyerTotalAmount,
             providerId: method.providerId,
             paymentMethodId: method.id,
             status: 'PENDING' as const,
           },
         },
+        charges: { create: charges },
       };
 
       const createdOrder = await OrderRepository.insertOrder(orderData, tx);
@@ -166,7 +268,7 @@ export default class OrderService {
       const providerCode = method.provider.code;
       const provider = PaymentService.getProviderAdapter(providerCode);
 
-      const amountInCentavos = Math.round(Number(financials.totalAmount) * 100);
+      const amountInCentavos = Math.round(Number(createdOrder.totalAmount) * 100);
       const lineItems = orderItemsData.map((item) => ({
         name: `Product #${item.productId}`,
         quantity: item.quantity,
@@ -280,7 +382,7 @@ export default class OrderService {
       // moment the money actually changes hands, and no gateway will ever send
       // a webhook for it. For every other method the gateway is the authority,
       // so completing the order must not fabricate a payment confirmation.
-      // See docs/payments-rework-review.md §6.
+      // See FLAGS.md.
       if (payment.status !== 'COMPLETED') {
         if (payment.paymentMethod?.type !== PAYMENTMETHODTYPE.CASH) {
           throw {

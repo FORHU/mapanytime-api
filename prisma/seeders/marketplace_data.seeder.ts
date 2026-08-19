@@ -380,23 +380,24 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
     },
   });
 
-  await prisma.productReviews.upsert({
+  const existingReview = await prisma.productReviews.findFirst({
     where: {
-      productId_buyerId_orderId: {
-        productId: orderProduct1.id,
-        buyerId: buyer.id,
-        orderId: completedOrder.id,
-      },
-    },
-    update: {},
-    create: {
       productId: orderProduct1.id,
       buyerId: buyer.id,
       orderId: completedOrder.id,
-      rating: 5,
-      comment: 'Extremely fresh and well packaged.',
     },
   });
+  if (!existingReview) {
+    await prisma.productReviews.create({
+      data: {
+        productId: orderProduct1.id,
+        buyerId: buyer.id,
+        orderId: completedOrder.id,
+        rating: 5,
+        comment: 'Extremely fresh and well packaged.',
+      },
+    });
+  }
 
   // ── 12. Carts & Wishlists ────────────────────────────────────────────────
   console.log('  → Seeding Carts & Wishlists...');

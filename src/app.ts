@@ -48,7 +48,7 @@ app.use(
  * unmodified bytes still exist. Provider webhook signatures (PayMongo's
  * `paymongo-signature`) are an HMAC over exactly those bytes — re-serialising
  * the parsed object with JSON.stringify changes key order and whitespace, so
- * the digest never matches. See docs/payments-rework-review.md §7.
+ * the digest never matches. See FLAGS.md.
  */
 app.use(
   express.json({

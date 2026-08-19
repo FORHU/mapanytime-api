@@ -74,7 +74,7 @@ export const handleProviderWebhook = async (req: Request, res: Response, next: N
     // back to a re-serialised body would change key order and whitespace, and
     // the provider HMAC is over the bytes as sent — so a missing rawBody is a
     // verification failure, not something to paper over.
-    // See docs/payments-rework-review.md §7.
+    // See FLAGS.md.
     const rawBody = (req as Request & { rawBody?: Buffer | string }).rawBody;
     if (!rawBody) {
       return res.status(400).json({
@@ -105,7 +105,7 @@ export const handleProviderWebhook = async (req: Request, res: Response, next: N
  * gateway. MockProvider.verifyWebhook returns true unconditionally, so this
  * route is an unauthenticated "mark any order paid" endpoint if it is ever
  * reachable in production — hence both the guard here and the mount-time guard
- * in payment.route.ts. See docs/payments-rework-review.md §2.
+ * in payment.route.ts. See FLAGS.md.
  */
 export const mockWebhook = async (req: Request, res: Response, next: NextFunction) => {
   try {

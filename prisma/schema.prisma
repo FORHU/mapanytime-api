@@ -37,7 +37,7 @@ model Users {
   verifiedDocuments  DocumentVerifications[]
   sentAdminInvites   AdminInvites[]
   notifications      Notifications[]
-  reviewedProperties ProductProperties[]            @relation("PropertyReviewers")
+  reviewedProperties ProductProperties[]     @relation("PropertyReviewers")
   reviewedStores     Stores[]                @relation("StoreReviewers")
   userReferral       Users?                  @relation("UserReferrals", fields: [userReferralId], references: [id])
   userReferrals      Users[]                 @relation("UserReferrals")
@@ -120,11 +120,11 @@ model Files {
   updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
 
-  avatarUser    Users?          @relation("UserAvatar")
-  documents     Documents[]
-  productImages ProductImages[]
-  logoStores    Stores[]        @relation("StoreLogo")
-  bannerStores  Stores[]        @relation("StoreBanner")
+  avatarUser      Users?            @relation("UserAvatar")
+  documents       Documents[]
+  productImages   ProductImages[]
+  logoStores      Stores[]          @relation("StoreLogo")
+  bannerStores    Stores[]          @relation("StoreBanner")
   propertiesFiles PropertiesFiles[] @relation("PropertyFiles")
 }
 
@@ -150,15 +150,15 @@ model Sellers {
 }
 
 model PropertiesFiles {
-  id                  String    @id @default(cuid())
-  propertyId          String
-  fileId              String
-  titleType           TITLETYPE?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  id         String     @id @default(cuid())
+  propertyId String
+  fileId     String
+  titleType  TITLETYPE?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
 
   property ProductProperties @relation(fields: [propertyId], references: [id])
-  file Files @relation("PropertyFiles", fields: [fileId], references: [id])
+  file     Files             @relation("PropertyFiles", fields: [fileId], references: [id])
 
   @@index([propertyId])
 }
@@ -192,13 +192,13 @@ model ProductProperties {
   furnishing    FURNISHING?
 
   // Pricing & financial terms
-  sellingPrice       Decimal?         @db.Decimal(12, 2)
-  negotiability      NEGOTIABILITY?
+  sellingPrice        Decimal?           @db.Decimal(12, 2)
+  negotiability       NEGOTIABILITY?
   taxResponsibilities TAXRESPONSIBILITY?
-  hoaDues            Decimal?         @db.Decimal(12, 2)
+  hoaDues             Decimal?           @db.Decimal(12, 2)
 
-  store      Stores        @relation("StoreProperties", fields: [storeId], references: [id])
-  reviewedBy Users?        @relation("PropertyReviewers", fields: [reviewedById], references: [id])
+  store         Stores            @relation("StoreProperties", fields: [storeId], references: [id])
+  reviewedBy    Users?            @relation("PropertyReviewers", fields: [reviewedById], references: [id])
   propertyFiles PropertiesFiles[]
 
   @@index([storeId])
@@ -333,31 +333,31 @@ enum INVITESTATUS {
 // =========================================================================
 
 model Stores {
-  id              String              @id @default(cuid())
-  sellerId        String
-  storeName       String
-  description     String?
-  logoId          String?
-  bannerId        String?
-  slug            String?             @unique
-  phone           String?
-  email           String?
-  returnPolicy    String?
-  shippingPolicy  String?
-  socialLinks     Json?
-  ratingAverage   Float               @default(0)
-  ratingCount     Int                 @default(0)
-  followersCount  Int                 @default(0)
+  id                String              @id @default(cuid())
+  sellerId          String
+  storeName         String
+  description       String?
+  logoId            String?
+  bannerId          String?
+  slug              String?             @unique
+  phone             String?
+  email             String?
+  returnPolicy      String?
+  shippingPolicy    String?
+  socialLinks       Json?
+  ratingAverage     Float               @default(0)
+  ratingCount       Int                 @default(0)
+  followersCount    Int                 @default(0)
   primaryCategoryId String?
-  vacationMode    Boolean             @default(false)
-  isActive        Boolean             @default(false)
-  approvalStatus  STOREAPPROVALSTATUS @default(PENDING)
-  rejectionReason String?
-  reviewedAt      DateTime?
-  reviewedById    String?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  deletedAt       DateTime?
+  vacationMode      Boolean             @default(false)
+  isActive          Boolean             @default(false)
+  approvalStatus    STOREAPPROVALSTATUS @default(PENDING)
+  rejectionReason   String?
+  reviewedAt        DateTime?
+  reviewedById      String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  deletedAt         DateTime?
 
   logoFile              Files?                  @relation("StoreLogo", fields: [logoId], references: [id])
   bannerFile            Files?                  @relation("StoreBanner", fields: [bannerId], references: [id])
@@ -373,7 +373,7 @@ model Stores {
   orders                Orders[]
   inventory             Inventory[]
   inventoryMovements    InventoryMovements[]
-  productProperties    ProductProperties[]    @relation("StoreProperties")
+  productProperties     ProductProperties[]     @relation("StoreProperties")
   merchantAds           MerchantAds[]
 
   @@index([sellerId])
@@ -441,10 +441,31 @@ enum MERCHANTDISCOUNTTYPE {
   FIXED_AMOUNT
 }
 
+enum ADGOAL {
+  STORE_VISITS
+  IMPRESSIONS
+  PURCHASES
+}
+
+enum ADFORMAT {
+  MAP_FLOATING_CARD
+  PROMOTED_PIN
+  DISCOVERY_CAROUSEL
+  SPONSORED_SEARCH
+}
+
+enum ADSTATUS {
+  DRAFT
+  ACTIVE
+  PAUSED
+  EXPIRED
+  BUDGET_EXHAUSTED
+}
+
 model MerchantAds {
-  id            String                 @id @default(cuid())
+  id            String                @id @default(cuid())
   storeId       String
-  kind          MERCHANTADKIND
+  kind          MERCHANTADKIND        @default(PROMO)
   title         String
   description   String
   imageUrl      String?
@@ -454,17 +475,39 @@ model MerchantAds {
   buyQuantity   Int?
   freeQuantity  Int?
   discountType  MERCHANTDISCOUNTTYPE?
-  discountValue Decimal?               @db.Decimal(12, 2)
-  isActive      Boolean                @default(true)
-  expiresAt     DateTime?
-  createdAt     DateTime               @default(now())
-  updatedAt     DateTime               @updatedAt
+  discountValue Decimal?              @db.Decimal(12, 2)
+  isActive      Boolean               @default(true)
+
+  // Campaign & Location Targeting (from Promote This Store Wizard)
+  goal      ADGOAL   @default(STORE_VISITS)
+  format    ADFORMAT @default(MAP_FLOATING_CARD)
+  radiusKm  Int      @default(3)
+  targetLat Float?
+  targetLng Float?
+
+  // Budget & Billing
+  dailyBudget Decimal? @db.Decimal(12, 2)
+  totalBudget Decimal? @db.Decimal(12, 2)
+  spentAmount Decimal  @default(0) @db.Decimal(12, 2)
+
+  // Aggregated Performance Counters
+  impressionsCount  Int     @default(0)
+  clicksCount       Int     @default(0)
+  conversionsCount  Int     @default(0)
+  attributedRevenue Decimal @default(0) @db.Decimal(12, 2)
+
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   store      Stores               @relation(fields: [storeId], references: [id])
   products   MerchantAdProducts[]
   orderItems OrderItems[]
+  adEvents   AdEvents[]
 
   @@index([storeId, isActive])
+  @@index([radiusKm])
+  @@index([expiresAt])
 }
 
 // Links an EVENT (or any ad) to the specific products/variants whose
@@ -481,6 +524,32 @@ model MerchantAdProducts {
 
   @@unique([adId, productId, variantId])
   @@index([productId])
+  @@index([variantId])
+}
+
+enum ADEVENTTYPE {
+  IMPRESSION
+  CLICK
+  CONVERSION
+}
+
+model AdEvents {
+  id            String      @id @default(cuid())
+  adId          String
+  eventType     ADEVENTTYPE
+  buyerId       String?
+  sessionId     String?
+  orderId       String?
+  revenueAmount Decimal?    @db.Decimal(12, 2)
+  ipAddress     String?
+  userAgent     String?
+  occurredAt    DateTime    @default(now())
+
+  ad MerchantAds @relation(fields: [adId], references: [id], onDelete: Cascade)
+
+  @@index([adId, eventType, occurredAt])
+  @@index([buyerId])
+  @@index([orderId])
 }
 
 // =========================================================================
@@ -619,20 +688,21 @@ model SupplierProducts {
 }
 
 model Categories {
-  id               String           @id @default(cuid())
-  parentId         String?
-  name             String
-  description      String?
-  status           CategoryStatus   @default(APPROVED)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  deletedAt        DateTime?
-  parent           Categories?      @relation("CategoryToParent", fields: [parentId], references: [id])
-  subCategories    Categories[]     @relation("CategoryToParent")
-  products         Products[]
-  stores           Stores[]         @relation("CategoriesToStores")
-  primaryForStores Stores[]         @relation("StorePrimaryCategory")
-  commissionRules  CommissionRules?
+  id                String              @id @default(cuid())
+  parentId          String?
+  name              String
+  description       String?
+  status            CategoryStatus      @default(APPROVED)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  deletedAt         DateTime?
+  parent            Categories?         @relation("CategoryToParent", fields: [parentId], references: [id])
+  subCategories     Categories[]        @relation("CategoryToParent")
+  products          Products[]
+  stores            Stores[]            @relation("CategoriesToStores")
+  primaryForStores  Stores[]            @relation("StorePrimaryCategory")
+  commissionRules   CommissionRules?
+  pricingComponents PricingComponents[]
 
   @@unique([parentId, name])
   @@index([parentId])
@@ -686,7 +756,7 @@ enum CategoryStatus {
 // =========================================================================
 
 model Orders {
-  id                   String           @id @default(cuid())
+  id                   String  @id @default(cuid())
   buyerId              String
   storeId              String
   storeName            String?
@@ -694,23 +764,37 @@ model Orders {
   storeAddressSnapshot String?
   sellerPhoneSnapshot  String?
   storeEmailSnapshot   String?
-  totalAmount          Decimal          @db.Decimal(12, 2)
-  subtotalAmount       Decimal          @default(0) @db.Decimal(12, 2)
-  shippingAmount       Decimal          @default(0) @db.Decimal(12, 2)
-  discountAmount       Decimal          @default(0) @db.Decimal(12, 2)
-  taxAmount            Decimal          @default(0) @db.Decimal(12, 2)
-  marketplaceFeeAmount Decimal          @default(0) @db.Decimal(12, 2)
-  sellerNetAmount      Decimal          @default(0) @db.Decimal(12, 2)
-  paymentFeeAmount     Decimal          @default(0) @db.Decimal(12, 2)
-  currency             String           @default("PHP")
-  version              Int              @default(0)
-  type                 FULLFILLMENTTYPE @default(PICKUP)
-  status               ORDERSTATUS      @default(PENDING)
-  pickupAt             DateTime?
-  completedAt          DateTime?
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
-  deletedAt            DateTime?
+  totalAmount          Decimal @db.Decimal(12, 2)
+  subtotalAmount       Decimal @default(0) @db.Decimal(12, 2)
+  shippingAmount       Decimal @default(0) @db.Decimal(12, 2)
+  discountAmount       Decimal @default(0) @db.Decimal(12, 2)
+  taxAmount            Decimal @default(0) @db.Decimal(12, 2)
+  marketplaceFeeAmount Decimal @default(0) @db.Decimal(12, 2)
+  sellerNetAmount      Decimal @default(0) @db.Decimal(12, 2)
+
+  // 1. Marketplace Commission (MapAnytime Platform Revenue)
+  sellerMarketplaceFeeRate   Decimal @default(0.0200) @db.Decimal(8, 5) // e.g. 2.00%
+  sellerMarketplaceFeeAmount Decimal @default(0) @db.Decimal(12, 2)
+
+  // 2. Payment Provider Processing Cost (Actual cost charged by PayMongo / Bank / Card)
+  paymentProviderFeeRate   Decimal? @db.Decimal(8, 5)
+  paymentProviderFixedFee  Decimal? @db.Decimal(12, 2)
+  paymentProviderFeeAmount Decimal  @default(0) @db.Decimal(12, 2)
+
+  // 3. Buyer Transaction Fee (Amount charged to buyer based on PAYMENTFEEPAYER policy)
+  buyerTransactionFeeRate   Decimal?        @db.Decimal(8, 5)
+  buyerTransactionFeeAmount Decimal         @default(0) @db.Decimal(12, 2)
+  paymentFeePayer           PAYMENTFEEPAYER @default(BUYER)
+
+  currency    String           @default("PHP")
+  version     Int              @default(0)
+  type        FULLFILLMENTTYPE @default(PICKUP)
+  status      ORDERSTATUS      @default(PENDING)
+  pickupAt    DateTime?
+  completedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  deletedAt   DateTime?
 
   buyer          Buyers                  @relation(fields: [buyerId], references: [id])
   store          Stores                  @relation(fields: [storeId], references: [id])
@@ -720,6 +804,7 @@ model Orders {
   shipment       Shipments?
   returnRequests ReturnRequests[]
   reservations   InventoryReservations[]
+  charges        OrderCharges[]
 
   @@index([buyerId])
   @@index([storeId])
@@ -770,6 +855,68 @@ model OrderItems {
   @@index([productId])
   @@index([variantId])
   @@index([appliedAdId])
+}
+
+enum ORDERCHARGETYPE {
+  PRODUCT
+  DISCOUNT
+  BUYER_TRANSACTION_FEE
+  SELLER_MARKETPLACE_FEE
+  PAYMENT_PROCESSING_FEE
+  SHIPPING
+  TAX
+  PROMOTION
+  PLATFORM_SUBSIDY
+  SELLER_SUBSIDY
+  CAMPAIGN
+  REFUND
+  ADJUSTMENT
+}
+
+enum CHARGEPAYER {
+  BUYER
+  SELLER
+  PLATFORM
+}
+
+enum CHARGEBENEFICIARY {
+  BUYER
+  SELLER
+  PLATFORM
+  PAYMENT_PROVIDER
+  COURIER
+  GOVERNMENT
+}
+
+enum PROMOTION_FUNDING {
+  SELLER
+  PLATFORM
+  SHARED
+}
+
+/// Itemized financial audit ledger for every transaction
+model OrderCharges {
+  id      String @id @default(cuid())
+  orderId String
+
+  type        ORDERCHARGETYPE
+  source      String? // e.g. "PayMongo Gateway", "Standard 2.0% Commission", "Summer 10% Promo"
+  description String?
+
+  rate   Decimal? @db.Decimal(8, 5)
+  amount Decimal  @db.Decimal(12, 2)
+
+  payer       CHARGEPAYER
+  beneficiary CHARGEBENEFICIARY
+
+  createdAt DateTime @default(now())
+
+  order Orders @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([type])
+  @@index([payer])
+  @@index([beneficiary])
 }
 
 model ProductImages {
@@ -859,20 +1006,21 @@ model InventoryReservations {
 // gateway, gatewayReference and the PAYMENTMETHOD enum. NOT YET APPLIED to any
 // database. See docs/payments-rework-review.md §3.
 model PaymentProviders {
-  id          String   @id @default(cuid())
-  code        String   @unique
+  id          String  @id @default(cuid())
+  code        String  @unique
   name        String
   description String?
 
-  isActive    Boolean  @default(false)
-  priority    Int      @default(0)
+  isActive Boolean @default(false)
+  priority Int     @default(0)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  methods       PaymentMethods[]
-  payments      Payments[]
-  webhookEvents PaymentWebhookEvents[]
+  methods           PaymentMethods[]
+  payments          Payments[]
+  webhookEvents     PaymentWebhookEvents[]
+  pricingComponents PricingComponents[]
 
   @@index([isActive])
   @@index([priority])
@@ -888,23 +1036,24 @@ enum PAYMENTMETHODTYPE {
 }
 
 model PaymentMethods {
-  id          String            @id @default(cuid())
-  providerId  String
+  id         String @id @default(cuid())
+  providerId String
 
   code        String
   name        String
   description String?
 
-  type        PAYMENTMETHODTYPE
+  type PAYMENTMETHODTYPE
 
-  isActive    Boolean           @default(false)
-  priority    Int               @default(0)
+  isActive Boolean @default(false)
+  priority Int     @default(0)
 
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  provider    PaymentProviders  @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  payments    Payments[]
+  provider          PaymentProviders    @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  payments          Payments[]
+  pricingComponents PricingComponents[]
 
   @@unique([providerId, code])
   @@index([providerId])
@@ -912,20 +1061,27 @@ model PaymentMethods {
   @@index([type])
 }
 
-model PaymentWebhookEvents {
-  id          String    @id @default(cuid())
-  providerId  String
-  eventId     String
-  eventType   String
+enum PAYMENTFEEPAYER {
+  BUYER
+  SELLER
+  PLATFORM
+  SHARED
+}
 
-  payload     Json
+model PaymentWebhookEvents {
+  id         String @id @default(cuid())
+  providerId String
+  eventId    String
+  eventType  String
+
+  payload Json
 
   processed   Boolean   @default(false)
   processedAt DateTime?
 
-  createdAt   DateTime  @default(now())
+  createdAt DateTime @default(now())
 
-  provider    PaymentProviders @relation(fields: [providerId], references: [id])
+  provider PaymentProviders @relation(fields: [providerId], references: [id])
 
   @@unique([providerId, eventId])
   @@index([eventType])
@@ -933,38 +1089,38 @@ model PaymentWebhookEvents {
 }
 
 model Payments {
-  id                String        @id @default(cuid())
-  orderId           String
+  id      String @id @default(cuid())
+  orderId String
 
-  amount            Decimal       @db.Decimal(12, 2)
-  currency          String        @default("PHP")
+  amount   Decimal @db.Decimal(12, 2)
+  currency String  @default("PHP")
 
-  providerId        String?
-  paymentMethodId   String?
+  providerId      String?
+  paymentMethodId String?
 
-  status            PAYMENTSTATUS @default(PENDING)
+  status PAYMENTSTATUS @default(PENDING)
 
-  referenceNumber   String?       @unique
+  referenceNumber String? @unique
 
   providerReference String?
   checkoutSessionId String?
   paymentIntentId   String?
 
-  checkoutUrl       String?
+  checkoutUrl String?
 
-  gatewayFee        Decimal       @default(0) @db.Decimal(12, 2)
+  gatewayFee Decimal @default(0) @db.Decimal(12, 2)
 
-  rawResponse       Json?
-  failureReason     String?
+  rawResponse   Json?
+  failureReason String?
 
-  paidAt            DateTime?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-  deletedAt         DateTime?
+  paidAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
-  order             Orders            @relation(fields: [orderId], references: [id])
-  provider          PaymentProviders? @relation(fields: [providerId], references: [id])
-  paymentMethod     PaymentMethods?   @relation(fields: [paymentMethodId], references: [id])
+  order         Orders            @relation(fields: [orderId], references: [id])
+  provider      PaymentProviders? @relation(fields: [providerId], references: [id])
+  paymentMethod PaymentMethods?   @relation(fields: [paymentMethodId], references: [id])
 
   @@index([orderId])
   @@index([providerId])
@@ -986,6 +1142,9 @@ enum PAYMENTSTATUS {
   REFUND_PENDING
 }
 
+// Legacy category commission rules. Still the source of truth for
+// TaxationService; PricingComponents is intended to supersede it, but nothing
+// has migrated the data or the callers yet, so both exist for now.
 model CommissionRules {
   id             String   @id @default(cuid())
   categoryId     String?  @unique
@@ -996,6 +1155,93 @@ model CommissionRules {
   updatedAt      DateTime @updatedAt
 
   category Categories? @relation(fields: [categoryId], references: [id])
+}
+
+// =========================================================================
+// ⚖️ FEATURE DOMAIN: VERSIONED PRICING CONFIGURATIONS & COMPONENTS
+// =========================================================================
+
+enum PRICINGSTATUS {
+  DRAFT
+  ACTIVE
+  SCHEDULED
+  EXPIRED
+  ARCHIVED
+}
+
+enum PRICINGCOMPONENTTYPE {
+  BUYER_TRANSACTION_FEE
+  SELLER_MARKETPLACE_FEE
+  PAYMENT_PROCESSING_FEE
+  FIXED_TRANSACTION_FEE
+  WITHDRAWAL_FEE
+  ADVERTISING_FEE
+}
+
+enum PRICINGCALCULATIONTYPE {
+  PERCENTAGE
+  FIXED
+  PERCENTAGE_AND_FIXED
+}
+
+/// Versioned business-level pricing configuration container
+model PricingConfigurations {
+  id          String        @id @default(cuid())
+  name        String // e.g. "Standard Marketplace Pricing v1"
+  description String?
+  status      PRICINGSTATUS @default(DRAFT)
+  currency    String        @default("PHP")
+
+  effectiveFrom  DateTime  @default(now())
+  effectiveUntil DateTime?
+  priority       Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  components PricingComponents[]
+
+  @@index([status])
+  @@index([effectiveFrom, effectiveUntil])
+}
+
+/// Individual pricing and fee components underneath a configuration
+model PricingComponents {
+  id        String @id @default(cuid())
+  pricingId String
+
+  type            PRICINGCOMPONENTTYPE
+  calculationType PRICINGCALCULATIONTYPE @default(PERCENTAGE)
+
+  ratePercentage Decimal? @db.Decimal(7, 5) // e.g. 0.02000 for 2.00%, 0.00230 for 0.23%
+  fixedAmount    Decimal? @db.Decimal(12, 2)
+  minFee         Decimal? @db.Decimal(12, 2)
+  maxFee         Decimal? @db.Decimal(12, 2)
+
+  // Scopes & Target Overrides
+  providerId      String?
+  paymentMethodId String?
+  sellerPlan      String? // "FREE", "GROWTH", "PRO"
+  categoryId      String?
+  storeId         String?
+
+  priority Int     @default(0)
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pricing       PricingConfigurations @relation(fields: [pricingId], references: [id], onDelete: Cascade)
+  provider      PaymentProviders?     @relation(fields: [providerId], references: [id])
+  paymentMethod PaymentMethods?       @relation(fields: [paymentMethodId], references: [id])
+  category      Categories?           @relation(fields: [categoryId], references: [id])
+
+  @@index([pricingId])
+  @@index([type, isActive, priority])
+  @@index([providerId])
+  @@index([paymentMethodId])
+  @@index([categoryId])
+  @@index([storeId])
 }
 
 model Settlements {
@@ -1109,6 +1355,7 @@ model ProductReviews {
   buyer   Buyers   @relation(fields: [buyerId], references: [id])
 
   @@unique([productId, buyerId, orderId])
+  @@index([orderId])
   @@index([productId])
   @@index([buyerId])
 }
@@ -1142,6 +1389,7 @@ model CartItems {
   @@unique([cartId, productId, variantId])
   @@index([cartId])
   @@index([productId])
+  @@index([variantId])
 }
 
 model Wishlists {
@@ -1167,6 +1415,8 @@ model WishlistItems {
 
   @@unique([wishlistId, productId, variantId])
   @@index([wishlistId])
+  @@index([productId])
+  @@index([variantId])
 }
 
 enum INVENTORYMOVEMENTTYPE {
@@ -1318,12 +1568,12 @@ enum RELEASESTATUS {
 model AppRelease {
   id String @id @default(cuid())
 
-  version String @unique
+  version     String @unique
   // Unique because every ordering in the module depends on it: the isLatest fallback in
   // getLatestRelease, the rollback target, and the admin console's next-build calculation.
   // Duplicates would make "the latest release" nondeterministic. The @unique also provides the
   // index those orderBy clauses need.
-  buildNumber Int @unique
+  buildNumber Int    @unique
 
   // Build metadata carries no column defaults on purpose — RELEASE_DEFAULTS in
   // app-release.constants.ts is the single source of truth, and the service always supplies a
@@ -1346,7 +1596,6 @@ model AppRelease {
   @@index([status])
   @@index([isLatest])
 }
-
 
 // =========================================================================
 // 📊 FEATURE DOMAIN: MARKETPLACE ANALYTICS

@@ -35,7 +35,7 @@ export default class AdminDashboardController {
         prisma.stores.count({ where: { approvalStatus: 'ACTIVE' } }),
         prisma.stores.count({ where: { approvalStatus: 'PENDING' } }),
         // Summed in the database rather than by loading every completed order
-        // into memory and reducing. See docs/payments-rework-review.md §13.
+        // into memory and reducing. See FLAGS.md.
         prisma.orders.aggregate({
           where: { status: 'COMPLETED' },
           _sum: { totalAmount: true },

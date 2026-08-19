@@ -66,7 +66,7 @@ export default class PaymentService {
    * 401 would surface inside the order-creation transaction and roll the whole
    * order back. Falling back to MockProvider keeps a keyless environment
    * working, which is what the pre-rework code did.
-   * See docs/payments-rework-review.md §1.
+   * See FLAGS.md.
    */
   static getProviderAdapter(providerCode: string): PaymentProvider {
     switch (providerCode.toUpperCase()) {
@@ -97,7 +97,7 @@ export default class PaymentService {
    * There is deliberately no "just pick any active method" fallback. The old
    * one was an unordered findFirst, which resolved a buyer's cash-on-pickup
    * choice to whichever row Postgres happened to return first.
-   * See docs/payments-rework-review.md §1.
+   * See FLAGS.md.
    */
   static async resolvePaymentMethod(
     client: Pick<typeof prisma, 'paymentMethods'>,
@@ -184,7 +184,7 @@ export default class PaymentService {
    * Asserts the authenticated user is a party to this order — its buyer, or the
    * seller of the fulfilling store. `authenticate` only establishes who the
    * caller is; without this any signed-in user could read or pay any order id
-   * they could guess. See docs/payments-rework-review.md §4.
+   * they could guess. See FLAGS.md.
    *
    * Deliberately a 404 rather than a 403: confirming that an order id exists is
    * itself the enumeration signal worth withholding.
@@ -268,7 +268,7 @@ export default class PaymentService {
     // rather than stacking a second one. Both this and the webhook resolve a
     // payment with findFirst(createdAt desc), so a second row would strand the
     // first in PENDING forever holding a checkout session nobody reconciles.
-    // See docs/payments-rework-review.md §8.
+    // See FLAGS.md.
     const sessionFields = {
       currency: 'PHP',
       providerId: method.provider.id,
@@ -356,7 +356,7 @@ export default class PaymentService {
     // route is not enough on its own — /webhook/:provider reaches the same
     // processor, and payments.seeder.ts activates the MOCK provider row
     // unconditionally. Enforced here so every route in is covered.
-    // See docs/payments-rework-review.md §2.
+    // See FLAGS.md.
     if (providerRecord.code === 'MOCK' && process.env.NODE_ENV === 'production') {
       throw { status: 403, message: 'Mock payment webhooks are disabled in production.' };
     }
@@ -466,7 +466,7 @@ export default class PaymentService {
       // successes. Gateways retry and can deliver out of order, so a late
       // payment.failed must not walk a settled payment backwards — and §2's
       // open mock endpoint made that trivially reachable from outside.
-      // See docs/payments-rework-review.md §5.
+      // See FLAGS.md.
       if (existingPayment.status === PAYMENTSTATUS.COMPLETED) {
         return { payment: existingPayment, justCompleted: false };
       }

@@ -20,7 +20,7 @@ export class MockProvider implements PaymentProvider {
    * be reachable in production. PaymentService.processProviderWebhook rejects
    * the MOCK provider there before reaching this; returning false is the second
    * layer, so a future caller that skips that check still fails closed.
-   * See docs/payments-rework-review.md §2.
+   * See FLAGS.md.
    */
   verifyWebhook(_rawBody: string | Buffer, _signature: string): boolean {
     return process.env.NODE_ENV !== 'production';

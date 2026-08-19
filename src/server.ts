@@ -23,6 +23,8 @@ const startServer = async () => {
     await RedisUtil.initialize();
     await rabbitmq.connect();
 
+    // Explicit 0.0.0.0: this runs in a container (see Dockerfile), and the
+    // published port is only reachable if the server binds every interface.
     server.listen(Number(PORT), '0.0.0.0', () => {
       logger.info(`Server running on port ${PORT} in ${NODE_ENV} mode`);
     });
