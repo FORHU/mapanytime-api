@@ -152,8 +152,8 @@ npm run worker
 
 | Service            | URL                                      |
 | ------------------ | ---------------------------------------- |
-| API                | `http://localhost:3002`                  |
-| Swagger Docs       | `http://localhost:3002/api/docs`         |
+| API                | `http://localhost:4002`                  |
+| Swagger Docs       | `http://localhost:4002/api/docs`         |
 | RabbitMQ Dashboard | `http://localhost:15672` (guest / guest) |
 | Worker Health      | `http://localhost:8080/health`           |
 
@@ -590,7 +590,7 @@ PostgreSQL     Redis     CloudWatch
 
 | Variable                | Default                             | Description                       |
 | ----------------------- | ----------------------------------- | --------------------------------- |
-| `PORT`                  | `3002`                              | API server port                   |
+| `PORT`                  | `4002`                              | API server port                   |
 | `NODE_ENV`              | `development`                       | Environment                       |
 | `DATABASE_URL`          | —                                   | Prisma connection string          |
 | `ACCESS_TOKEN_SECRET`   | —                                   | JWT signing secret                |

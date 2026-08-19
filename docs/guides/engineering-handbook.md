@@ -116,7 +116,7 @@ This is how you verify the system works end-to-end:
 
 ```bash
 # Send a request
-curl -X POST http://localhost:3002/api/v1/users \
+curl -X POST http://localhost:4002/api/v1/users \
   -H "x-correlation-id: test-trace-001" \
   -H "Content-Type: application/json" \
   -d '{ "email": "test@example.com", "password": "Test1234!" }'

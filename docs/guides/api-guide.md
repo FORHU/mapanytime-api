@@ -7,7 +7,7 @@ Reference documentation for building and consuming the REST API.
 ## Base URL
 
 ```
-http://localhost:3002/api
+http://localhost:4002/api
 ```
 
 All endpoints are prefixed with `/api/v1` except health checks.
@@ -228,7 +228,7 @@ Rate limiting is disabled in `development` mode.
 
 ## Interactive Docs
 
-Open [http://localhost:3002/api/docs](http://localhost:3002/api/docs) in your browser for the full Swagger UI with request/response examples and a built-in API tester.
+Open [http://localhost:4002/api/docs](http://localhost:4002/api/docs) in your browser for the full Swagger UI with request/response examples and a built-in API tester.
 
 > Available in development mode only.
 

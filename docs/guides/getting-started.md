@@ -92,10 +92,10 @@ npm run worker
 
 ```bash
 # Liveness check
-curl http://localhost:3002/api/health/live
+curl http://localhost:4002/api/health/live
 
 # Readiness check (all services)
-curl http://localhost:3002/api/health/ready
+curl http://localhost:4002/api/health/ready
 ```
 
 Expected response:
@@ -111,7 +111,7 @@ Expected response:
 
 ## Step 7 — Explore the API Docs
 
-Open [http://localhost:3002/api/docs](http://localhost:3002/api/docs) in your browser.
+Open [http://localhost:4002/api/docs](http://localhost:4002/api/docs) in your browser.
 
 > Swagger UI is only enabled in `development` mode.
 
@@ -121,8 +121,8 @@ Open [http://localhost:3002/api/docs](http://localhost:3002/api/docs) in your br
 
 | Service       | URL                              | Credentials   |
 | ------------- | -------------------------------- | ------------- |
-| API Server    | `http://localhost:3002`          | —             |
-| Swagger Docs  | `http://localhost:3002/api/docs` | —             |
+| API Server    | `http://localhost:4002`          | —             |
+| Swagger Docs  | `http://localhost:4002/api/docs` | —             |
 | RabbitMQ UI   | `http://localhost:15672`         | guest / guest |
 | Worker Health | `http://localhost:8080/health`   | —             |
 
