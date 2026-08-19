@@ -96,10 +96,31 @@ function isViewport(v: unknown): v is Viewport {
   );
 }
 
+/**
+ * Reflecting every origin while `credentials: true` is set lets any site open an
+ * authenticated socket on a signed-in user's behalf, so the allowlist wins
+ * wherever CORS_ORIGIN is configured. It is intentionally left open when the var
+ * is unset: local dev and the mobile client send no usable Origin header.
+ * Staging and production must set CORS_ORIGIN.
+ */
+const allowedOrigins = (process.env.CORS_ORIGIN ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 export function initSocket(server: HttpServer): Server {
   io = new Server(server, {
-    // Mobile clients have no fixed web origin; allow all in this phase.
-    cors: { origin: '*', methods: ['GET', 'POST'] },
+    cors: {
+      origin: (origin, callback) => {
+        if (allowedOrigins.length === 0 || !origin || allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+        return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+      },
+      credentials: true,
+      methods: ['GET', 'POST'],
+    },
+    transports: ['polling', 'websocket'],
   });
 
   io.on('connection', (socket: Socket) => {

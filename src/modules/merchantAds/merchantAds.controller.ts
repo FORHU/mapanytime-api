@@ -9,13 +9,22 @@ const productLinkSchema = Joi.object({
 });
 
 const adFieldsSchema = {
-  kind: Joi.string().valid('PROMO', 'JOB', 'EVENT').required(),
+  kind: Joi.string().valid('PROMO', 'JOB', 'EVENT').optional(),
   title: Joi.string().required(),
   description: Joi.string().required(),
   imageUrl: Joi.string().optional(),
   badgeLabel: Joi.string().optional(),
   ctaLabel: Joi.string().optional(),
   salaryLabel: Joi.string().optional(),
+  goal: Joi.string().valid('STORE_VISITS', 'IMPRESSIONS', 'PURCHASES').optional(),
+  format: Joi.string()
+    .valid('MAP_FLOATING_CARD', 'PROMOTED_PIN', 'DISCOVERY_CAROUSEL', 'SPONSORED_SEARCH')
+    .optional(),
+  radiusKm: Joi.number().integer().min(1).max(50).optional(),
+  targetLat: Joi.number().optional(),
+  targetLng: Joi.number().optional(),
+  dailyBudget: Joi.number().min(0).optional(),
+  totalBudget: Joi.number().min(0).optional(),
   discountType: Joi.string().valid('BOGO', 'PERCENTAGE', 'FIXED_AMOUNT').optional(),
   buyQuantity: Joi.number()
     .integer()
@@ -75,11 +84,16 @@ export default class MerchantAdsController {
 
   static async index(req: Request, res: Response, next: NextFunction) {
     const storeId = req.query.storeId as string;
-    if (!storeId) return responseError(res, 400, 'storeId query parameter is required');
 
     try {
       const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
+
+      if (!storeId) {
+        // Return all ads across all stores owned by seller
+        const data = await MerchantAdsService.listAllMyAds(userId);
+        return responseSuccess(res, 200, data);
+      }
 
       const data = await MerchantAdsService.listMyAds(userId, storeId);
       return responseSuccess(res, 200, data);
@@ -102,7 +116,7 @@ export default class MerchantAdsController {
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       const data = await MerchantAdsService.createAd(userId, value);
-      return responseSuccess(res, 201, data, 'Merchant ad created successfully');
+      return responseSuccess(res, 201, data, 'Merchant promotion/ad created successfully');
     } catch (error) {
       next(error);
     }
@@ -119,7 +133,7 @@ export default class MerchantAdsController {
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       const data = await MerchantAdsService.updateAd(userId, req.params.id, value);
-      return responseSuccess(res, 200, data, 'Merchant ad updated successfully');
+      return responseSuccess(res, 200, data, 'Merchant promotion/ad updated successfully');
     } catch (error) {
       next(error);
     }
@@ -131,7 +145,7 @@ export default class MerchantAdsController {
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       await MerchantAdsService.deleteAd(userId, req.params.id);
-      return responseSuccess(res, 200, null, 'Merchant ad deleted successfully');
+      return responseSuccess(res, 200, null, 'Merchant promotion/ad deleted successfully');
     } catch (error) {
       next(error);
     }
@@ -151,8 +165,47 @@ export default class MerchantAdsController {
         res,
         200,
         data,
-        `Merchant ad ${value.isActive ? 'enabled' : 'disabled'}`,
+        `Merchant promotion/ad ${value.isActive ? 'enabled' : 'disabled'}`,
       );
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async analytics(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized');
+
+      const data = await MerchantAdsService.getAnalytics(userId, req.params.id);
+      return responseSuccess(res, 200, data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async recordEvent(req: Request, res: Response, next: NextFunction) {
+    // revenueAmount is deliberately not accepted here: this route is public, and
+    // the value it feeds (attributedRevenue) drives ROAS and ad billing. It is
+    // derived from the referenced order server-side instead.
+    const schema = Joi.object({
+      eventType: Joi.string().valid('IMPRESSION', 'CLICK', 'CONVERSION').required(),
+      sessionId: Joi.string().optional(),
+      orderId: Joi.string().optional(),
+    });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const buyerId = (req.user as { id: string })?.id;
+      await MerchantAdsService.trackEvent(req.params.id, {
+        ...value,
+        buyerId,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+      return responseSuccess(res, 200, null, 'Ad event logged successfully');
     } catch (error) {
       next(error);
     }

@@ -1,5 +1,4 @@
 import { validateOrderTransition } from '../../src/modules/orders/order.state';
-import { ORDERSTATUS } from '@prisma/client';
 
 describe('Order State Machine (order.state.ts)', () => {
   describe('validateOrderTransition', () => {

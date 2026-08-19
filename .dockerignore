@@ -6,3 +6,8 @@ dist
 coverage
 tests
 *.log
+
+# Docs never take part in the build; excluding them keeps them from
+# invalidating the COPY layer cache on every edit.
+*.md
+docs

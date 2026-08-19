@@ -2,7 +2,6 @@ import {
   PrismaClient,
   FULLFILLMENTTYPE,
   ORDERSTATUS,
-  PAYMENTMETHOD,
   PAYMENTSTATUS,
   SETTLEMENTSTATUS,
   PAYOUTSTATUS,
@@ -244,11 +243,15 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
 
   // ── 7. Payments ──────────────────────────────────────────────────────────
   console.log('  → Seeding Payments...');
+  const cashMethod = await prisma.paymentMethods.findFirst({ where: { code: 'COD' } });
+  const gcashMethod = await prisma.paymentMethods.findFirst({ where: { code: 'GCASH' } });
+
   await prisma.payments.create({
     data: {
       orderId: completedOrder.id,
       amount: completedOrder.totalAmount,
-      paymentMethod: PAYMENTMETHOD.CASH_ON_DELIVERY,
+      providerId: cashMethod?.providerId,
+      paymentMethodId: cashMethod?.id,
       status: PAYMENTSTATUS.COMPLETED,
       referenceNumber: `PAY-COD-${completedOrder.id.slice(-8).toUpperCase()}`,
       paidAt: completedOrder.completedAt,
@@ -259,11 +262,11 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
     data: {
       orderId: processingOrder.id,
       amount: processingOrder.totalAmount,
-      paymentMethod: PAYMENTMETHOD.E_WALLET,
+      providerId: gcashMethod?.providerId,
+      paymentMethodId: gcashMethod?.id,
       status: PAYMENTSTATUS.COMPLETED,
       referenceNumber: `PAY-GCASH-${processingOrder.id.slice(-8).toUpperCase()}`,
-      gateway: 'GCASH_MOCK',
-      gatewayReference: `REF-GCASH-${Date.now()}`,
+      providerReference: `REF-GCASH-${Date.now()}`,
       paidAt: new Date(),
     },
   });
@@ -377,23 +380,24 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
     },
   });
 
-  await prisma.productReviews.upsert({
+  const existingReview = await prisma.productReviews.findFirst({
     where: {
-      productId_buyerId_orderId: {
-        productId: orderProduct1.id,
-        buyerId: buyer.id,
-        orderId: completedOrder.id,
-      },
-    },
-    update: {},
-    create: {
       productId: orderProduct1.id,
       buyerId: buyer.id,
       orderId: completedOrder.id,
-      rating: 5,
-      comment: 'Extremely fresh and well packaged.',
     },
   });
+  if (!existingReview) {
+    await prisma.productReviews.create({
+      data: {
+        productId: orderProduct1.id,
+        buyerId: buyer.id,
+        orderId: completedOrder.id,
+        rating: 5,
+        comment: 'Extremely fresh and well packaged.',
+      },
+    });
+  }
 
   // ── 12. Carts & Wishlists ────────────────────────────────────────────────
   console.log('  → Seeding Carts & Wishlists...');

@@ -4,9 +4,13 @@ import { authenticate } from '../../middleware/auth.middleware';
 
 const router = express.Router();
 
-// Public, buyer-facing — unlike the routes below, no auth/store-ownership check.
+// Public, buyer-facing — discovery & deal inspection
 router.get('/nearby', MerchantAdsController.nearby);
+router.post('/:id/events', MerchantAdsController.recordEvent);
+
+// Seller-authenticated management
 router.get('/', authenticate, MerchantAdsController.index);
+router.get('/:id/analytics', authenticate, MerchantAdsController.analytics);
 router.post('/', authenticate, MerchantAdsController.create);
 router.put('/:id', authenticate, MerchantAdsController.update);
 router.delete('/:id', authenticate, MerchantAdsController.destroy);

@@ -3,7 +3,7 @@ name: Deploy Staging
 on:
   workflow_run:
     workflows: ['CI']
-    branches: [staging]
+    branches: [main]
     types: [completed]
   workflow_dispatch:
     inputs:
@@ -22,8 +22,15 @@ env:
   NODE_ENV: staging
   IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
   EC2_IAM_ROLE_NAME: forhu-staging-mapanytime-api-role # <-- EC2 instance profile role name
-  CONTAINER_NAME: mapanytime-api
+  CONTAINER_NAME: mapanytime-api-staging
+  WORKER_NAME: mapanytime-api-worker-staging
+  DOCKER_NETWORK: mapanytime-staging
+  ENV_FILE_NAME: mapanytime-api-staging.env
+
   APP_PORT: 4002
+  HOST_PORT: 4003
+  WORKER_PORT: 8080
+  WORKER_HOST_PORT: 8081
 
 jobs:
   deploy:
@@ -110,7 +117,7 @@ jobs:
           WORKER_HEALTH_PORT: ${{ secrets.WORKER_HEALTH_PORT || '8080' }}
           METRICS_INTERVAL_MS: ${{ secrets.METRICS_INTERVAL_MS || '60000' }}
         run: |
-          cat > ${{ github.workspace }}/mapanytime-api.env << EOF
+          cat > ${{ github.workspace }}/${{ env.ENV_FILE_NAME }} << EOF
           DATABASE_URL=${DATABASE_URL}
           NODE_ENV=${{ env.NODE_ENV }}
           PORT=${{ env.APP_PORT }}
@@ -156,7 +163,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: mapanytime-api.env
+          source: ${{ env.ENV_FILE_NAME }}
           target: /home/ec2-user/
 
       - name: Deploy to EC2
@@ -168,39 +175,42 @@ jobs:
           command_timeout: 20m
           script: |
             set -e
-            chmod 600 /home/ec2-user/mapanytime-api.env
+            chmod 600 /home/ec2-user/${{ env.ENV_FILE_NAME }}
             set -a
-            source /home/ec2-user/mapanytime-api.env
+            source /home/ec2-user/${{ env.ENV_FILE_NAME }}
             set +a
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
             docker pull ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+
+            docker network inspect ${{ env.DOCKER_NETWORK }} >/dev/null 2>&1 \
+              || docker network create ${{ env.DOCKER_NETWORK }}
 
             # Run migrations before swapping the container.
             # --entrypoint overrides the image CMD so only the migration runs (not the app).
             docker run --rm \
               --entrypoint npx \
-              --network mapanytime \
-              --env-file /home/ec2-user/mapanytime-api.env \
+              --network ${{ env.DOCKER_NETWORK }} \
+              --env-file /home/ec2-user/${{ env.ENV_FILE_NAME }} \
               ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
               prisma migrate deploy
 
             docker stop ${{ env.CONTAINER_NAME }} 2>/dev/null || true
             docker rm   ${{ env.CONTAINER_NAME }} 2>/dev/null || true
             docker run -d --name ${{ env.CONTAINER_NAME }} --restart unless-stopped \
-              --network mapanytime \
-              --env-file /home/ec2-user/mapanytime-api.env \
-              -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
+              --network ${{ env.DOCKER_NETWORK }} \
+              --env-file /home/ec2-user/${{ env.ENV_FILE_NAME }} \
+              -p ${{ env.HOST_PORT }}:${{ env.APP_PORT }} \
               --log-driver json-file \
               --log-opt max-size=10m \
               --log-opt max-file=3 \
               ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
 
-            docker stop ${{ env.CONTAINER_NAME }}-worker 2>/dev/null || true
-            docker rm   ${{ env.CONTAINER_NAME }}-worker 2>/dev/null || true
-            docker run -d --name ${{ env.CONTAINER_NAME }}-worker --restart unless-stopped \
-              --network mapanytime \
-              --env-file /home/ec2-user/mapanytime-api.env \
-              -p 127.0.0.1:8080:8080 \
+            docker stop ${{ env.WORKER_NAME }} 2>/dev/null || true
+            docker rm   ${{ env.WORKER_NAME }} 2>/dev/null || true
+            docker run -d --name ${{ env.WORKER_NAME }} --restart unless-stopped \
+              --network ${{ env.DOCKER_NETWORK }} \
+              --env-file /home/ec2-user/${{ env.ENV_FILE_NAME }} \
+              -p 127.0.0.1:${{ env.WORKER_HOST_PORT }}:${{ env.WORKER_PORT }} \
               --log-driver json-file \
               --log-opt max-size=10m \
               --log-opt max-file=3 \
@@ -211,7 +221,7 @@ jobs:
             echo "Verifying API container health..."
             HEALTH_CHECK_PASSED=false
             for i in {1..10}; do
-              if curl -sf http://127.0.0.1:${{ env.APP_PORT }}/api/health/live > /dev/null 2>&1; then
+              if curl -sf http://127.0.0.1:${{ env.HOST_PORT }}/api/health/live > /dev/null 2>&1; then
                 echo "Health check passed!"
                 HEALTH_CHECK_PASSED=true
                 break

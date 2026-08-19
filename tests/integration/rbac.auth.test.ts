@@ -2,6 +2,15 @@ import request from 'supertest';
 import app from '../../src/app';
 
 /**
+ * Infrastructure is mocked below, so the cost here is compiling the app's import
+ * graph, which lands on whichever test runs first. Under a loaded full suite that
+ * has overrun the default while the suite passes in ~7s alone; `maxWorkers` in
+ * jest.config.ts is the actual remedy. Assertions are unchanged — only the budget
+ * is raised, so a real hang still fails.
+ */
+jest.setTimeout(20000);
+
+/**
  * Every /v1/rbac endpoint reads or rewrites the role/permission model, so none
  * of them may be reachable without an authenticated admin.
  *

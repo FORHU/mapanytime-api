@@ -2,6 +2,15 @@ import request from 'supertest';
 import app from '../../src/app';
 
 /**
+ * Infrastructure is mocked below, so the cost here is compiling the app's import
+ * graph, which lands on whichever test runs first. Under a loaded full suite that
+ * has overrun the default while the suite passes in ~7s alone; `maxWorkers` in
+ * jest.config.ts is the actual remedy. Assertions are unchanged — only the budget
+ * is raised, so a real hang still fails.
+ */
+jest.setTimeout(20000);
+
+/**
  * Integration tests for the health endpoints.
  *
  * NOTE: These tests mock infrastructure connections so they run without

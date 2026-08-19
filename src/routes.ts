@@ -26,6 +26,7 @@ import {
 } from './modules/appRelease/app-release.route';
 import filesRoute from './modules/files/files.route';
 import analyticsRoute from './modules/analytics/analytics.route';
+import pricingRoute from './modules/pricing/pricing.route';
 
 const router = express.Router();
 
@@ -43,6 +44,7 @@ router.use('/v1/products', productRoute);
 router.use('/v1/supplier-products', supplierProductsRoute);
 router.use('/v1/stores', storeRoute);
 router.use('/v1/merchant-ads', merchantAdsRoute);
+router.use('/v1/pricing', pricingRoute);
 router.use('/health', healthRouter);
 router.use('/v1/categories', categoryRoute);
 router.use('/v1/orders', orderRoute);
