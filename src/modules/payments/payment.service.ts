@@ -4,7 +4,7 @@ import { emitNotificationToUser } from '../../infrastructure/socket';
 import { PaymentProvider } from './providers/payment-provider.interface';
 import { PayMongoProvider } from './providers/paymongo.provider';
 import { MockProvider } from './providers/mock.provider';
-import PricingEngineService from '../pricing/pricing-engine.service';
+import PricingEngineService, { OrderPricingResult } from '../pricing/pricing-engine.service';
 
 /** Peso amount for buyer-facing copy: `1500` -> `₱1,500`. */
 const formatPeso = (amount: number) => `₱${amount.toLocaleString('en-PH')}`;
@@ -180,17 +180,60 @@ export default class PaymentService {
       },
     });
 
-    return Promise.all(
-      providers.map(async (provider) => ({
-        id: provider.id,
-        code: provider.code,
-        name: provider.name,
-        description: provider.description,
-        methods: await Promise.all(
-          provider.methods.map((method) => this.describeMethod(method, provider.id, amount)),
-        ),
-      })),
+    // The mock provider accepts any signature and any payment. It is gated at
+    // the webhook, but the *method* was still offered in the picker, so a
+    // production checkout could list "Mock Sandbox" as a way to pay.
+    // See FLAGS.md F33.
+    const offerable = providers.filter(
+      (provider) => provider.code !== 'MOCK' || process.env.NODE_ENV !== 'production',
     );
+
+    // Price every method against one read of the pricing configuration. A call
+    // per method re-read the configuration and its components each time —
+    // roughly 15 queries on a public, unauthenticated endpoint. See FLAGS.md F37.
+    const priceable = offerable.flatMap((provider) =>
+      provider.methods
+        .filter((method) => this.isWithinBounds(method, amount))
+        .map((method) => ({ provider, method })),
+    );
+
+    const pricings =
+      amount === undefined
+        ? []
+        : await PricingEngineService.calculateManyOrderPricing(
+            priceable.map(({ provider, method }) => ({
+              subtotalAmount: amount,
+              providerId: provider.id,
+              paymentMethodId: method.id,
+              paymentMethodCode: method.code,
+              paymentMethodType: method.type,
+            })),
+          );
+
+    const pricingByMethodId = new Map(priceable.map(({ method }, i) => [method.id, pricings[i]]));
+
+    return offerable.map((provider) => ({
+      id: provider.id,
+      code: provider.code,
+      name: provider.name,
+      description: provider.description,
+      methods: provider.methods.map((method) =>
+        this.describeMethod(method, amount, pricingByMethodId.get(method.id)),
+      ),
+    }));
+  }
+
+  /** True when this basket falls inside the method's configured order bounds. */
+  private static isWithinBounds(
+    method: { minOrderAmount: Prisma.Decimal | null; maxOrderAmount: Prisma.Decimal | null },
+    amount?: number,
+  ): boolean {
+    if (amount === undefined) return true;
+    const min = method.minOrderAmount ? Number(method.minOrderAmount) : null;
+    const max = method.maxOrderAmount ? Number(method.maxOrderAmount) : null;
+    if (min !== null && amount < min) return false;
+    if (max !== null && amount > max) return false;
+    return true;
   }
 
   /**
@@ -199,7 +242,7 @@ export default class PaymentService {
    * bounds — why it is unavailable. A disabled method that explains itself
    * beats one that is merely greyed out.
    */
-  private static async describeMethod(
+  private static describeMethod(
     method: {
       id: string;
       code: string;
@@ -209,8 +252,8 @@ export default class PaymentService {
       minOrderAmount: Prisma.Decimal | null;
       maxOrderAmount: Prisma.Decimal | null;
     },
-    providerId: string,
     amount?: number,
+    pricing?: OrderPricingResult,
   ) {
     const base = {
       id: method.id,
@@ -241,13 +284,7 @@ export default class PaymentService {
       };
     }
 
-    const pricing = await PricingEngineService.calculateOrderPricing({
-      subtotalAmount: amount,
-      providerId,
-      paymentMethodId: method.id,
-      paymentMethodCode: method.code,
-      paymentMethodType: method.type,
-    });
+    if (!pricing) return { ...base, available: true };
 
     return {
       ...base,
