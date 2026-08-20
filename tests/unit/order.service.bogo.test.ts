@@ -1,10 +1,8 @@
 import OrderService from '../../src/modules/orders/order.service';
 import OrderRepository from '../../src/modules/orders/order.repository';
-import TaxationRepository from '../../src/modules/taxation/taxation.repository';
 import { prisma } from '../../src/utils/prisma';
 
 jest.mock('../../src/modules/orders/order.repository');
-jest.mock('../../src/modules/taxation/taxation.repository');
 jest.mock('../../src/infrastructure/socket', () => ({
   emitNotificationToUser: jest.fn(),
 }));
@@ -86,7 +84,6 @@ describe('OrderService.createOrder — BOGO discount', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (TaxationRepository.getCommissionRuleForCategory as jest.Mock).mockResolvedValue(null);
     (OrderRepository.insertOrder as jest.Mock).mockImplementation((data) =>
       Promise.resolve({ id: 'order-1', ...data }),
     );
@@ -205,7 +202,6 @@ describe('OrderService.createOrder — percentage / fixed-amount discount', () =
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (TaxationRepository.getCommissionRuleForCategory as jest.Mock).mockResolvedValue(null);
     (OrderRepository.insertOrder as jest.Mock).mockImplementation((data) =>
       Promise.resolve({ id: 'order-1', ...data }),
     );
