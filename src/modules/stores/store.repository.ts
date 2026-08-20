@@ -181,7 +181,7 @@ export default class StoreRepository {
   static async getStoresBySellerId(sellerId: string) {
     return prisma.stores.findMany({
       where: { sellerId: sellerId },
-      include: { storeLocations: true },
+      include: { storeLocations: true, primaryCategory: true },
       orderBy: { createdAt: 'desc' },
     });
   }
