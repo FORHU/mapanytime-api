@@ -3,7 +3,17 @@ import PaymentService from './payment.service';
 
 export const getActiveMethods = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const providers = await PaymentService.getActivePaymentMethods();
+    // Optional: with an amount the response carries each method's real fee for
+    // this basket and gates the ones that do not apply to it.
+    const rawAmount = req.query.amount;
+    const amount = rawAmount === undefined ? undefined : Number(rawAmount);
+    if (amount !== undefined && (!Number.isFinite(amount) || amount < 0)) {
+      return res
+        .status(400)
+        .json({ success: false, message: 'amount must be a non-negative number.' });
+    }
+
+    const providers = await PaymentService.getActivePaymentMethods(amount);
     return res.status(200).json({
       success: true,
       message: 'Active payment methods retrieved successfully.',

@@ -1048,6 +1048,12 @@ model PaymentMethods {
   isActive Boolean @default(false)
   priority Int     @default(0)
 
+  /// Order-amount window in which this method may be offered. Cards carry a
+  /// flat P13.39 gateway fee, which is 17% of a P100 basket, so they are gated
+  /// above a minimum rather than shown at a punitive rate. Null means no bound.
+  minOrderAmount Decimal? @db.Decimal(12, 2)
+  maxOrderAmount Decimal? @db.Decimal(12, 2)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1142,9 +1148,13 @@ enum PAYMENTSTATUS {
   REFUND_PENDING
 }
 
-// Legacy category commission rules. Still the source of truth for
-// TaxationService; PricingComponents is intended to supersede it, but nothing
-// has migrated the data or the callers yet, so both exist for now.
+// ORPHANED as of 2026-08-20. `TaxationService` was its only reader and has been
+// deleted — `PricingComponents` now supersedes it, and `PricingEngineService`
+// is the single engine for every fee. The model is kept rather than dropped
+// because the table may hold per-category rates worth migrating, and dropping
+// it is a destructive migration. Migrate any live rows into
+// `PricingComponents` (type SELLER_MARKETPLACE_FEE, scoped by categoryId),
+// then drop. See FLAGS.md F28.
 model CommissionRules {
   id             String   @id @default(cuid())
   categoryId     String?  @unique

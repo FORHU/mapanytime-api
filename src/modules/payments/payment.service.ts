@@ -4,6 +4,10 @@ import { emitNotificationToUser } from '../../infrastructure/socket';
 import { PaymentProvider } from './providers/payment-provider.interface';
 import { PayMongoProvider } from './providers/paymongo.provider';
 import { MockProvider } from './providers/mock.provider';
+import PricingEngineService from '../pricing/pricing-engine.service';
+
+/** Peso amount for buyer-facing copy: `1500` -> `₱1,500`. */
+const formatPeso = (amount: number) => `₱${amount.toLocaleString('en-PH')}`;
 
 /**
  * Values of the removed PAYMENTMETHOD enum that name a channel rather than a
@@ -148,8 +152,14 @@ export default class PaymentService {
 
   /**
    * Returns active payment providers and active payment channels for frontend checkout.
+   *
+   * When `amount` is supplied, each method additionally carries what it would
+   * actually cost the buyer and whether it may be used for a basket that size.
+   * The buyer picks from this list, so the fee is known before the checkout
+   * session is created and the engine can price the exact method chosen —
+   * rather than letting PayMongo's hosted page decide after the fact.
    */
-  static async getActivePaymentMethods() {
+  static async getActivePaymentMethods(amount?: number) {
     const providers = await prisma.paymentProviders.findMany({
       where: { isActive: true },
       orderBy: { priority: 'asc' },
@@ -163,18 +173,88 @@ export default class PaymentService {
             name: true,
             description: true,
             type: true,
+            minOrderAmount: true,
+            maxOrderAmount: true,
           },
         },
       },
     });
 
-    return providers.map((provider) => ({
-      id: provider.id,
-      code: provider.code,
-      name: provider.name,
-      description: provider.description,
-      methods: provider.methods,
-    }));
+    return Promise.all(
+      providers.map(async (provider) => ({
+        id: provider.id,
+        code: provider.code,
+        name: provider.name,
+        description: provider.description,
+        methods: await Promise.all(
+          provider.methods.map((method) => this.describeMethod(method, provider.id, amount)),
+        ),
+      })),
+    );
+  }
+
+  /**
+   * One method as the checkout picker needs it: its fee for this basket, the
+   * total the buyer would pay, and — when the basket falls outside the method's
+   * bounds — why it is unavailable. A disabled method that explains itself
+   * beats one that is merely greyed out.
+   */
+  private static async describeMethod(
+    method: {
+      id: string;
+      code: string;
+      name: string;
+      description: string | null;
+      type: PAYMENTMETHODTYPE;
+      minOrderAmount: Prisma.Decimal | null;
+      maxOrderAmount: Prisma.Decimal | null;
+    },
+    providerId: string,
+    amount?: number,
+  ) {
+    const base = {
+      id: method.id,
+      code: method.code,
+      name: method.name,
+      description: method.description,
+      type: method.type,
+    };
+
+    if (amount === undefined) return { ...base, available: true };
+
+    const min = method.minOrderAmount ? Number(method.minOrderAmount) : null;
+    const max = method.maxOrderAmount ? Number(method.maxOrderAmount) : null;
+
+    if (min !== null && amount < min) {
+      return {
+        ...base,
+        available: false,
+        unavailableReason: `${method.name} is available on orders of ${formatPeso(min)} and above.`,
+      };
+    }
+
+    if (max !== null && amount > max) {
+      return {
+        ...base,
+        available: false,
+        unavailableReason: `${method.name} is available on orders up to ${formatPeso(max)}.`,
+      };
+    }
+
+    const pricing = await PricingEngineService.calculateOrderPricing({
+      subtotalAmount: amount,
+      providerId,
+      paymentMethodId: method.id,
+      paymentMethodCode: method.code,
+      paymentMethodType: method.type,
+    });
+
+    return {
+      ...base,
+      available: true,
+      feeAmount: pricing.buyerTransactionFee.totalBuyerFeeAmount,
+      buyerTotalAmount: pricing.buyerTotalAmount,
+    };
   }
 
   /**
@@ -257,6 +337,7 @@ export default class PaymentService {
       description: `Order ${order.id} - ${order.store?.storeName || 'Marketplace Store'}`,
       lineItems,
       customer,
+      paymentMethodCode: method.code,
       metadata: {
         orderId: order.id,
         storeId: order.storeId,

@@ -3,6 +3,7 @@ import { seedUsers } from './seeders/users.seeder';
 import { seedRoles } from './seeders/roles.seeder';
 import { seedCategories } from './seeders/categories.seeder';
 import { seedPaymentProviders } from './seeders/payments.seeder';
+import { seedPricingConfiguration } from './seeders/pricing.seeder';
 import { seedStoresAndProducts } from './seeders/stores_and_products.seeder';
 import { seedMarketplaceData } from './seeders/marketplace_data.seeder';
 import { seedMultiStoreSeller } from './seeders/multi_store_seller.seeder';
@@ -18,6 +19,7 @@ async function main() {
     await seedUsers(prisma);
     await seedCategories(prisma);
     await seedPaymentProviders(prisma);
+    await seedPricingConfiguration(prisma);
     await seedStoresAndProducts(prisma);
     await seedMarketplaceData(prisma);
     await seedMultiStoreSeller(prisma);
