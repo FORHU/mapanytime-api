@@ -5,7 +5,6 @@ import {
   PAYMENTSTATUS,
   SETTLEMENTSTATUS,
   PAYOUTSTATUS,
-  SHIPMENTSTATUS,
   RETURNSTATUS,
   RESERVATIONSTATUS,
   INVENTORYMOVEMENTTYPE,
@@ -70,7 +69,7 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
   await prisma.buyerAddresses.create({
     data: {
       buyerId: buyer.id,
-      addressType: ADDRESSTYPE.SHIPPING,
+      addressType: ADDRESSTYPE.HOME,
       recipientName: 'Sara Smith',
       phoneNumber: '+639171234567',
       addressLine1: 'Unit 4B, Burnham Heights Condo',
@@ -89,7 +88,7 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
     await prisma.buyerAddresses.create({
       data: {
         buyerId: dualBuyer.id,
-        addressType: ADDRESSTYPE.SHIPPING,
+        addressType: ADDRESSTYPE.HOME,
         recipientName: 'Alex Mercer',
         phoneNumber: '+639189876543',
         addressLine1: '12 Session Road',
@@ -270,19 +269,10 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
     },
   });
 
-  // ── 8. Shipments & ReturnRequests ────────────────────────────────────────
-  console.log('  → Seeding Shipments & ReturnRequests...');
-  await prisma.shipments.create({
-    data: {
-      orderId: completedOrder.id,
-      courier: 'LBC Express (Local Pickup)',
-      trackingNumber: `LBC-${completedOrder.id.slice(-8).toUpperCase()}`,
-      status: SHIPMENTSTATUS.DELIVERED,
-      shippedAt: new Date(Date.now() - 18 * 60 * 60 * 1000),
-      deliveredAt: completedOrder.completedAt,
-    },
-  });
-
+  // ── 8. ReturnRequests ────────────────────────────────────────────────────
+  // Shipments were removed with the rest of the courier apparatus on
+  // 2026-08-20 — fulfillment is pickup at the stall. See FIX-PLAN.md item 15.
+  console.log('  → Seeding ReturnRequests...');
   await prisma.returnRequests.create({
     data: {
       orderId: completedOrder.id,

@@ -45,14 +45,22 @@ export async function seedPaymentProviders(prisma: PrismaClient) {
   }
 
   // 2. Mock Provider (for dev / test)
+  //
+  // Seeded INACTIVE in production. The mock provider accepts any webhook
+  // signature and marks any order paid; the webhook is gated at the processor,
+  // but seeding the provider and its method ACTIVE unconditionally still put
+  // "Sandbox Simulator" in the production checkout picker. Two layers now: this,
+  // and the filter in PaymentService.getActivePaymentMethods. See FLAGS.md F33.
+  const mockIsActive = process.env.NODE_ENV !== 'production';
+
   const mockProvider = await prisma.paymentProviders.upsert({
     where: { code: 'MOCK' },
-    update: { isActive: true, priority: 99 },
+    update: { isActive: mockIsActive, priority: 99 },
     create: {
       code: 'MOCK',
       name: 'Mock Payment Gateway',
       description: 'Simulated Sandbox Gateway for Development & Testing',
-      isActive: true,
+      isActive: mockIsActive,
       priority: 99,
     },
   });
@@ -64,13 +72,13 @@ export async function seedPaymentProviders(prisma: PrismaClient) {
         code: 'MOCK_SANDBOX',
       },
     },
-    update: { isActive: true },
+    update: { isActive: mockIsActive },
     create: {
       providerId: mockProvider.id,
       code: 'MOCK_SANDBOX',
       name: 'Sandbox Simulator',
       type: PAYMENTMETHODTYPE.OTHER,
-      isActive: true,
+      isActive: mockIsActive,
       priority: 1,
     },
   });
