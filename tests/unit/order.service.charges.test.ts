@@ -12,7 +12,7 @@ jest.mock('../../src/utils/prisma', () => ({
     stores: { findUnique: jest.fn() },
     buyers: { findUnique: jest.fn() },
     pricingConfigurations: { findFirst: jest.fn().mockResolvedValue(null) },
-    pricingComponents: { findFirst: jest.fn().mockResolvedValue(null) },
+    pricingComponents: { findMany: jest.fn().mockResolvedValue([]) },
   },
 }));
 

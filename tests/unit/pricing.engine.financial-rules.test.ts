@@ -6,25 +6,23 @@ import PricingEngineService from '../../src/modules/pricing/pricing-engine.servi
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
     pricingConfigurations: { findFirst: jest.fn().mockResolvedValue(null) },
-    pricingComponents: { findFirst: jest.fn().mockResolvedValue(null) },
+    pricingComponents: { findMany: jest.fn().mockResolvedValue([]) },
   },
 }));
 
 const SUBTOTAL = 1000;
-const SHIPPING = 100;
 
 describe('Confirmed financial rules', () => {
   // VAT was removed on 2026-08-20: the platform is a marketplace intermediary
   // and does not collect the seller's output VAT. These lock that in — a
   // failure here means a tax term crept back into the buyer's total.
   describe('No tax is added to an order', () => {
-    it('leaves the order amount as subtotal - discount + shipping', async () => {
+    it('leaves the order amount as subtotal - discount', async () => {
       const r = await PricingEngineService.calculateOrderPricing({
         subtotalAmount: SUBTOTAL,
-        shippingAmount: SHIPPING,
         discountAmount: 200,
       });
-      expect(r.orderAmount).toBe(SUBTOTAL - 200 + SHIPPING);
+      expect(r.orderAmount).toBe(SUBTOTAL - 200);
     });
 
     it('charges the buyer nothing beyond the order amount and the transaction fee', async () => {
@@ -39,32 +37,46 @@ describe('Confirmed financial rules', () => {
   });
 
   describe('Marketplace commission base', () => {
-    it('is the subtotal alone — never subtotal + shipping', async () => {
+    it('is the discounted subtotal at the agreed 2.00%', async () => {
       const r = await PricingEngineService.calculateOrderPricing({
         subtotalAmount: SUBTOTAL,
-        shippingAmount: SHIPPING,
       });
 
       // 2.00% of 1,000 — the seller agreement's base.
       expect(r.sellerMarketplaceCommission.amount).toBe(20);
-
-      // The base this must never silently become: 1,100.
-      expect(r.sellerMarketplaceCommission.amount).not.toBe(22);
     });
 
-    it('does not grow when only shipping grows', async () => {
-      const base = await PricingEngineService.calculateOrderPricing({
+    // Settled 2026-08-20 (FLAGS.md F4). The base was the gross subtotal, so a
+    // seller funding a promotion paid commission on money no buyer ever handed
+    // them. A failure here means the base drifted back to gross.
+    it('is net of the discount, not the gross subtotal', async () => {
+      const r = await PricingEngineService.calculateOrderPricing({
         subtotalAmount: SUBTOTAL,
+        discountAmount: 200,
       });
-      const shipped = await PricingEngineService.calculateOrderPricing({
-        subtotalAmount: SUBTOTAL,
-        shippingAmount: 500,
-      });
-      expect(shipped.sellerMarketplaceCommission.amount).toBe(
-        base.sellerMarketplaceCommission.amount,
-      );
+
+      // 2.00% of the 800 the seller actually sold.
+      expect(r.sellerMarketplaceCommission.amount).toBe(16);
+
+      // The base this must never silently become: the gross 1,000.
+      expect(r.sellerMarketplaceCommission.amount).not.toBe(20);
     });
 
+    it('falls to zero when a discount takes the basket to nothing', async () => {
+      const r = await PricingEngineService.calculateOrderPricing({
+        subtotalAmount: SUBTOTAL,
+        discountAmount: SUBTOTAL,
+      });
+      expect(r.sellerMarketplaceCommission.amount).toBe(0);
+    });
+
+    it('never goes negative when a discount exceeds the subtotal', async () => {
+      const r = await PricingEngineService.calculateOrderPricing({
+        subtotalAmount: SUBTOTAL,
+        discountAmount: SUBTOTAL + 500,
+      });
+      expect(r.sellerMarketplaceCommission.amount).toBe(0);
+    });
   });
 
   describe('Seller settlement', () => {
@@ -76,14 +88,14 @@ describe('Confirmed financial rules', () => {
       expect(r.sellerNetAmount).toBe(980);
     });
 
-    it('includes shipping and subtracts a seller-funded discount', async () => {
+    it('subtracts a seller-funded discount', async () => {
       const r = await PricingEngineService.calculateOrderPricing({
         subtotalAmount: SUBTOTAL,
-        shippingAmount: SHIPPING,
         discountAmount: 200,
       });
-      // 1,000 - 200 + 100 - 20 commission
-      expect(r.sellerNetAmount).toBe(880);
+      // 1,000 - 200 - 16 commission. The commission is 2% of the discounted
+      // 800, not the gross 1,000 — see the commission base tests.
+      expect(r.sellerNetAmount).toBe(784);
     });
   });
 
@@ -168,10 +180,9 @@ describe('Confirmed financial rules', () => {
     it('is order amount plus the buyer transaction fee, and nothing else', async () => {
       const r = await PricingEngineService.calculateOrderPricing({
         subtotalAmount: SUBTOTAL,
-        shippingAmount: SHIPPING,
         discountAmount: 50,
       });
-      expect(r.orderAmount).toBe(SUBTOTAL - 50 + SHIPPING);
+      expect(r.orderAmount).toBe(SUBTOTAL - 50);
       expect(r.buyerTotalAmount).toBe(
         Number((r.orderAmount + r.buyerTransactionFee.totalBuyerFeeAmount).toFixed(2)),
       );

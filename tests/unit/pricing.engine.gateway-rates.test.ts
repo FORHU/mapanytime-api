@@ -4,27 +4,36 @@ import { prisma } from '../../src/utils/prisma';
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
     pricingConfigurations: { findFirst: jest.fn() },
-    pricingComponents: { findFirst: jest.fn() },
+    pricingComponents: { findMany: jest.fn() },
   },
 }));
 
 const config = prisma.pricingConfigurations.findFirst as jest.Mock;
-const component = prisma.pricingComponents.findFirst as jest.Mock;
+const components = prisma.pricingComponents.findMany as jest.Mock;
 
-/** Stand up an ACTIVE configuration whose gateway component carries `rate`/`fixed`. */
+/**
+ * Stand up an ACTIVE configuration whose gateway component carries
+ * `rate`/`fixed`. The engine reads every component under a configuration in one
+ * query and matches them in memory (F37), so the double returns the set rather
+ * than answering per-type lookups.
+ */
 function withGatewayRate(rate: number, fixed = 0) {
   config.mockResolvedValue({ id: 'cfg-1' });
-  component.mockImplementation(({ where }: { where: { type: string } }) => {
-    if (where.type === 'PAYMENT_PROCESSING_FEE') {
-      return Promise.resolve({
-        ratePercentage: rate,
-        fixedAmount: fixed,
-        minFee: null,
-        maxFee: null,
-      });
-    }
-    return Promise.resolve(null); // commission + buyer fee fall back
-  });
+  components.mockResolvedValue([
+    {
+      id: 'comp-gateway',
+      type: 'PAYMENT_PROCESSING_FEE',
+      ratePercentage: rate,
+      fixedAmount: fixed,
+      minFee: null,
+      maxFee: null,
+      providerId: null,
+      paymentMethodId: null,
+      sellerPlan: null,
+      categoryId: null,
+      storeId: null,
+    },
+  ]); // commission + buyer fee fall back
 }
 
 const SUBTOTAL = 1000;
@@ -41,7 +50,7 @@ describe('Gateway rates and the buyer transaction fee', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     config.mockResolvedValue(null);
-    component.mockResolvedValue(null);
+    components.mockResolvedValue([]);
   });
 
   describe('the platform keeps exactly its commission', () => {

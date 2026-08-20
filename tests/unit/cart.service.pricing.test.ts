@@ -10,7 +10,7 @@ jest.mock('../../src/utils/prisma', () => ({
     merchantAdProducts: { findMany: jest.fn() },
     // The preview prices through PricingEngineService now, which reads these.
     pricingConfigurations: { findFirst: jest.fn().mockResolvedValue(null) },
-    pricingComponents: { findFirst: jest.fn().mockResolvedValue(null) },
+    pricingComponents: { findMany: jest.fn().mockResolvedValue([]) },
   },
 }));
 
