@@ -238,6 +238,8 @@ export default class MerchantAdsService {
           ctaLabel: ad.ctaLabel,
           discountType: ad.discountType,
           discountValue: ad.discountValue ? Number(ad.discountValue) : null,
+          buyQuantity: ad.buyQuantity,
+          freeQuantity: ad.freeQuantity,
           imageUrl: ad.imageUrl ?? productImageUrl,
           expiresAt: ad.expiresAt,
           isPromoted: ad.dailyBudget ? Number(ad.dailyBudget) > 0 : false,

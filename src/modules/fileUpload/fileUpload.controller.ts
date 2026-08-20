@@ -9,7 +9,9 @@ export default class FileUploadController {
     const schema = Joi.object({
       fileName: Joi.string().required(),
       mimeType: Joi.string().required(),
-      folder: Joi.string().valid('compliance', 'products', 'avatars').default('compliance'),
+      folder: Joi.string()
+        .valid('compliance', 'products', 'avatars', 'stores')
+        .default('compliance'),
     });
 
     const { error, value } = schema.validate(req.query);

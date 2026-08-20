@@ -13,6 +13,19 @@ async function resolveImageUrl(file: { path: string; bucket?: string | null }): 
   return S3Util.getFileUrl(file.path);
 }
 
+// Replaces the raw logoFile/bannerFile relations (internal S3 keys) with
+// public URLs, the same way the public /stores/nearby listing already does.
+function withPhotoUrls<
+  T extends { logoFile: { path: string } | null; bannerFile: { path: string } | null },
+>(entity: T) {
+  const { logoFile, bannerFile, ...rest } = entity;
+  return {
+    ...rest,
+    logoUrl: logoFile ? S3Util.getPublicUrl(logoFile.path) : null,
+    bannerUrl: bannerFile ? S3Util.getPublicUrl(bannerFile.path) : null,
+  };
+}
+
 export type MerchantAdWithProducts = Prisma.MerchantAdsGetPayload<{
   include: {
     products: {
@@ -298,6 +311,7 @@ export default class StoreService {
       email?: string;
       categoryId?: string;
       isActive?: boolean;
+      bannerId?: string | null;
       currentAddress?: string;
       city?: string;
       province?: string;
@@ -321,6 +335,10 @@ export default class StoreService {
     if (input.isActive !== undefined) storeData.isActive = input.isActive;
     if (input.categoryId !== undefined) {
       storeData.primaryCategory = { connect: { id: input.categoryId } };
+    }
+    if (input.bannerId !== undefined) {
+      storeData.bannerFile =
+        input.bannerId === null ? { disconnect: true } : { connect: { id: input.bannerId } };
     }
 
     const locationData: Prisma.StoreLocationsUpdateWithoutStoreInput = {};
@@ -349,7 +367,7 @@ export default class StoreService {
 
       return tx.stores.findUnique({
         where: { id: storeId },
-        include: { storeLocations: true },
+        include: { storeLocations: true, logoFile: true, bannerFile: true },
       });
     });
 
@@ -371,7 +389,7 @@ export default class StoreService {
       logger.warn(`[Socket] Failed to emit store:upserted for updated store ${storeId}.`);
     }
 
-    return updated;
+    return updated ? withPhotoUrls(updated) : updated;
   }
 
   static async getStoreById(id: string) {
@@ -385,7 +403,7 @@ export default class StoreService {
       throw { status: 404, message: 'Store is not currently active.' };
     }
 
-    return { ...store, merchantAds: filterLiveAds(store.merchantAds) };
+    return { ...withPhotoUrls(store), merchantAds: filterLiveAds(store.merchantAds) };
   }
 
   static async getStoreProducts(storeId: string, limit: number, offset: number) {

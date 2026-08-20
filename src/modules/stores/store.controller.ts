@@ -101,6 +101,9 @@ export default class StoreController {
       email: Joi.alternatives(Joi.string().email(), Joi.string().valid('')).optional(),
       categoryId: Joi.string().optional(),
       isActive: Joi.boolean().optional(),
+      // The Files row id from POST /v1/files, after the client uploads the
+      // photo straight to S3 via the presigned-URL flow. null clears it.
+      bannerId: Joi.string().allow(null).optional(),
 
       currentAddress: Joi.string().allow('').optional(),
       city: Joi.string().allow('').optional(),

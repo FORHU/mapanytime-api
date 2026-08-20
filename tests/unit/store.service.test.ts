@@ -26,7 +26,7 @@ describe('StoreService', () => {
       (StoreRepository.getStoreById as jest.Mock).mockResolvedValue(mockStore);
 
       const result = await StoreService.getStoreById('store-123');
-      expect(result).toEqual(mockStore);
+      expect(result).toEqual({ ...mockStore, logoUrl: null, bannerUrl: null });
       expect(StoreRepository.getStoreById).toHaveBeenCalledWith('store-123');
     });
 
