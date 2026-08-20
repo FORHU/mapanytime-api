@@ -1,12 +1,36 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
+import logger from '../../utils/logger';
 
 export type PaymentFeePayerPolicy = 'BUYER' | 'SELLER' | 'PLATFORM' | 'SHARED';
+
+/** The `PricingComponents` columns the engine actually reads. */
+type PricingComponentRow = {
+  id: string;
+  type: string;
+  ratePercentage: Prisma.Decimal | null;
+  fixedAmount: Prisma.Decimal | null;
+  minFee: Prisma.Decimal | null;
+  maxFee: Prisma.Decimal | null;
+  providerId: string | null;
+  paymentMethodId: string | null;
+  sellerPlan: string | null;
+  categoryId: string | null;
+  storeId: string | null;
+};
+
+/**
+ * One read of the rate card, reusable across as many baskets as needed.
+ * See `calculateManyOrderPricing`.
+ */
+interface ResolvedPricingConfiguration {
+  config: { id: string; paymentFeePayerPolicy?: string } | null;
+  components: PricingComponentRow[];
+}
 
 export interface PricingCalculationInput {
   subtotalAmount: number;
   discountAmount?: number;
-  shippingAmount?: number;
-  taxAmount?: number;
   storeId?: string;
   sellerId?: string;
   sellerPlan?: string;
@@ -14,6 +38,14 @@ export interface PricingCalculationInput {
   providerId?: string;
   paymentMethodId?: string;
   paymentMethodCode?: string;
+  /**
+   * The method's `PAYMENTMETHODTYPE`. Cash is zero-rated off this rather than
+   * off `paymentMethodCode`: the seeded cash method's code is `COD`, so a code
+   * comparison against 'CASH' never matched a real order and every
+   * pay-at-the-stall buyer was charged a gateway fee for a gateway that never
+   * ran. See FLAGS.md F31.
+   */
+  paymentMethodType?: string;
   paymentFeePayerPolicy?: PaymentFeePayerPolicy;
 }
 
@@ -50,16 +82,14 @@ export interface SellerMarketplaceCommissionBreakdown {
   componentId?: string;
   label: string;
   rate: number;
-  amount: number; // MapAnytime marketplace commission, charged on the goods subtotal
+  amount: number; // MapAnytime marketplace commission, charged on the discounted goods subtotal
 }
 
 export interface OrderPricingResult {
   // 1. Order Core
   subtotalAmount: number;
   discountAmount: number;
-  shippingAmount: number;
-  taxAmount: number;
-  orderAmount: number; // Subtotal - Discount + Shipping + Tax
+  orderAmount: number; // Subtotal - Discount
 
   // 2. Gateway Processing Cost
   paymentProcessingCost: PaymentProcessingCostBreakdown;
@@ -73,10 +103,7 @@ export interface OrderPricingResult {
 
   // 5. Seller Marketplace Commission & Settlement
   sellerMarketplaceCommission: SellerMarketplaceCommissionBreakdown;
-  /**
-   * Subtotal - Discount + Shipping - Commission (- gateway fee when the payer
-   * policy is SELLER). Excludes tax, which is remitted rather than settled.
-   */
+  /** Subtotal - Discount - Commission (- gateway fee when the policy is SELLER). */
   sellerNetAmount: number;
 
   // 6. Platform Financial Economics
@@ -86,8 +113,37 @@ export interface OrderPricingResult {
 }
 
 const DEFAULT_SELLER_COMMISSION_RATE = 0.02; // 2.00% Seller Marketplace Fee
-const DEFAULT_PAYMENT_GATEWAY_RATE = 0.02; // 2.00% Base Gateway Processing Cost
-const DEFAULT_BUYER_PLATFORM_RATE = 0.0023; // 0.23% Buyer Platform Fee (Combined 2.23%)
+
+/**
+ * Fallback gateway rate, used only when no `PricingConfigurations` row matches.
+ * It understates every real PayMongo rate (GCash 2.23%, Maya 1.79%, domestic
+ * card 3.125% + P13.39), so any order priced off it undercharges the buyer and
+ * the platform absorbs the difference. Seed a configuration — see FLAGS.md F2.
+ */
+const DEFAULT_PAYMENT_GATEWAY_RATE = 0.02;
+
+/**
+ * Platform handling margin on top of the gateway's own cost.
+ *
+ * Zero by decision (2026-08-20): the previous 0.23% was not margin at all. It
+ * was the remainder of GCash's 2.23% after someone split that single rate into
+ * a fictional "2% cost + 0.23% margin", so the platform booked revenue it had
+ * already remitted to PayMongo. Platform revenue is the commission alone.
+ * Raise this only to charge a real, deliberate markup. See FLAGS.md.
+ */
+const DEFAULT_BUYER_PLATFORM_RATE = 0;
+
+/**
+ * Fraction of the gateway cost that is added to what the buyer pays, per payer
+ * policy. This drives the gross-up: only the part added on top enlarges the
+ * amount the gateway bills against.
+ */
+const BUYER_COST_SHARE: Record<PaymentFeePayerPolicy, number> = {
+  BUYER: 1,
+  SHARED: 0.5,
+  SELLER: 0,
+  PLATFORM: 0,
+};
 
 export class PricingEngineService {
   /**
@@ -100,33 +156,89 @@ export class PricingEngineService {
    *  5. Seller Marketplace Commission
    */
   static async calculateOrderPricing(input: PricingCalculationInput): Promise<OrderPricingResult> {
+    const resolved = await this.resolveConfiguration();
+    return this.priceWith(resolved, input);
+  }
+
+  /**
+   * Price several baskets against one read of the configuration.
+   *
+   * `GET /payments/methods?amount=` prices every method to quote its fee, and
+   * calling `calculateOrderPricing` per method re-read the configuration and
+   * its components each time — roughly 15 queries on a public, unauthenticated
+   * endpoint. See FLAGS.md F37.
+   */
+  static async calculateManyOrderPricing(
+    inputs: PricingCalculationInput[],
+  ): Promise<OrderPricingResult[]> {
+    if (inputs.length === 0) return [];
+    const resolved = await this.resolveConfiguration();
+    return inputs.map((input) => this.priceWith(resolved, input));
+  }
+
+  /**
+   * Read the active configuration and every component under it, in one go.
+   *
+   * The components are matched in memory afterwards rather than with a query
+   * per component type: a configuration holds a handful of rows, and filtering
+   * them here costs nothing next to three more round trips.
+   */
+  private static async resolveConfiguration(): Promise<ResolvedPricingConfiguration> {
+    const config = await this.getActivePricingConfiguration();
+    if (!config) return { config: null, components: [] };
+
+    try {
+      const components = await prisma.pricingComponents.findMany({
+        where: { pricingId: config.id, isActive: true },
+        orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+      });
+      return { config, components };
+    } catch {
+      return { config, components: [] };
+    }
+  }
+
+  private static priceWith(
+    resolved: ResolvedPricingConfiguration,
+    input: PricingCalculationInput,
+  ): OrderPricingResult {
     const subtotal = Math.max(0, Number(input.subtotalAmount) || 0);
     const discount = Math.max(0, Number(input.discountAmount) || 0);
-    const shipping = Math.max(0, Number(input.shippingAmount) || 0);
-    const tax = Math.max(0, Number(input.taxAmount) || 0);
+    // Eligible transaction base amount. No tax term: the platform is a
+    // marketplace intermediary and collects no VAT on the seller's goods.
+    // See FLAGS.md.
+    const orderAmount = Math.max(0, subtotal - discount);
 
-    // Eligible transaction base amount
-    const orderAmount = Math.max(0, subtotal - discount + shipping + tax);
+    // ── STEP 1: Active Pricing Configuration Container ────────────────
+    const activePricingConfig = resolved.config;
 
-    // ── STEP 1: Resolve Active Pricing Configuration Container ────────
-    const activePricingConfig = await this.getActivePricingConfiguration();
+    // The policy is resolved before the gateway cost because it decides how
+    // much of that cost is added to the buyer's total — which is the amount
+    // the gateway then bills against. See `grossUp`.
+    //
+    // Precedence: an explicit input (a quote asking "what if?"), then the
+    // active configuration's policy, then BUYER. The configuration column is
+    // new — before it, the policy was an engine input nothing ever passed, so
+    // every order priced as BUYER whatever the admin had configured.
+    // See FLAGS.md F20 / FEE-5.
+    const policy: PaymentFeePayerPolicy =
+      input.paymentFeePayerPolicy ||
+      (activePricingConfig?.paymentFeePayerPolicy as PaymentFeePayerPolicy | undefined) ||
+      'BUYER';
+    const buyerCostShare = BUYER_COST_SHARE[policy];
 
     // ── STEP 2: Resolve Payment Processing Gateway Cost ───────────────
-    const paymentProcessingCost = await this.resolvePaymentProcessingCost(
+    const paymentProcessingCost = this.resolvePaymentProcessingCost(
       orderAmount,
-      activePricingConfig?.id,
+      resolved.components,
       input,
+      buyerCostShare,
     );
 
     // ── STEP 3: Resolve Buyer Platform Handling Fee ───────────────────
-    const buyerPlatformFee = await this.resolveBuyerPlatformFee(
-      orderAmount,
-      activePricingConfig?.id,
-      input,
-    );
+    const buyerPlatformFee = this.resolveBuyerPlatformFee(orderAmount, resolved.components);
 
     // ── STEP 4: Apply Payment Fee Payer Policy ────────────────────────
-    const policy: PaymentFeePayerPolicy = input.paymentFeePayerPolicy || 'BUYER';
     let buyerProviderCostPortion = 0;
     let sellerPaymentDeduction = 0;
 
@@ -142,7 +254,13 @@ export class PricingEngineService {
         sellerPaymentDeduction = paymentProcessingCost.calculatedCost;
         break;
       case 'SHARED':
+        // Buyer half, seller half. The seller's half was previously left
+        // unassigned, so the platform silently absorbed it and SHARED behaved
+        // as "buyer half / platform half". See FLAGS.md F29.
         buyerProviderCostPortion = Number((paymentProcessingCost.calculatedCost / 2).toFixed(2));
+        sellerPaymentDeduction = Number(
+          (paymentProcessingCost.calculatedCost - buyerProviderCostPortion).toFixed(2),
+        );
         break;
     }
 
@@ -160,17 +278,19 @@ export class PricingEngineService {
     };
 
     // ── STEP 5: Resolve Seller Marketplace Commission ─────────────────
-    // Charged on the goods subtotal only. Shipping is pass-through and tax is
-    // remitted, so neither belongs in the commission base.
-    const commission = await this.resolveSellerCommission(subtotal, activePricingConfig?.id, input);
+    // Charged on the goods the seller actually sold, net of discount.
+    //
+    // The base was previously the gross, pre-discount subtotal, carried over
+    // from `TaxationService`. That made a seller funding a 20% promotion pay
+    // commission on money no one ever handed them. Settled 2026-08-20:
+    // commission follows the discounted subtotal. See FLAGS.md F4.
+    const commissionBase = Math.max(0, subtotal - discount);
+    const commission = this.resolveSellerCommission(commissionBase, resolved.components, input);
 
     // ── STEP 6: Calculate Final Checkout Totals & Settlements ────────
     const buyerTotalAmount = Number((orderAmount + totalBuyerFeeAmount).toFixed(2));
     const sellerNetAmount = Number(
-      Math.max(
-        0,
-        subtotal - discount + shipping - commission.amount - sellerPaymentDeduction,
-      ).toFixed(2),
+      Math.max(0, subtotal - discount - commission.amount - sellerPaymentDeduction).toFixed(2),
     );
 
     // ── STEP 7: Platform Economics ───────────────────────────────────
@@ -185,8 +305,6 @@ export class PricingEngineService {
     return {
       subtotalAmount: Number(subtotal.toFixed(2)),
       discountAmount: Number(discount.toFixed(2)),
-      shippingAmount: Number(shipping.toFixed(2)),
-      taxAmount: Number(tax.toFixed(2)),
       orderAmount: Number(orderAmount.toFixed(2)),
       paymentProcessingCost,
       buyerPlatformFee,
@@ -203,7 +321,7 @@ export class PricingEngineService {
   private static async getActivePricingConfiguration() {
     try {
       const now = new Date();
-      return await prisma.pricingConfigurations.findFirst({
+      const config = await prisma.pricingConfigurations.findFirst({
         where: {
           status: 'ACTIVE',
           effectiveFrom: { lte: now },
@@ -211,166 +329,215 @@ export class PricingEngineService {
         },
         orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
       });
+
+      if (!config) this.warnNoConfiguration();
+      return config;
     } catch {
+      this.warnNoConfiguration();
       return null;
     }
   }
 
-  private static async resolvePaymentProcessingCost(
-    amount: number,
-    pricingId?: string,
-    context?: PricingCalculationInput,
-  ): Promise<PaymentProcessingCostBreakdown> {
-    try {
-      if (pricingId) {
-        const component = await prisma.pricingComponents.findFirst({
-          where: {
-            pricingId,
-            type: 'PAYMENT_PROCESSING_FEE',
-            isActive: true,
-            AND: [
-              context?.providerId
-                ? { OR: [{ providerId: context.providerId }, { providerId: null }] }
-                : {},
-              context?.paymentMethodId
-                ? { OR: [{ paymentMethodId: context.paymentMethodId }, { paymentMethodId: null }] }
-                : {},
-            ],
-          },
-          orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
-        });
+  /**
+   * A missing configuration used to be indistinguishable from a correct one —
+   * the engine silently priced every order off its fallback constants. Warn
+   * once per process so the state is visible without flooding the log on every
+   * order. See FLAGS.md F2.
+   */
+  private static warnedNoConfiguration = false;
+  private static warnNoConfiguration() {
+    if (this.warnedNoConfiguration) return;
+    this.warnedNoConfiguration = true;
+    logger.warn(
+      '[Pricing] No ACTIVE PricingConfigurations row matched. Every order is ' +
+        'pricing off built-in fallback rates, which understate the real ' +
+        'PayMongo rates — the platform absorbs the difference. See FLAGS.md F2.',
+    );
+  }
 
-        if (component) {
-          const rate = component.ratePercentage ? Number(component.ratePercentage) : 0;
-          const fixed = component.fixedAmount ? Number(component.fixedAmount) : 0;
-          let calculated = amount * rate + fixed;
-          if (component.minFee && calculated < Number(component.minFee))
-            calculated = Number(component.minFee);
-          if (component.maxFee && calculated > Number(component.maxFee))
-            calculated = Number(component.maxFee);
+  /**
+   * Gross up a gateway fee so it survives being charged on the captured total.
+   *
+   * PayMongo bills its rate against the amount actually captured. Under `BUYER`
+   * the fee is added on top of the order, so the gateway bills against
+   * `order + fee` and a plain `amount * rate + fixed` leaves the platform short
+   * by `fee * rate`. Under `SELLER` or `PLATFORM` nothing is added — the buyer
+   * pays the order amount and the fee is recovered afterwards — so the captured
+   * total is the order alone and there is nothing to gross up. `SHARED` adds
+   * half.
+   *
+   * Solving `captured = amount + cost * buyerShare` against
+   * `cost = captured * rate + fixed` gives the divisor below. See FLAGS.md F30.
+   */
+  private static grossUp(amount: number, rate: number, fixed: number, buyerShare = 1): number {
+    if (rate <= 0 && fixed <= 0) return 0;
+    const divisor = 1 - rate * buyerShare;
+    if (divisor <= 0) return amount * rate + fixed; // nonsensical rate; never divide by <= 0
+    return (amount * rate + fixed) / divisor;
+  }
 
-          return {
-            providerId: context?.providerId,
-            paymentMethodId: context?.paymentMethodId,
-            componentName: 'Configured Payment Processing Fee',
-            ratePercentage: rate,
-            fixedAmount: fixed,
-            calculatedCost: Number(calculated.toFixed(2)),
-          };
-        }
+  /**
+   * Pick the component that applies, from the already-loaded set.
+   *
+   * A component with `null` in a scope column is a wildcard that matches
+   * anything; a component naming a specific provider, method, store, plan or
+   * category matches only that. The list arrives pre-sorted by priority then
+   * recency, so the first match is the winner — the same order the per-type
+   * queries used before they were collapsed into one read.
+   */
+  private static matchComponent(
+    components: PricingComponentRow[],
+    type: string,
+    scopes: Partial<
+      Record<
+        'providerId' | 'paymentMethodId' | 'storeId' | 'sellerPlan' | 'categoryId',
+        string | undefined
+      >
+    >,
+  ): PricingComponentRow | undefined {
+    return components.find((c) => {
+      if (c.type !== type) return false;
+      for (const [key, wanted] of Object.entries(scopes)) {
+        if (wanted === undefined) continue;
+        const actual = c[key as keyof PricingComponentRow] as string | null;
+        if (actual !== null && actual !== wanted) return false;
       }
-    } catch {
-      // Fallback
+      return true;
+    });
+  }
+
+  /** Apply a component's min/max floor and ceiling to a computed fee. */
+  private static clampFee(value: number, component: PricingComponentRow): number {
+    let out = value;
+    if (component.minFee != null && out < Number(component.minFee)) out = Number(component.minFee);
+    if (component.maxFee != null && out > Number(component.maxFee)) out = Number(component.maxFee);
+    return out;
+  }
+
+  private static resolvePaymentProcessingCost(
+    amount: number,
+    components: PricingComponentRow[],
+    context?: PricingCalculationInput,
+    buyerShare = 1,
+  ): PaymentProcessingCostBreakdown {
+    // Cash never touches a gateway, so there is nothing to charge for. Keyed on
+    // the method TYPE: the seeded cash method's code is `COD`, so the old
+    // comparison against the string 'CASH' never matched and every
+    // pay-at-the-stall order carried a phantom gateway fee. See FLAGS.md F31.
+    if (this.isCashPayment(context)) {
+      return {
+        providerId: context?.providerId,
+        paymentMethodId: context?.paymentMethodId,
+        componentName: 'In-Store Cash',
+        ratePercentage: 0,
+        fixedAmount: 0,
+        calculatedCost: 0,
+      };
     }
 
-    const isCash = context?.paymentMethodCode?.toUpperCase() === 'CASH';
-    const rate = isCash ? 0 : DEFAULT_PAYMENT_GATEWAY_RATE;
-    const cost = amount * rate;
+    const component = this.matchComponent(components, 'PAYMENT_PROCESSING_FEE', {
+      providerId: context?.providerId,
+      paymentMethodId: context?.paymentMethodId,
+    });
+
+    if (component) {
+      const rate = component.ratePercentage ? Number(component.ratePercentage) : 0;
+      const fixed = component.fixedAmount ? Number(component.fixedAmount) : 0;
+      const calculated = this.clampFee(this.grossUp(amount, rate, fixed, buyerShare), component);
+
+      return {
+        providerId: context?.providerId,
+        paymentMethodId: context?.paymentMethodId,
+        componentName: 'Configured Payment Processing Fee',
+        ratePercentage: rate,
+        fixedAmount: fixed,
+        calculatedCost: Number(calculated.toFixed(2)),
+      };
+    }
+
+    // No configured component matched. This is the state an environment is in
+    // until a PricingConfigurations row exists, and it understates every real
+    // rate — see FLAGS.md F2.
+    const rate = DEFAULT_PAYMENT_GATEWAY_RATE;
+    const cost = this.grossUp(amount, rate, 0, buyerShare);
 
     return {
       providerId: context?.providerId,
       paymentMethodId: context?.paymentMethodId,
-      componentName: isCash ? 'In-Store Cash' : 'Default Gateway Processing Fee',
+      componentName: 'Default Gateway Processing Fee',
       ratePercentage: rate,
       fixedAmount: 0,
       calculatedCost: Number(cost.toFixed(2)),
     };
   }
 
-  private static async resolveBuyerPlatformFee(
+  /**
+   * True when the buyer settles in cash at the stall. Matches on
+   * `PAYMENTMETHODTYPE.CASH`, falling back to the legacy code spellings so an
+   * older client that still sends `CASH_ON_DELIVERY` is not charged a gateway
+   * fee either.
+   */
+  private static isCashPayment(context?: PricingCalculationInput): boolean {
+    if (context?.paymentMethodType?.toUpperCase() === 'CASH') return true;
+    const code = context?.paymentMethodCode?.toUpperCase();
+    return code === 'CASH' || code === 'COD' || code === 'CASH_ON_DELIVERY';
+  }
+
+  private static resolveBuyerPlatformFee(
     amount: number,
-    pricingId?: string,
-    _context?: PricingCalculationInput,
-  ): Promise<BuyerPlatformFeeBreakdown> {
-    try {
-      if (pricingId) {
-        const component = await prisma.pricingComponents.findFirst({
-          where: {
-            pricingId,
-            type: 'BUYER_TRANSACTION_FEE',
-            isActive: true,
-          },
-          orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
-        });
+    components: PricingComponentRow[],
+  ): BuyerPlatformFeeBreakdown {
+    const component = this.matchComponent(components, 'BUYER_TRANSACTION_FEE', {});
 
-        if (component) {
-          const rate = component.ratePercentage ? Number(component.ratePercentage) : 0;
-          const fixed = component.fixedAmount ? Number(component.fixedAmount) : 0;
-          let calculated = amount * rate + fixed;
-          if (component.minFee && calculated < Number(component.minFee))
-            calculated = Number(component.minFee);
-          if (component.maxFee && calculated > Number(component.maxFee))
-            calculated = Number(component.maxFee);
+    if (component) {
+      const rate = component.ratePercentage ? Number(component.ratePercentage) : 0;
+      const fixed = component.fixedAmount ? Number(component.fixedAmount) : 0;
+      const calculated = this.clampFee(amount * rate + fixed, component);
 
-          return {
-            componentName: 'Buyer Platform Handling Fee',
-            ratePercentage: rate,
-            fixedAmount: fixed,
-            amount: Number(calculated.toFixed(2)),
-          };
-        }
-      }
-    } catch {
-      // Fallback
+      return {
+        componentName: 'Buyer Platform Handling Fee',
+        ratePercentage: rate,
+        fixedAmount: fixed,
+        amount: Number(calculated.toFixed(2)),
+      };
     }
 
     const rate = DEFAULT_BUYER_PLATFORM_RATE;
-    const fee = amount * rate;
     return {
-      componentName: 'Standard Buyer Platform Fee (0.23%)',
+      componentName: 'Standard Buyer Platform Fee',
       ratePercentage: rate,
       fixedAmount: 0,
-      amount: Number(fee.toFixed(2)),
+      amount: Number((amount * rate).toFixed(2)),
     };
   }
 
-  private static async resolveSellerCommission(
+  private static resolveSellerCommission(
     amount: number,
-    pricingId?: string,
+    components: PricingComponentRow[],
     context?: PricingCalculationInput,
-  ): Promise<SellerMarketplaceCommissionBreakdown> {
-    try {
-      if (pricingId) {
-        const component = await prisma.pricingComponents.findFirst({
-          where: {
-            pricingId,
-            type: 'SELLER_MARKETPLACE_FEE',
-            isActive: true,
-            AND: [
-              context?.storeId ? { OR: [{ storeId: context.storeId }, { storeId: null }] } : {},
-              context?.sellerPlan
-                ? { OR: [{ sellerPlan: context.sellerPlan }, { sellerPlan: null }] }
-                : {},
-              context?.categoryId
-                ? { OR: [{ categoryId: context.categoryId }, { categoryId: null }] }
-                : {},
-            ],
-          },
-          orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
-        });
+  ): SellerMarketplaceCommissionBreakdown {
+    const component = this.matchComponent(components, 'SELLER_MARKETPLACE_FEE', {
+      storeId: context?.storeId,
+      sellerPlan: context?.sellerPlan,
+      categoryId: context?.categoryId,
+    });
 
-        if (component) {
-          const rate = component.ratePercentage
-            ? Number(component.ratePercentage)
-            : DEFAULT_SELLER_COMMISSION_RATE;
-          const fee = amount * rate;
-          return {
-            componentId: component.id,
-            label: 'Seller Marketplace Commission',
-            rate,
-            amount: Number(fee.toFixed(2)),
-          };
-        }
-      }
-    } catch {
-      // Fallback
+    if (component) {
+      const rate = component.ratePercentage
+        ? Number(component.ratePercentage)
+        : DEFAULT_SELLER_COMMISSION_RATE;
+      return {
+        componentId: component.id,
+        label: 'Seller Marketplace Commission',
+        rate,
+        amount: Number((amount * rate).toFixed(2)),
+      };
     }
 
-    const commissionAmount = amount * DEFAULT_SELLER_COMMISSION_RATE;
     return {
       label: 'Seller Marketplace Fee (2.00%)',
       rate: DEFAULT_SELLER_COMMISSION_RATE,
-      amount: Number(commissionAmount.toFixed(2)),
+      amount: Number((amount * DEFAULT_SELLER_COMMISSION_RATE).toFixed(2)),
     };
   }
 }

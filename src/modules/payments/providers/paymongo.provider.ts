@@ -7,6 +7,34 @@ import {
   RefundResult,
 } from './payment-provider.interface';
 
+/** Our `PaymentMethods.code` to PayMongo's `payment_method_types` values. */
+const PAYMONGO_METHOD_TYPES: Record<string, string> = {
+  GCASH: 'gcash',
+  MAYA: 'paymaya',
+  CARD: 'card',
+  QRPH: 'qrph',
+  GRAB_PAY: 'grab_pay',
+  DOB: 'dob',
+};
+
+const ALL_PAYMONGO_METHOD_TYPES = ['card', 'gcash', 'paymaya', 'grab_pay', 'dob', 'qrph'];
+
+/**
+ * Restrict the session to the single method the buyer already chose.
+ *
+ * Offering the full list here would let PayMongo's hosted page decide the
+ * method *after* we priced the order — and each method bills a different rate
+ * (GCash 2.23%, Maya 1.79%, card 3.125% + P13.39). The buyer would then be
+ * charged one method's fee while PayMongo billed another's, and the platform
+ * would absorb the difference. Falls back to the full list only when no method
+ * is known, so an older caller still works.
+ */
+function resolvePaymentMethodTypes(methodCode?: string): string[] {
+  if (!methodCode) return ALL_PAYMONGO_METHOD_TYPES;
+  const mapped = PAYMONGO_METHOD_TYPES[methodCode.toUpperCase()];
+  return mapped ? [mapped] : ALL_PAYMONGO_METHOD_TYPES;
+}
+
 export class PayMongoProvider implements PaymentProvider {
   private secretKey = process.env.PAYMONGO_SECRET_KEY || '';
   private webhookSecret = process.env.PAYMONGO_WEBHOOK_SECRET_KEY || '';
@@ -49,7 +77,7 @@ export class PayMongoProvider implements PaymentProvider {
           show_line_items: true,
           description: input.description,
           line_items: formattedLineItems,
-          payment_method_types: ['card', 'gcash', 'paymaya', 'grab_pay', 'dob', 'qrph'],
+          payment_method_types: resolvePaymentMethodTypes(input.paymentMethodCode),
           reference_number: input.orderId,
           success_url:
             input.successUrl ||

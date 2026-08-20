@@ -33,17 +33,31 @@ export default class NotificationService {
     return notification;
   }
 
-  static async getUserNotifications(userId: string) {
+  static async getUserNotifications(userId: string, options: { unreadOnly?: boolean } = {}) {
     return prisma.notifications.findMany({
-      where: { userId },
+      where: { userId, ...(options.unreadOnly ? { readAt: null } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
   }
 
+  /** Badge count, so a client does not have to pull the feed to render one. */
+  static async getUnreadCount(userId: string) {
+    return prisma.notifications.count({ where: { userId, readAt: null } });
+  }
+
   static async markAsRead(id: string, userId: string) {
+    // `updateMany` with the userId in the filter is what scopes this to the
+    // caller: a bare `update` by id would let anyone mark anyone's read.
     return prisma.notifications.updateMany({
       where: { id, userId },
+      data: { readAt: new Date() },
+    });
+  }
+
+  static async markAllAsRead(userId: string) {
+    return prisma.notifications.updateMany({
+      where: { userId, readAt: null },
       data: { readAt: new Date() },
     });
   }

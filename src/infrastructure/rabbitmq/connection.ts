@@ -11,6 +11,13 @@ class RabbitMQConnection {
   private channel: Channel | null = null;
   private reconnectAttempts = 0;
   private isShuttingDown = false;
+  /**
+   * Held so shutdown can cancel a pending reconnect. A bare `setTimeout` here
+   * kept the event loop alive for up to 30 seconds after everything else had
+   * finished — which is what Jest reports as a worker that will not exit.
+   * See FLAGS.md F38.
+   */
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   public async connect(): Promise<void> {
     if (this.connection && this.channel) return;
@@ -60,7 +67,15 @@ class RabbitMQConnection {
       `[RabbitMQ] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`,
     );
 
-    setTimeout(() => this.connect(), delay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.connect();
+    }, delay);
+
+    // A pending reconnect is not a reason to keep the process running. `unref`
+    // lets Node exit while the timer is outstanding; the timer still fires
+    // normally as long as anything else is keeping the loop alive.
+    this.reconnectTimer.unref?.();
   }
 
   public getChannel(): Channel {
@@ -96,6 +111,11 @@ class RabbitMQConnection {
 
   public async close(): Promise<void> {
     this.isShuttingDown = true;
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     try {
       if (this.channel) {
         await this.channel.close();

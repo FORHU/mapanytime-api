@@ -1,0 +1,46 @@
+-- Fulfillment is pickup-at-the-stall only. The courier apparatus is removed:
+-- nothing ever computed a shipping fee, so a delivery order would have shipped
+-- free. See FIX-PLAN.md item 15.
+
+-- DropTable
+DROP TABLE "Shipments";
+
+-- DropEnum
+DROP TYPE "SHIPMENTSTATUS";
+
+-- AlterTable
+ALTER TABLE "Orders" DROP COLUMN "shippingAmount";
+
+-- AlterEnum: FULLFILLMENTTYPE loses DELIVERY
+ALTER TYPE "FULLFILLMENTTYPE" RENAME TO "FULLFILLMENTTYPE_old";
+CREATE TYPE "FULLFILLMENTTYPE" AS ENUM ('PICKUP');
+ALTER TABLE "Orders" ALTER COLUMN "type" DROP DEFAULT;
+ALTER TABLE "Orders" ALTER COLUMN "type" TYPE "FULLFILLMENTTYPE" USING ('PICKUP'::text::"FULLFILLMENTTYPE");
+ALTER TABLE "Orders" ALTER COLUMN "type" SET DEFAULT 'PICKUP';
+DROP TYPE "FULLFILLMENTTYPE_old";
+
+-- AlterEnum: ORDERCHARGETYPE loses SHIPPING, and only SHIPPING.
+-- The recreated list must carry every other value the type currently holds —
+-- SELLER_SUBSIDY, CAMPAIGN, REFUND and ADJUSTMENT included. Dropping them here
+-- would fail outright on any row using one, and leave the database out of step
+-- with schema.prisma even where it succeeded.
+DELETE FROM "OrderCharges" WHERE "type" = 'SHIPPING';
+ALTER TYPE "ORDERCHARGETYPE" RENAME TO "ORDERCHARGETYPE_old";
+CREATE TYPE "ORDERCHARGETYPE" AS ENUM ('PRODUCT', 'DISCOUNT', 'BUYER_TRANSACTION_FEE', 'SELLER_MARKETPLACE_FEE', 'PAYMENT_PROCESSING_FEE', 'TAX', 'PROMOTION', 'PLATFORM_SUBSIDY', 'SELLER_SUBSIDY', 'CAMPAIGN', 'REFUND', 'ADJUSTMENT');
+ALTER TABLE "OrderCharges" ALTER COLUMN "type" TYPE "ORDERCHARGETYPE" USING ("type"::text::"ORDERCHARGETYPE");
+DROP TYPE "ORDERCHARGETYPE_old";
+
+-- AlterEnum: ADDRESSTYPE loses SHIPPING
+UPDATE "BuyerAddresses" SET "addressType" = 'HOME' WHERE "addressType" = 'SHIPPING';
+ALTER TABLE "BuyerAddresses" ALTER COLUMN "addressType" DROP DEFAULT;
+ALTER TYPE "ADDRESSTYPE" RENAME TO "ADDRESSTYPE_old";
+CREATE TYPE "ADDRESSTYPE" AS ENUM ('BILLING', 'HOME', 'OFFICE');
+ALTER TABLE "BuyerAddresses" ALTER COLUMN "addressType" TYPE "ADDRESSTYPE" USING ("addressType"::text::"ADDRESSTYPE");
+ALTER TABLE "BuyerAddresses" ALTER COLUMN "addressType" SET DEFAULT 'HOME';
+DROP TYPE "ADDRESSTYPE_old";
+
+-- AlterEnum: CHARGEBENEFICIARY loses COURIER, now unreachable
+ALTER TYPE "CHARGEBENEFICIARY" RENAME TO "CHARGEBENEFICIARY_old";
+CREATE TYPE "CHARGEBENEFICIARY" AS ENUM ('BUYER', 'SELLER', 'PLATFORM', 'PAYMENT_PROVIDER', 'GOVERNMENT');
+ALTER TABLE "OrderCharges" ALTER COLUMN "beneficiary" TYPE "CHARGEBENEFICIARY" USING ("beneficiary"::text::"CHARGEBENEFICIARY");
+DROP TYPE "CHARGEBENEFICIARY_old";

@@ -12,7 +12,6 @@ import inventoryRoutes from './modules/inventory/inventory.route';
 import cartRoutes from './modules/cart/cart.route';
 import paymentRoute from './modules/payments/payment.route';
 import supplierProductsRoute from './modules/supplierProducts/supplierProducts.route';
-import shipmentRoute from './modules/shipments/shipment.route';
 import returnRoute from './modules/returns/return.route';
 import settlementRoute from './modules/settlements/settlement.route';
 import payoutRoute from './modules/payouts/payout.route';
@@ -27,6 +26,9 @@ import {
 import filesRoute from './modules/files/files.route';
 import analyticsRoute from './modules/analytics/analytics.route';
 import pricingRoute from './modules/pricing/pricing.route';
+import reviewRoute from './modules/reviews/review.route';
+import wishlistRoute from './modules/wishlists/wishlist.route';
+import notificationRoute from './modules/notifications/notification.route';
 
 const router = express.Router();
 
@@ -51,7 +53,6 @@ router.use('/v1/orders', orderRoute);
 router.use('/v1/inventory', inventoryRoutes);
 router.use('/v1/cart', cartRoutes);
 router.use('/v1/payments', paymentRoute);
-router.use('/v1/shipments', shipmentRoute);
 router.use('/v1/returns', returnRoute);
 router.use('/v1/settlements', settlementRoute);
 router.use('/v1/payouts', payoutRoute);
@@ -62,5 +63,8 @@ router.use('/v1/admin/app-releases', adminAppReleaseRouter);
 router.use('/v1/admin/approvals', adminApprovalRoute);
 router.use('/v1/properties', propertyRoute);
 router.use('/v1/analytics', analyticsRoute);
+router.use('/v1/reviews', reviewRoute);
+router.use('/v1/wishlist', wishlistRoute);
+router.use('/v1/notifications', notificationRoute);
 
 export default router;
