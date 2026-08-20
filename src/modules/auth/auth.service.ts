@@ -12,6 +12,14 @@ import {
 } from '../../config';
 import CacheUtil from '../../utils/cache.util';
 import logger from '../../utils/logger';
+import { publish } from '../../infrastructure/rabbitmq/publisher';
+import { ROUTING_KEYS } from '../../events/routing-keys';
+
+/** How long a reset code stays usable. Short, because the code is only 4 digits. */
+const PASSWORD_RESET_TTL_MINUTES = 15;
+
+/** Wrong guesses allowed against one code before it is burned. */
+const MAX_RESET_ATTEMPTS = 5;
 
 export default class AuthSvc {
   static async register(data: {
@@ -248,6 +256,143 @@ export default class AuthSvc {
     return this.generateAuthResponse(user, session.provider || 'local', false, {
       replacesRefreshToken: refreshToken,
     });
+  }
+
+  /**
+   * Start a password reset: mint a one-time code, store its hash, email it.
+   *
+   * Always resolves the same way whether or not the address exists. Telling an
+   * unauthenticated caller "no such account" turns this into an email
+   * enumeration oracle, which is a worse leak than the inconvenience it saves.
+   * See FLAGS.md ID-6.
+   */
+  static async requestPasswordReset(email: string) {
+    const genericResponse = {
+      message: 'If an account exists for that address, a reset code has been sent.',
+    };
+
+    const user = await AuthRepo.findUserByEmail(email);
+    if (!user) {
+      logger.info(`[Auth] Password reset requested for unknown address: ${email}`);
+      return genericResponse;
+    }
+
+    // Any code already outstanding is retired, so a user who asks twice cannot
+    // be confused about which of two live codes to type.
+    await prisma.passwordResetTokens.updateMany({
+      where: { userId: user.id, consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
+
+    // 4 digits, to match the client's OTP field. Short codes are only safe
+    // because they expire fast and the attempt counter closes them — see
+    // MAX_RESET_ATTEMPTS in resetPassword.
+    const code = String(crypto.randomInt(0, 10000)).padStart(4, '0');
+
+    await prisma.passwordResetTokens.create({
+      data: {
+        userId: user.id,
+        codeHash: this.hashResetCode(code),
+        expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000),
+      },
+    });
+
+    await publish(ROUTING_KEYS.EMAIL_SEND_REQUESTED, {
+      userId: user.id,
+      email: user.email,
+      subject: 'Your MapAnytime password reset code',
+      templateName: 'password-reset.html',
+      data: {
+        firstName: user.firstName || 'there',
+        code,
+        expiryMinutes: PASSWORD_RESET_TTL_MINUTES,
+      },
+      // Plain-text alternative, for clients that will not render the HTML.
+      body:
+        `Your password reset code is ${code}.
+
+` +
+        `It expires in ${PASSWORD_RESET_TTL_MINUTES} minutes. ` +
+        'If you did not ask to reset your password, you can ignore this email.',
+    });
+
+    logger.info(`[Auth] Password reset code issued for user ${user.id}`);
+    return genericResponse;
+  }
+
+  /**
+   * Complete a password reset.
+   *
+   * Consuming the code and revoking every session happen together: a reset that
+   * changed the password but left an attacker's existing session alive would
+   * not have locked them out of anything.
+   */
+  static async resetPassword(data: { email: string; code: string; newPassword: string }) {
+    const invalid = { status: 400, message: 'That reset code is invalid or has expired.' };
+
+    const user = await AuthRepo.findUserByEmail(data.email);
+    if (!user) throw invalid;
+
+    const token = await prisma.passwordResetTokens.findFirst({
+      where: { userId: user.id, consumedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!token) throw invalid;
+
+    // A 4-digit code is 10,000 possibilities; without a ceiling it is walkable
+    // in seconds. Burning the token on the last attempt means an attacker gets
+    // a fixed budget, not an unlimited one.
+    if (token.attempts >= MAX_RESET_ATTEMPTS) {
+      await prisma.passwordResetTokens.update({
+        where: { id: token.id },
+        data: { consumedAt: new Date() },
+      });
+      logger.warn(`[Auth] Password reset token exhausted for user ${user.id}`);
+      throw invalid;
+    }
+
+    if (token.codeHash !== this.hashResetCode(data.code)) {
+      await prisma.passwordResetTokens.update({
+        where: { id: token.id },
+        data: { attempts: { increment: 1 } },
+      });
+      logger.warn(`[Auth] Wrong password reset code for user ${user.id}`);
+      throw invalid;
+    }
+
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.pbkdf2Sync(data.newPassword, salt, 1000, 64, 'sha512').toString('hex');
+
+    await prisma.$transaction(async (tx) => {
+      await tx.passwordResetTokens.update({
+        where: { id: token.id },
+        data: { consumedAt: new Date() },
+      });
+
+      await tx.users.update({
+        where: { id: user.id },
+        data: { passwordHash: `${salt}:${hash}`, activeSessionId: null },
+      });
+
+      // Every device is signed out. Whoever forced the reset does not keep a
+      // session they opened before it.
+      await tx.session.deleteMany({ where: { userId: user.id } });
+    });
+
+    await CacheUtil.del(`user:${user.id}`);
+    logger.info(`[Auth] Password reset completed for user ${user.id}; all sessions revoked.`);
+
+    return { message: 'Your password has been reset. Please sign in with your new password.' };
+  }
+
+  /**
+   * Reset codes are stored hashed, so a leaked row is not a working code.
+   * SHA-256 rather than pbkdf2 because the input is a random server-issued
+   * value with a minutes-long life, not a user-chosen secret worth stretching.
+   */
+  private static hashResetCode(code: string): string {
+    return crypto.createHash('sha256').update(code.trim()).digest('hex');
   }
 
   static async logout(userId: string, refreshToken?: string) {

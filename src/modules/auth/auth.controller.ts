@@ -66,6 +66,53 @@ export default class AuthController {
   }
 
   /**
+   * Always answers 200 with the same message, present address or not — see
+   * AuthSvc.requestPasswordReset on why enumeration matters more here than
+   * a helpful error does.
+   */
+  static async forgotPassword(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({
+      email: Joi.string()
+        .email({ tlds: { allow: false } })
+        .required(),
+    });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const data = await AuthSvc.requestPasswordReset(value.email);
+      return responseSuccess(res, 200, data, data.message);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async resetPassword(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({
+      email: Joi.string()
+        .email({ tlds: { allow: false } })
+        .required(),
+      // 4 digits, matching the client's OTP field.
+      code: Joi.string()
+        .pattern(/^\d{4}$/)
+        .required()
+        .messages({ 'string.pattern.base': 'The reset code must be 4 digits.' }),
+      newPassword: Joi.string().min(8).required(),
+    });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const data = await AuthSvc.resetPassword(value);
+      return responseSuccess(res, 200, data, data.message);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
    * Google OAuth Sign-In
    *
    * SECURITY — NOT SAFE TO REGISTER AS A ROUTE YET.
