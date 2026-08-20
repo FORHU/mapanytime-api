@@ -31,6 +31,10 @@ export default class InventoryReservationService {
     }
 
     const buyerId = await this.resolveBuyerId(userId);
+
+    // The 15-minute default is the pre-checkout cart hold. Once an order
+    // exists, `OrderService` sets the expiry from the booked pickup slot
+    // instead — see `resolveReservationExpiry` there and FIX-PLAN.md item 14.
     const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
 
     try {
