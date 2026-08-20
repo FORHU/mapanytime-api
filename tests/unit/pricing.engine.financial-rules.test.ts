@@ -1,5 +1,4 @@
 import PricingEngineService from '../../src/modules/pricing/pricing-engine.service';
-import TaxationService from '../../src/modules/taxation/taxation.service';
 
 // The engine reads an optional PricingConfigurations row; with none stored it
 // falls back to its built-in rates, which is the state every environment is in
@@ -15,35 +14,42 @@ const SUBTOTAL = 1000;
 const SHIPPING = 100;
 
 describe('Confirmed financial rules', () => {
-  describe('VAT', () => {
-    it('is 12% of subtotal', () => {
-      expect(TaxationService.calculateTax(SUBTOTAL)).toBe(120);
-    });
-
-    it('is carried through the engine untouched', async () => {
+  // VAT was removed on 2026-08-20: the platform is a marketplace intermediary
+  // and does not collect the seller's output VAT. These lock that in — a
+  // failure here means a tax term crept back into the buyer's total.
+  describe('No tax is added to an order', () => {
+    it('leaves the order amount as subtotal - discount + shipping', async () => {
       const r = await PricingEngineService.calculateOrderPricing({
         subtotalAmount: SUBTOTAL,
-        taxAmount: TaxationService.calculateTax(SUBTOTAL),
+        shippingAmount: SHIPPING,
+        discountAmount: 200,
       });
-      expect(r.taxAmount).toBe(120);
+      expect(r.orderAmount).toBe(SUBTOTAL - 200 + SHIPPING);
+    });
+
+    it('charges the buyer nothing beyond the order amount and the transaction fee', async () => {
+      const r = await PricingEngineService.calculateOrderPricing({
+        subtotalAmount: SUBTOTAL,
+      });
+      expect(r.orderAmount).toBe(SUBTOTAL);
+      expect(r.buyerTotalAmount).toBe(
+        Number((SUBTOTAL + r.buyerTransactionFee.totalBuyerFeeAmount).toFixed(2)),
+      );
     });
   });
 
   describe('Marketplace commission base', () => {
-    it('is the subtotal alone — never subtotal + shipping, VAT, or both', async () => {
+    it('is the subtotal alone — never subtotal + shipping', async () => {
       const r = await PricingEngineService.calculateOrderPricing({
         subtotalAmount: SUBTOTAL,
         shippingAmount: SHIPPING,
-        taxAmount: TaxationService.calculateTax(SUBTOTAL),
       });
 
       // 2.00% of 1,000 — the seller agreement's base.
       expect(r.sellerMarketplaceCommission.amount).toBe(20);
 
-      // The bases this must never silently become: 1,100 / 1,120 / 1,220.
+      // The base this must never silently become: 1,100.
       expect(r.sellerMarketplaceCommission.amount).not.toBe(22);
-      expect(r.sellerMarketplaceCommission.amount).not.toBe(22.4);
-      expect(r.sellerMarketplaceCommission.amount).not.toBe(24.4);
     });
 
     it('does not grow when only shipping grows', async () => {
@@ -59,27 +65,14 @@ describe('Confirmed financial rules', () => {
       );
     });
 
-    it('does not grow when only VAT grows', async () => {
-      const base = await PricingEngineService.calculateOrderPricing({
-        subtotalAmount: SUBTOTAL,
-      });
-      const taxed = await PricingEngineService.calculateOrderPricing({
-        subtotalAmount: SUBTOTAL,
-        taxAmount: 120,
-      });
-      expect(taxed.sellerMarketplaceCommission.amount).toBe(
-        base.sellerMarketplaceCommission.amount,
-      );
-    });
   });
 
   describe('Seller settlement', () => {
-    it('excludes VAT — tax is remitted, not settled to the seller', async () => {
+    it('is the subtotal less the commission', async () => {
       const r = await PricingEngineService.calculateOrderPricing({
         subtotalAmount: SUBTOTAL,
-        taxAmount: TaxationService.calculateTax(SUBTOTAL),
       });
-      // 1,000 subtotal - 20 commission. The 120 VAT must not reach the seller.
+      // 1,000 subtotal - 20 commission.
       expect(r.sellerNetAmount).toBe(980);
     });
 
@@ -130,14 +123,34 @@ describe('Confirmed financial rules', () => {
       expect(r.platformPaymentCost).toBe(r.paymentProcessingCost.calculatedCost);
     });
 
-    it('leaves the buyer platform fee in place regardless of policy', async () => {
-      for (const policy of ['BUYER', 'SELLER', 'PLATFORM'] as const) {
+    it('adds no platform handling fee — that 0.23% was GCash rate, not margin', async () => {
+      // Retired 2026-08-20. The old 0.23% was the remainder of GCash's 2.23%
+      // after it was split into a fictional cost-plus-margin, so the platform
+      // booked revenue it had already remitted. See FLAGS.md.
+      for (const policy of ['BUYER', 'SELLER', 'PLATFORM', 'SHARED'] as const) {
         const r = await PricingEngineService.calculateOrderPricing({
           ...input,
           paymentFeePayerPolicy: policy,
         });
-        expect(r.buyerTransactionFee.platformHandlingFee).toBeGreaterThan(0);
+        expect(r.buyerTransactionFee.platformHandlingFee).toBe(0);
       }
+    });
+
+    it('SHARED: buyer and seller split the gateway cost, not buyer and platform', async () => {
+      // The seller's half used to be left unassigned, so the platform absorbed
+      // it. See FLAGS.md F29.
+      const r = await PricingEngineService.calculateOrderPricing({
+        ...input,
+        paymentFeePayerPolicy: 'SHARED',
+      });
+      const cost = r.paymentProcessingCost.calculatedCost;
+
+      expect(r.buyerTransactionFee.providerProcessingFee).toBeCloseTo(cost / 2, 2);
+      // Whatever the buyer did not cover comes off the settlement.
+      expect(r.sellerNetAmount).toBeCloseTo(980 - (cost - cost / 2), 2);
+      // Between them the two halves cover the gateway in full, so the platform
+      // still nets exactly its commission and carries none of the cost.
+      expect(r.platformNetRevenue).toBeCloseTo(20, 2);
     });
   });
 
@@ -157,9 +170,8 @@ describe('Confirmed financial rules', () => {
         subtotalAmount: SUBTOTAL,
         shippingAmount: SHIPPING,
         discountAmount: 50,
-        taxAmount: TaxationService.calculateTax(SUBTOTAL),
       });
-      expect(r.orderAmount).toBe(SUBTOTAL - 50 + SHIPPING + 120);
+      expect(r.orderAmount).toBe(SUBTOTAL - 50 + SHIPPING);
       expect(r.buyerTotalAmount).toBe(
         Number((r.orderAmount + r.buyerTransactionFee.totalBuyerFeeAmount).toFixed(2)),
       );

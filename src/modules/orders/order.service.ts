@@ -1,6 +1,5 @@
 import OrderRepository from './order.repository';
 import ProductRepository from '../products/product.repository';
-import TaxationService from '../taxation/taxation.service';
 import { computeItemDiscount } from './pricing.util';
 import { validateOrderTransition } from './order.state';
 import { prisma } from '../../utils/prisma';
@@ -136,18 +135,16 @@ export default class OrderService {
       });
 
       // 2. Dynamically calculate order pricing, provider processing fee, payer policy, and marketplace commission
-      const taxAmount = TaxationService.calculateTax(subtotalAmount);
-
       const pricingResult = await PricingEngineService.calculateOrderPricing({
         subtotalAmount,
         discountAmount: totalDiscount,
-        taxAmount,
         storeId: payload.storeId,
         sellerId: store.sellerId,
         categoryId: primaryCategoryId,
         providerId: method.providerId,
         paymentMethodId: method.id,
         paymentMethodCode: method.code,
+        paymentMethodType: method.type,
       });
 
       const charges: Prisma.OrderChargesUncheckedCreateWithoutOrderInput[] = [
@@ -166,17 +163,6 @@ export default class OrderService {
                 amount: pricingResult.shippingAmount,
                 payer: CHARGEPAYER.BUYER,
                 beneficiary: CHARGEBENEFICIARY.COURIER,
-              },
-            ]
-          : []),
-        ...(pricingResult.taxAmount > 0
-          ? [
-              {
-                type: ORDERCHARGETYPE.TAX,
-                source: 'VAT (12%)',
-                amount: pricingResult.taxAmount,
-                payer: CHARGEPAYER.BUYER,
-                beneficiary: CHARGEBENEFICIARY.GOVERNMENT,
               },
             ]
           : []),
@@ -227,7 +213,6 @@ export default class OrderService {
         totalAmount: pricingResult.buyerTotalAmount,
         subtotalAmount: pricingResult.subtotalAmount,
         discountAmount: pricingResult.discountAmount,
-        taxAmount: pricingResult.taxAmount,
         marketplaceFeeAmount: pricingResult.sellerMarketplaceCommission.amount,
         sellerNetAmount: pricingResult.sellerNetAmount,
 
@@ -282,6 +267,7 @@ export default class OrderService {
         currency: 'PHP',
         description: `Payment for Order ${createdOrder.id}`,
         lineItems,
+        paymentMethodCode: method.code,
       });
 
       await tx.payments.updateMany({

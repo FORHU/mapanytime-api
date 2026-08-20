@@ -1,10 +1,8 @@
 import OrderService from '../../src/modules/orders/order.service';
 import OrderRepository from '../../src/modules/orders/order.repository';
-import TaxationRepository from '../../src/modules/taxation/taxation.repository';
 import { prisma } from '../../src/utils/prisma';
 
 jest.mock('../../src/modules/orders/order.repository');
-jest.mock('../../src/modules/taxation/taxation.repository');
 jest.mock('../../src/infrastructure/socket', () => ({
   emitNotificationToUser: jest.fn(),
 }));
@@ -90,7 +88,6 @@ describe('OrderService.createOrder — OrderCharges ledger', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (TaxationRepository.getCommissionRuleForCategory as jest.Mock).mockResolvedValue(null);
     (OrderRepository.insertOrder as jest.Mock).mockImplementation((data) =>
       Promise.resolve({ id: 'order-1', ...data }),
     );
@@ -98,22 +95,19 @@ describe('OrderService.createOrder — OrderCharges ledger', () => {
     (prisma.buyers.findUnique as jest.Mock).mockResolvedValue(null);
   });
 
-  it('persists an explicit TAX charge', async () => {
+  it('never persists a TAX charge — the platform collects no VAT', async () => {
     const { charges } = await createOrderAndReadCharges();
 
-    const tax = charges.find((c) => c.type === 'TAX');
-    expect(tax).toBeDefined();
-    expect(tax!.amount).toBe(120); // 12% of 1,000
-    expect(tax!.payer).toBe('BUYER');
-    expect(tax!.beneficiary).toBe('GOVERNMENT');
+    expect(charges.find((c) => c.type === 'TAX')).toBeUndefined();
+    expect(charges.find((c) => c.beneficiary === 'GOVERNMENT')).toBeUndefined();
   });
 
-  it('records the commission against the subtotal, not the taxed order amount', async () => {
+  it('records the commission against the subtotal', async () => {
     const { charges } = await createOrderAndReadCharges();
 
     const commission = charges.find((c) => c.type === 'SELLER_MARKETPLACE_FEE');
     expect(commission).toBeDefined();
-    expect(commission!.amount).toBe(20); // 2% of 1,000, not of 1,120
+    expect(commission!.amount).toBe(20); // 2% of 1,000
     expect(commission!.payer).toBe('SELLER');
     expect(commission!.beneficiary).toBe('PLATFORM');
   });
@@ -131,10 +125,9 @@ describe('OrderService.createOrder — OrderCharges ledger', () => {
 
     const amountOf = (type: string) => Number(charges.find((c) => c.type === type)?.amount ?? 0);
 
-    // Buyer total = product + tax + shipping - discount + buyer fee
+    // Buyer total = product + shipping - discount + buyer fee
     const buyerSide =
       amountOf('PRODUCT') +
-      amountOf('TAX') +
       amountOf('SHIPPING') -
       amountOf('DISCOUNT') +
       amountOf('BUYER_TRANSACTION_FEE');

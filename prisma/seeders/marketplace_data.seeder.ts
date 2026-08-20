@@ -178,9 +178,10 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
   const orderProduct1 = primaryStore.products[0];
   const orderProduct2 = primaryStore.products[1] || primaryStore.products[0];
 
+  // No tax term: the platform is a marketplace intermediary and collects no
+  // VAT. Commission is the confirmed 2% of subtotal. See FLAGS.md.
   const subtotal1 = Number(orderProduct1.price) * 2;
-  const tax1 = Math.round(subtotal1 * 0.12 * 100) / 100;
-  const fee1 = Math.round(subtotal1 * 0.08 * 100) / 100;
+  const fee1 = Math.round(subtotal1 * 0.02 * 100) / 100;
   const net1 = subtotal1 - fee1;
 
   const completedOrder = await prisma.orders.create({
@@ -191,9 +192,8 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
       sellerName: 'Grace Piatos',
       storeAddressSnapshot: 'Baguio City Public Market, Magsaysay Ave, Baguio',
       sellerPhoneSnapshot: '+639171112222',
-      totalAmount: subtotal1 + tax1,
+      totalAmount: subtotal1,
       subtotalAmount: subtotal1,
-      taxAmount: tax1,
       marketplaceFeeAmount: fee1,
       sellerNetAmount: net1,
       type: FULLFILLMENTTYPE.PICKUP,
@@ -222,9 +222,8 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
       storeAddressSnapshot: 'Session Road, Baguio City',
       totalAmount: Number(orderProduct2.price),
       subtotalAmount: Number(orderProduct2.price),
-      taxAmount: Math.round(Number(orderProduct2.price) * 0.12 * 100) / 100,
-      marketplaceFeeAmount: Math.round(Number(orderProduct2.price) * 0.08 * 100) / 100,
-      sellerNetAmount: Number(orderProduct2.price) * 0.92,
+      marketplaceFeeAmount: Math.round(Number(orderProduct2.price) * 0.02 * 100) / 100,
+      sellerNetAmount: Number(orderProduct2.price) * 0.98,
       type: FULLFILLMENTTYPE.PICKUP,
       status: ORDERSTATUS.PROCESSING,
       pickupAt: new Date(Date.now() + 2 * 60 * 60 * 1000),

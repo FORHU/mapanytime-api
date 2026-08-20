@@ -9,7 +9,6 @@ export default class PricingController {
       subtotalAmount: Joi.number().positive().required(),
       discountAmount: Joi.number().min(0).default(0),
       shippingAmount: Joi.number().min(0).default(0),
-      taxAmount: Joi.number().min(0).default(0),
       storeId: Joi.string().optional(),
       sellerId: Joi.string().optional(),
       sellerPlan: Joi.string().optional(),
@@ -17,6 +16,7 @@ export default class PricingController {
       providerId: Joi.string().optional(),
       paymentMethodId: Joi.string().optional(),
       paymentMethodCode: Joi.string().optional(),
+      paymentMethodType: Joi.string().optional(),
       paymentFeePayerPolicy: Joi.string().valid('BUYER', 'SELLER', 'PLATFORM', 'SHARED').optional(),
     });
 
