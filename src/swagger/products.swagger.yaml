@@ -5,18 +5,63 @@ tags:
 paths:
   /v1/products:
     get:
-      summary: Get all products for a specific store
-      description: Retrieves a list of products belonging to the specified store branch.
+      summary: List the authenticated seller's products
+      description: >-
+        Retrieves the seller's products. Omit `storeId` to aggregate across every
+        store the seller owns (the "All Stores" view); pass it to scope to one
+        branch. Selecting `categoryId` also matches every descendant category,
+        so filtering by a parent returns everything filed beneath it.
       tags: [Products]
       security:
         - BearerAuth: []
       parameters:
         - in: query
           name: storeId
-          required: true
+          required: false
           schema:
             type: string
-          description: The unique identifier of the store branch.
+          description: Scope to one store branch. Omit to aggregate across all of the seller's stores.
+        - in: query
+          name: categoryId
+          required: false
+          schema:
+            type: string
+          description: Filter by category, including all of its descendant categories.
+        - in: query
+          name: search
+          required: false
+          schema:
+            type: string
+          description: Case-insensitive match against name, brand, and description.
+        - in: query
+          name: sortBy
+          required: false
+          schema:
+            type: string
+            enum: [price, name, createdAt]
+            default: createdAt
+        - in: query
+          name: sortOrder
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
       responses:
         '200':
           description: List of products retrieved successfully
@@ -25,11 +70,55 @@ paths:
               schema:
                 $ref: '#/components/schemas/SuccessResponse'
         '400':
-          description: Bad request (Missing storeId parameter)
+          description: Validation error
         '401':
           description: Unauthorized
         '403':
-          description: Forbidden (User does not own the store)
+          description: Forbidden (User is not a seller, or does not own the store)
+        '404':
+          description: Store not found
+
+  /v1/products/my-categories:
+    get:
+      summary: Get the category tree the seller has products in
+      description: >-
+        Returns the category hierarchy the authenticated seller actually has
+        products in, pruned to those branches and rolled up with counts. Powers
+        the seller "My products" category filter. Omit `storeId` to aggregate
+        across every store the seller owns. Depth is unbounded. A seller with no
+        products receives `200` with an empty array, not a 404.
+      tags: [Products]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: query
+          name: storeId
+          required: false
+          schema:
+            type: string
+          description: Scope to one store branch. Omit to aggregate across all of the seller's stores.
+      responses:
+        '200':
+          description: Category tree retrieved successfully (may be an empty array)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SellerCategoryNode'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (User is not a seller, or does not own the store)
+        '404':
+          description: Store not found
 
     post:
       summary: Create a new product
@@ -172,3 +261,33 @@ paths:
           description: Forbidden (User does not own the product)
         '404':
           description: Product or Seller not found
+
+components:
+  schemas:
+    # Recursive node used by GET /v1/products/my-categories. Depth is unbounded:
+    # it mirrors whatever hierarchy the seller's products actually occupy.
+    SellerCategoryNode:
+      type: object
+      properties:
+        id:
+          type: string
+          example: cmr1kabey0004nh306b2ziapm
+        name:
+          type: string
+          example: Bakery
+        parentId:
+          type: string
+          nullable: true
+          example: cmr1kabey0001nh306b2zi000
+        directCount:
+          type: integer
+          description: Products filed directly on this category.
+          example: 3
+        totalCount:
+          type: integer
+          description: directCount plus every descendant's — what the filter displays.
+          example: 18
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/SellerCategoryNode'

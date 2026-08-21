@@ -86,4 +86,9 @@ export default class CategoryService {
   static async getCategoryDescendantIds(categoryId: string) {
     return CategoryRepository.getDescendantCategoryIds(categoryId);
   }
+
+  static async getAncestorClosure(ids: string[]) {
+    if (ids.length === 0) return [];
+    return CategoryRepository.getAncestorClosure(ids);
+  }
 }

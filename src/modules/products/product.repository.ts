@@ -38,7 +38,7 @@ export default class ProductRepository {
       skip: number;
       take: number;
       search?: string;
-      categoryId?: string;
+      categoryIds?: string[];
       sortBy?: 'price' | 'name' | 'createdAt';
       sortOrder?: 'asc' | 'desc';
     } = { skip: 0, take: 100 },
@@ -48,7 +48,9 @@ export default class ProductRepository {
     const where: Prisma.ProductsWhereInput = {
       ...(storeId ? { storeId } : { store: { sellerId } }),
       isActive: true,
-      ...(opts.categoryId ? { categoryId: opts.categoryId } : {}),
+      // Selecting a parent category must also match everything filed beneath it,
+      // so the caller passes the pre-expanded descendant set rather than one id.
+      ...(opts.categoryIds?.length ? { categoryId: { in: opts.categoryIds } } : {}),
       ...(term
         ? {
             OR: [
@@ -103,6 +105,23 @@ export default class ProductRepository {
     );
 
     return { items, total };
+  }
+
+  /**
+   * Which categories the seller actually has products in, with per-category
+   * counts. Scoped to one store when `storeId` is given, otherwise across every
+   * store the seller owns — mirroring `getMyProducts`.
+   */
+  static async getUsedCategoryCounts(storeId: string | undefined, sellerId: string) {
+    return prisma.products.groupBy({
+      by: ['categoryId'],
+      where: {
+        ...(storeId ? { storeId } : { store: { sellerId } }),
+        isActive: true,
+        categoryId: { not: null },
+      },
+      _count: { _all: true },
+    });
   }
 
   static async getProductById(productId: string) {
