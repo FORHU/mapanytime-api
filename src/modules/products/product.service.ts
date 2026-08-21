@@ -171,14 +171,16 @@ export default class ProductService {
     // Link by parentId so depth is unbounded — the tree is whatever the data is,
     // never a fixed number of nesting levels.
     const byId = new Map(
-      nodes.map((node) => ({
-        id: node.id,
-        name: node.name,
-        parentId: node.parentId,
-        directCount: directCounts.get(node.id) ?? 0,
-        totalCount: 0,
-        children: [] as CategoryTreeNode[],
-      })).map((node) => [node.id, node]),
+      nodes
+        .map((node) => ({
+          id: node.id,
+          name: node.name,
+          parentId: node.parentId,
+          directCount: directCounts.get(node.id) ?? 0,
+          totalCount: 0,
+          children: [] as CategoryTreeNode[],
+        }))
+        .map((node) => [node.id, node]),
     );
 
     const roots: CategoryTreeNode[] = [];

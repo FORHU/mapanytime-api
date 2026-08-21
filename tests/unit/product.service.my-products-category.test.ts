@@ -44,11 +44,7 @@ describe('ProductService.getMyProducts category filtering', () => {
     await ProductService.getMyProducts('user-1', undefined, opts({ categoryId: 'food' }));
 
     expect(getDescendants).toHaveBeenCalledWith('food');
-    expect(getMyProducts.mock.calls[0][2].categoryIds).toEqual([
-      'food',
-      'bakery',
-      'sourdough',
-    ]);
+    expect(getMyProducts.mock.calls[0][2].categoryIds).toEqual(['food', 'bakery', 'sourdough']);
   });
 
   it('still matches a leaf category, which expands to just itself', async () => {

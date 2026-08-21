@@ -54,7 +54,12 @@ describe('ProductService.getMyCategories', () => {
   });
 
   it('sums products filed at several depths of one branch', async () => {
-    getUsedCounts.mockResolvedValue(counts([['root', 2], ['leaf', 3]]));
+    getUsedCounts.mockResolvedValue(
+      counts([
+        ['root', 2],
+        ['leaf', 3],
+      ]),
+    );
     getAncestors.mockResolvedValue([
       { id: 'root', name: 'Food & Beverage', parentId: null },
       { id: 'leaf', name: 'Bakery', parentId: 'root' },
@@ -66,7 +71,12 @@ describe('ProductService.getMyCategories', () => {
   });
 
   it('returns one tree spanning unrelated roots for the All-Stores case', async () => {
-    getUsedCounts.mockResolvedValue(counts([['bakery', 4], ['audio', 1]]));
+    getUsedCounts.mockResolvedValue(
+      counts([
+        ['bakery', 4],
+        ['audio', 1],
+      ]),
+    );
     getAncestors.mockResolvedValue([
       { id: 'food', name: 'Food & Beverage', parentId: null },
       { id: 'bakery', name: 'Bakery', parentId: 'food' },
@@ -82,7 +92,13 @@ describe('ProductService.getMyCategories', () => {
   });
 
   it('sorts siblings by name', async () => {
-    getUsedCounts.mockResolvedValue(counts([['c', 1], ['a', 1], ['b', 1]]));
+    getUsedCounts.mockResolvedValue(
+      counts([
+        ['c', 1],
+        ['a', 1],
+        ['b', 1],
+      ]),
+    );
     getAncestors.mockResolvedValue([
       { id: 'root', name: 'Root', parentId: null },
       { id: 'c', name: 'Cocoa', parentId: 'root' },
