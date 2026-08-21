@@ -93,6 +93,40 @@ export default class CategoryRepository {
     return ids;
   }
 
+  /**
+   * Upward mirror of `getDescendantCategoryIds`: given a set of category ids,
+   * returns those categories plus every ancestor above them.
+   *
+   * Products only ever sit on the categories a seller picked (typically leaves),
+   * but a filter has to render their parents as group headers — so the pruned
+   * tree needs the ancestors even though no product references them directly.
+   */
+  static async getAncestorClosure(ids: string[]) {
+    const seen = new Map<string, { id: string; name: string; parentId: string | null }>();
+    let queue = [...new Set(ids)];
+
+    while (queue.length > 0) {
+      const nodes = await prisma.categories.findMany({
+        where: { id: { in: queue }, deletedAt: null },
+        select: { id: true, name: true, parentId: true },
+      });
+
+      for (const node of nodes) seen.set(node.id, node);
+
+      // Follow parents we haven't resolved yet. Filtering on `seen` also breaks
+      // out of any accidental parent cycle.
+      queue = [
+        ...new Set(
+          nodes
+            .map((node) => node.parentId)
+            .filter((parentId): parentId is string => Boolean(parentId) && !seen.has(parentId!)),
+        ),
+      ];
+    }
+
+    return [...seen.values()];
+  }
+
   static async updateCategory(id: string, data: { name?: string; description?: string }) {
     return prisma.categories.update({
       where: { id },

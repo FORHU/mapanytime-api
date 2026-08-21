@@ -3,6 +3,17 @@ import CategoryService from '../categories/category.service';
 import { prisma } from '../../utils/prisma';
 import { buildPage } from '../../helpers/pagination.helper';
 
+export interface CategoryTreeNode {
+  id: string;
+  name: string;
+  parentId: string | null;
+  /** Products filed directly on this category. */
+  directCount: number;
+  /** `directCount` plus every descendant's — what the filter displays. */
+  totalCount: number;
+  children: CategoryTreeNode[];
+}
+
 export default class ProductService {
   static async createProduct(
     userId: string,
@@ -81,19 +92,11 @@ export default class ProductService {
     return newProduct;
   }
 
-  static async getMyProducts(
-    userId: string,
-    storeId: string | undefined,
-    opts: {
-      page: number;
-      limit: number;
-      skip: number;
-      search?: string;
-      categoryId?: string;
-      sortBy?: 'price' | 'name' | 'createdAt';
-      sortOrder?: 'asc' | 'desc';
-    },
-  ) {
+  /**
+   * Resolves the seller behind a request and, when the request is scoped to one
+   * store, asserts they own it. Omitting `storeId` means "every store I own".
+   */
+  private static async resolveSellerScope(userId: string, storeId: string | undefined) {
     const seller = await ProductRepository.getSellerByUserId(userId);
     if (!seller) {
       throw { status: 403, message: 'Only sellers can view store products.' };
@@ -110,16 +113,93 @@ export default class ProductService {
       }
     }
 
+    return seller;
+  }
+
+  static async getMyProducts(
+    userId: string,
+    storeId: string | undefined,
+    opts: {
+      page: number;
+      limit: number;
+      skip: number;
+      search?: string;
+      categoryId?: string;
+      sortBy?: 'price' | 'name' | 'createdAt';
+      sortOrder?: 'asc' | 'desc';
+    },
+  ) {
+    const seller = await ProductService.resolveSellerScope(userId, storeId);
+
+    let categoryIds: string[] | undefined;
+    if (opts.categoryId) {
+      categoryIds = await CategoryService.getCategoryDescendantIds(opts.categoryId);
+    }
+
     const { items, total } = await ProductRepository.getMyProducts(storeId, seller.id, {
       skip: opts.skip,
       take: opts.limit,
       search: opts.search,
-      categoryId: opts.categoryId,
+      categoryIds,
       sortBy: opts.sortBy,
       sortOrder: opts.sortOrder,
     });
 
     return buildPage(items, total, { page: opts.page, limit: opts.limit });
+  }
+
+  /**
+   * The category hierarchy a seller actually sells in, pruned to the branches
+   * their products occupy and rolled up with counts. Powers the "My products"
+   * category filter, which must work in All-Stores mode (no `storeId`) where
+   * there is no single store category tree to read from.
+   */
+  static async getMyCategories(userId: string, storeId: string | undefined) {
+    const seller = await ProductService.resolveSellerScope(userId, storeId);
+
+    const used = await ProductRepository.getUsedCategoryCounts(storeId, seller.id);
+    if (used.length === 0) return [];
+
+    const directCounts = new Map<string, number>();
+    for (const row of used) {
+      // `categoryId: { not: null }` in the query guarantees this is a string.
+      directCounts.set(row.categoryId as string, row._count._all);
+    }
+
+    const nodes = await CategoryService.getAncestorClosure([...directCounts.keys()]);
+
+    // Link by parentId so depth is unbounded — the tree is whatever the data is,
+    // never a fixed number of nesting levels.
+    const byId = new Map(
+      nodes.map((node) => ({
+        id: node.id,
+        name: node.name,
+        parentId: node.parentId,
+        directCount: directCounts.get(node.id) ?? 0,
+        totalCount: 0,
+        children: [] as CategoryTreeNode[],
+      })).map((node) => [node.id, node]),
+    );
+
+    const roots: CategoryTreeNode[] = [];
+    for (const node of byId.values()) {
+      // A parent missing from the closure (soft-deleted mid-chain) would orphan
+      // the branch, so treat such a node as a root rather than dropping it.
+      const parent = node.parentId ? byId.get(node.parentId) : undefined;
+      if (parent) parent.children.push(node);
+      else roots.push(node);
+    }
+
+    const rollUp = (node: CategoryTreeNode): number => {
+      node.totalCount =
+        node.directCount + node.children.reduce((sum, child) => sum + rollUp(child), 0);
+      node.children.sort((a, b) => a.name.localeCompare(b.name));
+      return node.totalCount;
+    };
+    roots.forEach(rollUp);
+    roots.sort((a, b) => a.name.localeCompare(b.name));
+
+    return roots;
   }
 
   static async getAllProducts(filters: {

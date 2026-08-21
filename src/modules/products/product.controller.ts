@@ -39,6 +39,7 @@ export default class ProductController {
     // Sorting is whitelisted here; page/limit/search pass through parsePagination.
     const schema = Joi.object({
       storeId: Joi.string().optional().allow(null, ''),
+      categoryId: Joi.string().optional().allow(null, ''),
       sortBy: Joi.string().valid('price', 'name', 'createdAt').optional(),
       sortOrder: Joi.string().valid('asc', 'desc').optional(),
     }).unknown(true);
@@ -51,18 +52,37 @@ export default class ProductController {
       if (!userId) return responseError(res, 401, 'Unauthorized');
 
       const { page, limit, skip, search } = parsePagination(req.query as Record<string, unknown>);
-      const categoryId =
-        typeof req.query.categoryId === 'string' ? req.query.categoryId : undefined;
 
       const data = await ProductService.getMyProducts(userId, value.storeId, {
         page,
         limit,
         skip,
         search,
-        categoryId,
+        categoryId: value.categoryId || undefined,
         sortBy: value.sortBy,
         sortOrder: value.sortOrder,
       });
+      return responseSuccess(res, 200, data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async myCategories(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({
+      storeId: Joi.string().optional().allow(null, ''),
+    }).unknown(true);
+
+    const { error, value } = schema.validate(req.query);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized');
+
+      // A seller with no products yet is a valid empty result, not a 404 — the
+      // web filter treats a non-2xx as a hard error and would break onboarding.
+      const data = await ProductService.getMyCategories(userId, value.storeId || undefined);
       return responseSuccess(res, 200, data);
     } catch (error) {
       next(error);
