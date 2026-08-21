@@ -1,7 +1,22 @@
 import StoreService from '../../src/modules/stores/store.service';
 import StoreRepository from '../../src/modules/stores/store.repository';
+import CategoryRepository from '../../src/modules/categories/category.repository';
+import { prisma } from '../../src/utils/prisma';
 
 jest.mock('../../src/modules/stores/store.repository');
+
+jest.mock('../../src/modules/categories/category.repository', () => ({
+  __esModule: true,
+  default: { findById: jest.fn() },
+}));
+
+jest.mock('../../src/utils/prisma', () => ({
+  prisma: { $transaction: jest.fn() },
+}));
+
+jest.mock('../../src/infrastructure/socket', () => ({
+  emitStoreUpserted: jest.fn(),
+}));
 
 describe('StoreService', () => {
   describe('getStoreById', () => {
@@ -11,6 +26,7 @@ describe('StoreService', () => {
         storeName: 'Test Store',
         description: 'A test store',
         isActive: true,
+        approvalStatus: 'ACTIVE',
         storeLocations: {
           currentAddress: '123 Test St',
           city: 'Baguio',
@@ -35,6 +51,7 @@ describe('StoreService', () => {
         id: 'store-123',
         storeName: 'Test Store',
         isActive: true,
+        approvalStatus: 'ACTIVE',
         merchantAds: [
           {
             id: 'ad-promo',
@@ -87,6 +104,7 @@ describe('StoreService', () => {
         id: 'store-inactive',
         storeName: 'Closed Store',
         isActive: false,
+        approvalStatus: 'ACTIVE',
       };
 
       (StoreRepository.getStoreById as jest.Mock).mockResolvedValue(inactiveStore);
@@ -95,6 +113,149 @@ describe('StoreService', () => {
         status: 404,
         message: 'Store is not currently active.',
       });
+    });
+
+    it.each(['PENDING', 'REJECTED'])(
+      'throws 404 for a store with approvalStatus %s, even if isActive is true',
+      async (approvalStatus) => {
+        const pendingStore = {
+          id: 'store-pending',
+          storeName: 'Pending Store',
+          // isActive:true simulates a seller self-toggling their own PATCH
+          // /stores/:id "open for business" flag before admin review — the
+          // approvalStatus check must reject regardless.
+          isActive: true,
+          approvalStatus,
+        };
+
+        (StoreRepository.getStoreById as jest.Mock).mockResolvedValue(pendingStore);
+
+        await expect(StoreService.getStoreById('store-pending')).rejects.toEqual({
+          status: 404,
+          message: 'Store not found.',
+        });
+      },
+    );
+  });
+
+  describe('getStoreProducts', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      (StoreRepository.getStoreProducts as jest.Mock).mockResolvedValue({
+        items: [],
+        total: 0,
+      });
+    });
+
+    it('returns products for an approved store', async () => {
+      (StoreRepository.getStoreById as jest.Mock).mockResolvedValue({
+        id: 'store-123',
+        approvalStatus: 'ACTIVE',
+      });
+
+      const result = await StoreService.getStoreProducts('store-123', 20, 0);
+
+      expect(result).toEqual({ items: [], total: 0, limit: 20, offset: 0, hasMore: false });
+      expect(StoreRepository.getStoreProducts).toHaveBeenCalledWith('store-123', 20, 0);
+    });
+
+    it('throws 404 if the store does not exist', async () => {
+      (StoreRepository.getStoreById as jest.Mock).mockResolvedValue(null);
+
+      await expect(StoreService.getStoreProducts('missing', 20, 0)).rejects.toEqual({
+        status: 404,
+        message: 'Store not found.',
+      });
+      expect(StoreRepository.getStoreProducts).not.toHaveBeenCalled();
+    });
+
+    it.each(['PENDING', 'REJECTED'])(
+      'throws 404 for a store with approvalStatus %s',
+      async (approvalStatus) => {
+        (StoreRepository.getStoreById as jest.Mock).mockResolvedValue({
+          id: 'store-pending',
+          approvalStatus,
+        });
+
+        await expect(StoreService.getStoreProducts('store-pending', 20, 0)).rejects.toEqual({
+          status: 404,
+          message: 'Store not found.',
+        });
+        expect(StoreRepository.getStoreProducts).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  describe('updateStore', () => {
+    const existingStore = {
+      id: 'store-1',
+      sellerId: 'seller-1',
+      storeName: 'Test Store',
+      storeLocations: null,
+    };
+
+    let tx: {
+      stores: { update: jest.Mock; findUnique: jest.Mock };
+      storeLocations: { update: jest.Mock };
+    };
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+
+      tx = {
+        stores: {
+          update: jest.fn(),
+          findUnique: jest.fn().mockResolvedValue({ ...existingStore }),
+        },
+        storeLocations: { update: jest.fn() },
+      };
+
+      (prisma.$transaction as unknown as jest.Mock).mockImplementation(
+        (fn: (client: typeof tx) => unknown) => fn(tx),
+      );
+      (StoreRepository.getStoreById as jest.Mock).mockResolvedValue(existingStore);
+    });
+
+    it('writes both the primary scalar and the M2M set so they cannot drift', async () => {
+      (CategoryRepository.findById as jest.Mock).mockResolvedValue({ id: 'cat-B' });
+
+      await StoreService.updateStore('store-1', 'seller-1', { categoryId: 'cat-B' });
+
+      expect(tx.stores.update).toHaveBeenCalledWith({
+        where: { id: 'store-1' },
+        data: {
+          primaryCategory: { connect: { id: 'cat-B' } },
+          categories: { set: [{ id: 'cat-B' }] },
+        },
+      });
+    });
+
+    it('replaces the M2M set rather than adding to it, so no stale row survives', async () => {
+      (CategoryRepository.findById as jest.Mock).mockResolvedValue({ id: 'cat-B' });
+
+      await StoreService.updateStore('store-1', 'seller-1', { categoryId: 'cat-B' });
+
+      const { data } = (tx.stores.update as jest.Mock).mock.calls[0][0];
+      expect(data.categories).toEqual({ set: [{ id: 'cat-B' }] });
+      expect(data.categories.connect).toBeUndefined();
+    });
+
+    it('throws 404 for an unknown categoryId instead of leaking a Prisma error', async () => {
+      (CategoryRepository.findById as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        StoreService.updateStore('store-1', 'seller-1', { categoryId: 'missing' }),
+      ).rejects.toEqual({ status: 404, message: 'Category not found.' });
+
+      expect(tx.stores.update).not.toHaveBeenCalled();
+    });
+
+    it('leaves categories untouched when categoryId is absent from the patch', async () => {
+      await StoreService.updateStore('store-1', 'seller-1', { storeName: 'Renamed' });
+
+      expect(CategoryRepository.findById).not.toHaveBeenCalled();
+      const { data } = (tx.stores.update as jest.Mock).mock.calls[0][0];
+      expect(data).toEqual({ storeName: 'Renamed' });
     });
   });
 });

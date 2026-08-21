@@ -126,6 +126,7 @@ export default class StoreService {
           email: storeData.email,
           phone: storeData.phone,
           isActive: false,
+          primaryCategoryId: storeData.categoryIds[0] ?? null,
           storeLocations: { create: locationData },
           storeHours: { create: hoursData },
           categories: {
@@ -334,7 +335,16 @@ export default class StoreService {
     if (input.email !== undefined) storeData.email = input.email || null;
     if (input.isActive !== undefined) storeData.isActive = input.isActive;
     if (input.categoryId !== undefined) {
+      const category = await CategoryRepository.findById(input.categoryId);
+
+      if (!category) throw { status: 404, message: 'Category not found.' };
+
+      // The scalar and the join table are separate relations, so both have to be
+      // written or they drift: the map viewport filters on the join table while
+      // the same query reports the scalar as `categoryId`. `set` replaces the
+      // whole M2M set rather than adding to it, so no stale row can survive.
       storeData.primaryCategory = { connect: { id: input.categoryId } };
+      storeData.categories = { set: [{ id: input.categoryId }] };
     }
     if (input.bannerId !== undefined) {
       storeData.bannerFile =
@@ -399,6 +409,14 @@ export default class StoreService {
       throw { status: 404, message: 'Store not found.' };
     }
 
+    // Checked independently of isActive: isActive is the seller's own
+    // open/closed-for-business toggle (PATCH /stores/:id), so a PENDING or
+    // REJECTED store's owner could otherwise self-activate visibility before
+    // admin review completes.
+    if (store.approvalStatus !== 'ACTIVE') {
+      throw { status: 404, message: 'Store not found.' };
+    }
+
     if (!store.isActive) {
       throw { status: 404, message: 'Store is not currently active.' };
     }
@@ -410,6 +428,9 @@ export default class StoreService {
     // Verify store exists first
     const store = await StoreRepository.getStoreById(storeId);
     if (!store) throw { status: 404, message: 'Store not found.' };
+    if (store.approvalStatus !== 'ACTIVE') {
+      throw { status: 404, message: 'Store not found.' };
+    }
 
     const { items, total } = await StoreRepository.getStoreProducts(storeId, limit, offset);
     const resolved = await Promise.all(

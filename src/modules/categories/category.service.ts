@@ -46,6 +46,11 @@ export default class CategoryService {
         subCategories: { where: { deletedAt: null }, take: 1 },
         products: { take: 1 },
         stores: { take: 1 },
+        // `stores` is the M2M relation only. A category can be a store's
+        // primaryCategoryId without being in that set, and hard-deleting it then
+        // fires the FK's ON DELETE SET NULL and silently nulls the store's
+        // primary while its other join rows survive.
+        primaryForStores: { take: 1 },
       },
     });
 
@@ -54,7 +59,8 @@ export default class CategoryService {
     const hasDependencies =
       category.subCategories.length > 0 ||
       category.products.length > 0 ||
-      category.stores.length > 0;
+      category.stores.length > 0 ||
+      category.primaryForStores.length > 0;
 
     if (hasDependencies) {
       await CategoryRepository.softDeleteCategory(categoryId);
