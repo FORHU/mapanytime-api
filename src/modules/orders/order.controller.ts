@@ -62,7 +62,7 @@ export default class OrderController {
 
       const cart = await CartService.getCart(userId);
 
-      if (!cart || !cart.storeId || cart.items.length === 0) {
+      if (!cart || cart.items.length === 0) {
         return responseError(res, 400, 'Your checkout failed because your cart is empty.');
       }
 
@@ -77,9 +77,22 @@ export default class OrderController {
         }
       }
 
+      // A cart may hold several stores, but an order may not: Orders.storeId is
+      // singular and each order settles to exactly one seller. So the store
+      // rule that used to block add-to-cart lives here instead — the buyer
+      // checks out one store at a time, selecting that store's lines.
+      const storeIds = [...new Set(itemsToOrder.map((item) => item.storeId))];
+      if (storeIds.length > 1) {
+        return responseError(
+          res,
+          400,
+          'Please check out one store at a time. Select the items from a single store to continue.',
+        );
+      }
+
       const servicePayload = {
         buyerId: buyer.id,
-        storeId: cart.storeId,
+        storeId: storeIds[0],
         type: value.type,
         paymentMethod: value.paymentMethod,
         pickupAt: value.pickupAt as Date | undefined,

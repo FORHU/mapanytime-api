@@ -62,29 +62,44 @@ beforeEach(() => {
 
 describe('CartService.getCart', () => {
   it('returns an empty cart when nothing is stored', async () => {
-    await expect(CartService.getCart(USER)).resolves.toEqual({ storeId: null, items: [] });
+    await expect(CartService.getCart(USER)).resolves.toEqual({ items: [] });
   });
 
   it('returns the stored cart', async () => {
-    const stored = { storeId: STORE, items: [{ productId: PRODUCT, quantity: 2, unitPrice: 10 }] };
+    const stored = {
+      items: [{ productId: PRODUCT, storeId: STORE, quantity: 2, unitPrice: 10 }],
+    };
     givenCart(stored);
 
     await expect(CartService.getCart(USER)).resolves.toEqual(stored);
   });
+
+  it('backfills the store onto items from a cart written before the split', async () => {
+    // Redis holds carts for 7 days, so pre-deploy carts are still in flight and
+    // carry storeId at the root with items that have none.
+    givenCart({ storeId: STORE, items: [{ productId: PRODUCT, quantity: 2, unitPrice: 10 }] });
+
+    await expect(CartService.getCart(USER)).resolves.toEqual({
+      items: [{ productId: PRODUCT, storeId: STORE, quantity: 2, unitPrice: 10 }],
+    });
+  });
 });
 
 describe('CartService.addToCart', () => {
-  it('adds a new item at the product price and pins the cart to the store', async () => {
+  it('adds a new item at the product price, tagged with its store', async () => {
     const cart = await CartService.addToCart(USER, STORE, PRODUCT, 3);
 
-    expect(cart.storeId).toBe(STORE);
-    expect(cart.items).toEqual([{ productId: PRODUCT, quantity: 3, unitPrice: 49.99 }]);
+    expect(cart.items).toEqual([
+      { productId: PRODUCT, storeId: STORE, quantity: 3, unitPrice: 49.99 },
+    ]);
     // Price comes from the product record, never from the caller.
     expect(redis.setEx).toHaveBeenCalledWith(CART_KEY, CART_TTL, expect.any(String));
   });
 
   it('replaces the quantity of an existing item rather than adding to it', async () => {
-    givenCart({ storeId: STORE, items: [{ productId: PRODUCT, quantity: 2, unitPrice: 49.99 }] });
+    givenCart({
+      items: [{ productId: PRODUCT, storeId: STORE, quantity: 2, unitPrice: 49.99 }],
+    });
 
     const cart = await CartService.addToCart(USER, STORE, PRODUCT, 5);
 
@@ -97,32 +112,31 @@ describe('CartService.addToCart', () => {
   describe('quantity 0', () => {
     it('removes the item', async () => {
       givenCart({
-        storeId: STORE,
         items: [
-          { productId: PRODUCT, quantity: 2, unitPrice: 49.99 },
-          { productId: 'prod-2', quantity: 1, unitPrice: 5 },
+          { productId: PRODUCT, storeId: STORE, quantity: 2, unitPrice: 49.99 },
+          { productId: 'prod-2', storeId: STORE, quantity: 1, unitPrice: 5 },
         ],
       });
 
       const cart = await CartService.addToCart(USER, STORE, PRODUCT, 0);
 
       expect(cart.items.map((i) => i.productId)).toEqual(['prod-2']);
-      expect(cart.storeId).toBe(STORE);
     });
 
-    it('unpins the store once the last item goes', async () => {
-      givenCart({ storeId: STORE, items: [{ productId: PRODUCT, quantity: 2, unitPrice: 49.99 }] });
+    it('empties the cart once the last item goes', async () => {
+      givenCart({
+        items: [{ productId: PRODUCT, storeId: STORE, quantity: 2, unitPrice: 49.99 }],
+      });
 
       const cart = await CartService.addToCart(USER, STORE, PRODUCT, 0);
 
-      // Leaving storeId set would keep the single-store rule rejecting every
-      // other store even though the cart is empty.
       expect(cart.items).toEqual([]);
-      expect(cart.storeId).toBeNull();
     });
 
     it('skips the store, product and stock lookups entirely', async () => {
-      givenCart({ storeId: STORE, items: [{ productId: PRODUCT, quantity: 1, unitPrice: 1 }] });
+      givenCart({
+        items: [{ productId: PRODUCT, storeId: STORE, quantity: 1, unitPrice: 1 }],
+      });
 
       await CartService.addToCart(USER, STORE, PRODUCT, 0);
 
@@ -177,17 +191,6 @@ describe('CartService.addToCart', () => {
         name: 'X',
         price: '1',
       });
-      await expect(CartService.addToCart(USER, STORE, PRODUCT, 1)).rejects.toMatchObject({
-        status: 400,
-      });
-    });
-
-    it('mixing stores in one cart', async () => {
-      givenCart({
-        storeId: 'other-store',
-        items: [{ productId: 'prod-9', quantity: 1, unitPrice: 1 }],
-      });
-
       await expect(CartService.addToCart(USER, STORE, PRODUCT, 1)).rejects.toMatchObject({
         status: 400,
       });
@@ -254,14 +257,30 @@ describe('CartService.addToCart', () => {
   });
 });
 
+describe('CartService.addToCart across stores', () => {
+  it('keeps lines from a second store alongside the first', async () => {
+    // The single-store rule moved to checkout: a cart may hold several stores,
+    // an order may not. See FIX-PLAN item 17.
+    givenCart({
+      items: [{ productId: 'prod-9', storeId: 'other-store', quantity: 1, unitPrice: 1 }],
+    });
+
+    const cart = await CartService.addToCart(USER, STORE, PRODUCT, 1);
+
+    expect(cart.items).toEqual([
+      { productId: 'prod-9', storeId: 'other-store', quantity: 1, unitPrice: 1 },
+      { productId: PRODUCT, storeId: STORE, quantity: 1, unitPrice: 49.99 },
+    ]);
+  });
+});
+
 describe('CartService.removeItems', () => {
   it('removes only the named products', async () => {
     givenCart({
-      storeId: STORE,
       items: [
-        { productId: 'a', quantity: 1, unitPrice: 1 },
-        { productId: 'b', quantity: 1, unitPrice: 1 },
-        { productId: 'c', quantity: 1, unitPrice: 1 },
+        { productId: 'a', storeId: STORE, quantity: 1, unitPrice: 1 },
+        { productId: 'b', storeId: STORE, quantity: 1, unitPrice: 1 },
+        { productId: 'c', storeId: STORE, quantity: 1, unitPrice: 1 },
       ],
     });
 
@@ -271,12 +290,12 @@ describe('CartService.removeItems', () => {
     expect(lastWrittenCart().items).toHaveLength(1);
   });
 
-  it('deletes the key and unpins the store when the cart empties', async () => {
-    givenCart({ storeId: STORE, items: [{ productId: 'a', quantity: 1, unitPrice: 1 }] });
+  it('deletes the key when the cart empties', async () => {
+    givenCart({ items: [{ productId: 'a', storeId: STORE, quantity: 1, unitPrice: 1 }] });
 
     const cart = await CartService.removeItems(USER, ['a']);
 
-    expect(cart.storeId).toBeNull();
+    expect(cart.items).toEqual([]);
     expect(redis.del).toHaveBeenCalledWith(CART_KEY);
     expect(redis.setEx).not.toHaveBeenCalled();
   });

@@ -164,3 +164,90 @@ describe('CartService.previewPricing', () => {
     });
   });
 });
+
+describe('CartService.previewPricing across stores', () => {
+  /** A cart in the post-split shape: every line names its own store. */
+  function mockMultiStoreCart(
+    items: { productId: string; storeId: string; quantity: number; unitPrice: number }[],
+  ) {
+    (RedisUtil as unknown as { client: unknown }).client = {
+      get: jest.fn().mockResolvedValue(JSON.stringify({ items })),
+    };
+  }
+
+  function mockProducts(ids: string[]) {
+    (ProductRepository.getProductById as jest.Mock).mockImplementation((id: string) =>
+      ids.includes(id)
+        ? Promise.resolve({ id, price: PRICE, isActive: true, categoryId: null })
+        : Promise.resolve(null),
+    );
+  }
+
+  it('groups the cart into one priced basket per store', async () => {
+    mockMultiStoreCart([
+      { productId: 'product-1', storeId: 'store-1', quantity: 2, unitPrice: PRICE },
+      { productId: 'product-2', storeId: 'store-2', quantity: 1, unitPrice: PRICE },
+      { productId: 'product-3', storeId: 'store-1', quantity: 1, unitPrice: PRICE },
+    ]);
+    mockProducts(['product-1', 'product-2', 'product-3']);
+
+    const pricing = await CartService.previewPricing('user-1');
+
+    expect(pricing.stores.map((store) => store.storeId)).toEqual(['store-1', 'store-2']);
+    // store-1 holds two lines, three units; store-2 holds one line, one unit.
+    expect(pricing.stores[0].items.map((item) => item.productId)).toEqual([
+      'product-1',
+      'product-3',
+    ]);
+    expect(pricing.stores[0].totalAmount).toBe(3 * PRICE);
+    expect(pricing.stores[1].items.map((item) => item.productId)).toEqual(['product-2']);
+    expect(pricing.stores[1].totalAmount).toBe(PRICE);
+  });
+
+  it('reports cart totals as the sum of the per-store totals', async () => {
+    mockMultiStoreCart([
+      { productId: 'product-1', storeId: 'store-1', quantity: 2, unitPrice: PRICE },
+      { productId: 'product-2', storeId: 'store-2', quantity: 1, unitPrice: PRICE },
+    ]);
+    mockProducts(['product-1', 'product-2']);
+
+    const pricing = await CartService.previewPricing('user-1');
+
+    expect(pricing.subtotalAmount).toBe(3 * PRICE);
+    expect(pricing.totalAmount).toBe(3 * PRICE);
+    // The flat item list stays populated for clients that read it directly.
+    expect(pricing.items.map((item) => item.productId)).toEqual(['product-1', 'product-2']);
+    expect(pricing.paymentFeeIncluded).toBe(false);
+  });
+
+  it('prices each store against its own commission rules', async () => {
+    const spy = jest.spyOn(PricingEngineService, 'calculateManyOrderPricing');
+    mockMultiStoreCart([
+      { productId: 'product-1', storeId: 'store-1', quantity: 1, unitPrice: PRICE },
+      { productId: 'product-2', storeId: 'store-2', quantity: 1, unitPrice: PRICE },
+    ]);
+    mockProducts(['product-1', 'product-2']);
+
+    await CartService.previewPricing('user-1');
+
+    // One call carrying both baskets — not one engine call per store, and not
+    // a single blended basket that would apply store-1's rate to store-2.
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0][0].map((input) => input.storeId)).toEqual(['store-1', 'store-2']);
+    spy.mockRestore();
+  });
+
+  it('honours a productIds selection that narrows the cart to one store', async () => {
+    mockMultiStoreCart([
+      { productId: 'product-1', storeId: 'store-1', quantity: 1, unitPrice: PRICE },
+      { productId: 'product-2', storeId: 'store-2', quantity: 1, unitPrice: PRICE },
+    ]);
+    mockProducts(['product-1', 'product-2']);
+
+    const pricing = await CartService.previewPricing('user-1', ['product-2']);
+
+    expect(pricing.stores).toHaveLength(1);
+    expect(pricing.stores[0].storeId).toBe('store-2');
+    expect(pricing.totalAmount).toBe(PRICE);
+  });
+});
