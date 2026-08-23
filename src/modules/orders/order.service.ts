@@ -1,4 +1,4 @@
-import OrderRepository from './order.repository';
+import OrderRepository, { LOW_STOCK_THRESHOLD } from './order.repository';
 import ProductRepository from '../products/product.repository';
 import { computeItemDiscount } from './pricing.util';
 import { validateOrderTransition } from './order.state';
@@ -12,11 +12,14 @@ import {
   ORDERCHARGETYPE,
   ORDERSTATUS,
   PAYMENTMETHODTYPE,
+  PAYMENTSTATUS,
   Prisma,
 } from '@prisma/client';
 import PaymentService from '../payments/payment.service';
 import PricingEngineService from '../pricing/pricing-engine.service';
 import SettlementService from '../settlements/settlement.service';
+import NotificationService from '../notifications/notification.service';
+import logger from '../../utils/logger';
 
 /**
  * Grace period after the booked pickup time before the hold lapses. A buyer who
@@ -367,7 +370,10 @@ export default class OrderService {
       throw { status: 403, message: 'You do not have administrative access to this branch.' };
     }
 
-    return prisma.$transaction(async (tx) => {
+    // Populated inside the transaction, read after it commits — see below.
+    const lowStockAlerts: { productId: string; productName: string; quantityOnHand: number }[] = [];
+
+    const completed = await prisma.$transaction(async (tx) => {
       const order = await OrderRepository.getOrderById(orderId, tx);
 
       if (!order) throw new Error('Order not found.');
@@ -413,6 +419,8 @@ export default class OrderService {
         if (!inventory)
           throw new Error(`Inventory tracking ledger missing for product ID ${item.productId}.`);
 
+        const newOnHand = inventory.quantityOnHand - item.quantity;
+
         await tx.inventory.update({
           where: { id: inventory.id },
           data: {
@@ -420,6 +428,17 @@ export default class OrderService {
             quantityReserved: { decrement: item.quantity },
           },
         });
+
+        // Alert on the crossing, not on every order once already low — otherwise
+        // the seller gets one notification per sale for the rest of the product's
+        // life at low stock.
+        if (inventory.quantityOnHand > LOW_STOCK_THRESHOLD && newOnHand <= LOW_STOCK_THRESHOLD) {
+          lowStockAlerts.push({
+            productId: item.productId,
+            productName: item.productName ?? 'A product',
+            quantityOnHand: newOnHand,
+          });
+        }
 
         await tx.products.update({
           where: { id: item.productId },
@@ -450,6 +469,26 @@ export default class OrderService {
 
       return completed;
     });
+
+    for (const alert of lowStockAlerts) {
+      try {
+        await NotificationService.sendNotification({
+          userId: seller.userId,
+          title: 'Low stock alert',
+          body: `${alert.productName} is down to ${alert.quantityOnHand} unit${alert.quantityOnHand === 1 ? '' : 's'} left.`,
+          metadata: {
+            type: 'LOW_STOCK',
+            productId: alert.productId,
+            quantityOnHand: alert.quantityOnHand,
+          },
+        });
+      } catch {
+        // Swallow — notification delivery is non-critical, and the order is
+        // already completed.
+      }
+    }
+
+    return completed;
   }
 
   static async cancelOrder(userId: string, orderId: string) {
@@ -461,14 +500,108 @@ export default class OrderService {
       throw { status: 403, message: 'Only registered buyers can cancel orders.' };
     }
 
+    const order = await prisma.orders.findUnique({
+      where: { id: orderId },
+      include: { orderitems: true },
+    });
+
+    if (!order) throw { status: 404, message: 'Order not found.' };
+    if (order.buyerId !== buyer.id) {
+      throw { status: 403, message: 'Unauthorized. You do not own this order.' };
+    }
+
+    try {
+      validateOrderTransition(order.status, 'CANCELLED');
+    } catch (error) {
+      const err = error as Error;
+      throw { status: 400, message: err.message };
+    }
+
+    // Cancelling a PENDING order (buyer never finished paying) just releases the
+    // hold. Cancelling a PROCESSING order means the gateway already captured
+    // real money — that must go back through the provider, not just be
+    // stamped FAILED. See PICKUP-NEXT.md S3.
+    const payment = await prisma.payments.findFirst({
+      where: { orderId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        paymentMethod: { select: { type: true } },
+        provider: { select: { code: true } },
+      },
+    });
+
+    const isCash = payment?.paymentMethod?.type === PAYMENTMETHODTYPE.CASH;
+    const needsRefund = payment?.status === PAYMENTSTATUS.COMPLETED && !isCash;
+
+    let refundReference: string | null = null;
+
+    if (needsRefund && payment) {
+      if (!payment.providerReference) {
+        throw {
+          status: 409,
+          message:
+            'This payment has no provider reference, so it cannot be refunded automatically. ' +
+            'Cancel it in the provider dashboard and reconcile manually.',
+        };
+      }
+
+      const adapter = PaymentService.getProviderAdapter(payment.provider?.code ?? 'MOCK');
+      if (!adapter.refundPayment) {
+        throw {
+          status: 501,
+          message: `The ${payment.provider?.code ?? 'configured'} provider does not support automated refunds.`,
+        };
+      }
+
+      // Mark the intent before calling out, so a refund that succeeds at the
+      // gateway but whose response we never see is visibly in flight rather
+      // than looking like it never happened. Mirrors ReturnService.executeRefund.
+      await prisma.payments.update({
+        where: { id: payment.id },
+        data: { status: PAYMENTSTATUS.REFUND_PENDING },
+      });
+
+      try {
+        const result = await adapter.refundPayment(
+          payment.providerReference,
+          Math.round(Number(payment.amount) * 100),
+          'requested_by_customer',
+        );
+        refundReference = result.refundId;
+      } catch (error) {
+        // Put the payment back where it was; the refund did not happen, so the
+        // order must not be cancelled either.
+        await prisma.payments.update({
+          where: { id: payment.id },
+          data: { status: payment.status },
+        });
+        logger.error(`[Cancel] Provider refund failed for order ${orderId}:`, error);
+        throw {
+          status: 502,
+          message:
+            'The payment provider rejected the refund. No money has moved; the order was not cancelled.',
+        };
+      }
+    }
+
     try {
       return await prisma.$transaction(async (tx) => {
-        const order = await OrderRepository.getOrderById(orderId, tx);
-
-        if (!order) throw new Error('Order not found.');
-        if (order.buyerId !== buyer.id) throw new Error('Unauthorized. You do not own this order.');
-
-        validateOrderTransition(order.status, 'CANCELLED');
+        // Re-validate against the live status: the refund call above was made
+        // outside this transaction, so the order may have moved on (e.g. the
+        // seller completed it) while the refund was in flight. Overwriting a
+        // COMPLETED/settled order back to CANCELLED here would double-account
+        // — refunded buyer, settled seller, same order.
+        const current = await tx.orders.findUniqueOrThrow({ where: { id: orderId } });
+        try {
+          validateOrderTransition(current.status, 'CANCELLED');
+        } catch {
+          throw new Error(
+            needsRefund
+              ? `Order status changed to ${current.status} while the refund was processing. ` +
+                'The refund has already been issued at the provider — reconcile this order manually.'
+              : `Order status changed to ${current.status}; it can no longer be cancelled.`,
+          );
+        }
 
         for (const item of order.orderitems) {
           const inventory = await tx.inventory.findFirst({
@@ -490,6 +623,23 @@ export default class OrderService {
           where: { orderId: orderId, status: 'RESERVED' },
           data: { status: 'RELEASED' },
         });
+
+        if (needsRefund && payment) {
+          await tx.payments.update({
+            where: { id: payment.id },
+            data: {
+              status: PAYMENTSTATUS.REFUNDED,
+              refundedAmount: payment.amount,
+              refundReference,
+              refundedAt: new Date(),
+            },
+          });
+          return tx.orders.update({
+            where: { id: orderId },
+            data: { status: 'CANCELLED' },
+            include: { orderitems: true, payment: true },
+          });
+        }
 
         return OrderRepository.updateOrderStatus(orderId, 'CANCELLED', 'FAILED', tx);
       });

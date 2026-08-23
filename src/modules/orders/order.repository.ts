@@ -1,6 +1,9 @@
 import { Prisma, ORDERSTATUS } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 
+/** Shared with OrderService.completeOrder's low-stock seller alert — keep in sync. */
+export const LOW_STOCK_THRESHOLD = 10;
+
 export interface StoreOrdersPageQuery {
   status?: ORDERSTATUS;
   search?: string;
@@ -221,7 +224,7 @@ export default class OrderRepository {
           storeId: { in: storeIds },
           productId: { not: null },
           variantId: null,
-          quantityOnHand: { lte: 10 },
+          quantityOnHand: { lte: LOW_STOCK_THRESHOLD },
           deletedAt: null,
           product: { isActive: true, deletedAt: null },
         },
