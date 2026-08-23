@@ -83,14 +83,14 @@ export async function seedPaymentProviders(prisma: PrismaClient) {
     },
   });
 
-  // 3. Cash on Delivery Provider
+  // 3. Cash on Pickup Provider — the platform is pickup-only, no delivery.
   const cashProvider = await prisma.paymentProviders.upsert({
     where: { code: 'CASH' },
-    update: { isActive: true, priority: 10 },
+    update: { isActive: true, priority: 10, description: 'Physical cash paid on pickup' },
     create: {
       code: 'CASH',
       name: 'Cash',
-      description: 'Physical cash on pickup/delivery',
+      description: 'Physical cash paid on pickup',
       isActive: true,
       priority: 10,
     },
@@ -103,11 +103,11 @@ export async function seedPaymentProviders(prisma: PrismaClient) {
         code: 'COD',
       },
     },
-    update: { isActive: true },
+    update: { isActive: true, name: 'Pay on Pickup' },
     create: {
       providerId: cashProvider.id,
       code: 'COD',
-      name: 'Cash on Delivery / Pickup',
+      name: 'Pay on Pickup',
       type: PAYMENTMETHODTYPE.CASH,
       isActive: true,
       priority: 1,
