@@ -598,7 +598,7 @@ export default class OrderService {
           throw new Error(
             needsRefund
               ? `Order status changed to ${current.status} while the refund was processing. ` +
-                'The refund has already been issued at the provider — reconcile this order manually.'
+                  'The refund has already been issued at the provider — reconcile this order manually.'
               : `Order status changed to ${current.status}; it can no longer be cancelled.`,
           );
         }
