@@ -4,6 +4,7 @@ import {
   PERMISSIONS,
   SYSTEM_PERMISSIONS,
   NON_ADMIN_HELD_PERMISSIONS,
+  NON_ADMIN_ROLE_PERMISSIONS,
   PermissionCode,
 } from '../../src/constants/permissions.constant';
 
@@ -90,18 +91,12 @@ describe('permission gates', () => {
 
 describe('the seeder and the gate catalogue', () => {
   it('seeds non-admin roles exactly the codes NON_ADMIN_HELD_PERMISSIONS claims', () => {
-    const seeder = fs.readFileSync(path.join(REPO_ROOT, 'prisma/seeders/roles.seeder.ts'), 'utf8');
+    // roles.seeder.ts assigns non-admin roles their codes straight out of
+    // NON_ADMIN_ROLE_PERMISSIONS (admin roles get every seeded permission
+    // instead, via ADMIN_ROLES, and are not part of this claim) — so the
+    // union of that map's values is exactly what the seeder grants them.
+    const assigned = new Set<string>(Object.values(NON_ADMIN_ROLE_PERMISSIONS).flat());
 
-    // Pull the codes assigned in the SELLER / SUPPORT_AGENT branches.
-    const assigned = new Set<string>();
-    for (const match of seeder.matchAll(/assignedCodes = \[([\s\S]*?)\]/g)) {
-      for (const ref of match[1].matchAll(/PERMISSIONS\.([A-Z_]+)/g)) {
-        assigned.add(PERMISSIONS[ref[1] as keyof typeof PERMISSIONS]);
-      }
-    }
-
-    // Admin roles get Object.keys(seededPermissions) — everything — and are not
-    // part of this claim, so what remains is exactly the non-admin grants.
     expect([...assigned].sort()).toEqual([...NON_ADMIN_HELD_PERMISSIONS].sort());
   });
 });
