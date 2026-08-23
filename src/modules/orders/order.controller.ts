@@ -142,6 +142,56 @@ export default class OrderController {
     }
   }
 
+  static async generateCashPickupCode(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({
+      orderId: Joi.string().required(),
+      storeId: Joi.string().required(),
+    });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
+      const data = await OrderService.generateCashPickupCode(userId, value.orderId, value.storeId);
+      return responseSuccess(res, 200, data, 'Pickup confirmation code generated');
+    } catch (error) {
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
+      next(error);
+    }
+  }
+
+  static async confirmCashPickup(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({
+      orderId: Joi.string().required(),
+      code: Joi.string().required(),
+    });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
+      const data = await OrderService.confirmCashPickup(userId, value.orderId, value.code);
+      return responseSuccess(res, 200, data, 'Order marked as completed');
+    } catch (error) {
+      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred');
+      }
+      next(error);
+    }
+  }
+
   static async cancel(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
       orderId: Joi.string().required(),

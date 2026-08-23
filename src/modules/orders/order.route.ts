@@ -13,6 +13,11 @@ router.get('/admin', authenticate, requireAdmin, OrderController.allOrders);
 router.get('/store/stats', authenticate, OrderController.storeOrderStats);
 router.get('/store', authenticate, OrderController.storeOrders);
 router.patch('/complete', authenticate, OrderController.complete);
+// Cash on Pickup only: seller generates a short-lived code, buyer confirms
+// it to complete the order — the flipped counterpart of /complete, which
+// every other payment method still uses (seller marks it complete directly).
+router.post('/cash-pickup/generate-code', authenticate, OrderController.generateCashPickupCode);
+router.post('/cash-pickup/confirm', authenticate, OrderController.confirmCashPickup);
 router.patch('/cancel', authenticate, OrderController.cancel);
 router.patch('/status', authenticate, OrderController.updateFulfillmentStatus);
 

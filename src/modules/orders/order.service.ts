@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import OrderRepository, { LOW_STOCK_THRESHOLD } from './order.repository';
 import ProductRepository from '../products/product.repository';
 import { computeItemDiscount } from './pricing.util';
@@ -5,6 +6,7 @@ import { validateOrderTransition } from './order.state';
 import { prisma } from '../../utils/prisma';
 import { emitNotificationToUser } from '../../infrastructure/socket';
 import { buildPage } from '../../helpers/pagination.helper';
+import RedisUtil from '../../utils/redis.util';
 import {
   CHARGEBENEFICIARY,
   CHARGEPAYER,
@@ -29,6 +31,18 @@ const PICKUP_GRACE_MS = 2 * 60 * 60 * 1000;
 
 /** Fallback hold for an order with no pickup time — the old flat TTL. */
 const DEFAULT_RESERVATION_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * How long a seller-generated cash-pickup confirmation code stays valid.
+ * Long enough to cover showing the QR and the buyer scanning it, short
+ * enough to bound how long a leaked/overheard code stays exploitable.
+ */
+const CASH_PICKUP_CODE_TTL_SECONDS = 15 * 60;
+
+const cashPickupCodeKey = (orderId: string) => `cash-pickup-code:${orderId}`;
+
+/** Mutex guarding confirmCashPickup's critical section — see its comment. */
+const cashPickupLockKey = (orderId: string) => `cash-pickup-lock:${orderId}`;
 
 /**
  * How long stock is held for an order.
@@ -489,6 +503,136 @@ export default class OrderService {
     }
 
     return completed;
+  }
+
+  /**
+   * Seller generates a short-lived, single-use code for a Cash on Pickup
+   * order — displayed to the buyer as a QR (and as plain text for manual
+   * fallback) instead of the seller unilaterally marking the order complete.
+   * The buyer scanning/entering it correctly is what proves cash actually
+   * changed hands; see {@link confirmCashPickup}, which is the only thing
+   * that can spend this code.
+   */
+  static async generateCashPickupCode(userId: string, orderId: string, storeId: string) {
+    const seller = await ProductRepository.getSellerByUserId(userId);
+    if (!seller || seller.applicationStatus !== 'APPROVED') {
+      throw { status: 403, message: 'User is not an approved seller profile.' };
+    }
+
+    const store = await ProductRepository.getStoreById(storeId);
+    if (!store || store.sellerId !== seller.id) {
+      throw { status: 403, message: 'You do not have administrative access to this branch.' };
+    }
+
+    const order = await OrderRepository.getOrderById(orderId, prisma);
+    if (!order) throw { status: 404, message: 'Order not found.' };
+    if (order.storeId !== storeId) {
+      throw { status: 403, message: 'This order does not belong to this branch.' };
+    }
+    if (order.status !== 'READY_FOR_PICKUP') {
+      throw {
+        status: 400,
+        message: 'Only orders that are ready for pickup can generate a confirmation code.',
+      };
+    }
+
+    const payment = await prisma.payments.findFirst({
+      where: { orderId },
+      orderBy: { createdAt: 'desc' },
+      include: { paymentMethod: { select: { type: true } } },
+    });
+    if (payment?.paymentMethod?.type !== PAYMENTMETHODTYPE.CASH) {
+      throw {
+        status: 400,
+        message: 'This order is not paid by cash on pickup.',
+      };
+    }
+
+    const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+    await RedisUtil.client.setEx(cashPickupCodeKey(orderId), CASH_PICKUP_CODE_TTL_SECONDS, code);
+
+    return { code, expiresInSeconds: CASH_PICKUP_CODE_TTL_SECONDS };
+  }
+
+  /**
+   * Buyer redeems the seller-shown code to confirm a Cash on Pickup order —
+   * the flipped counterpart of the seller-scans-buyer's-pass flow every other
+   * payment method uses. The code is the only proof of payment this endpoint
+   * trusts; it is consumed on first use (deleted from Redis before completion
+   * runs) so a screenshot or overheard code cannot confirm a second time.
+   * Completion itself still runs through {@link completeOrder} unchanged, so
+   * inventory, settlement, and low-stock alerting stay identical either way —
+   * only *who* is allowed to trigger it, and *why*, differs here.
+   */
+  static async confirmCashPickup(userId: string, orderId: string, code: string) {
+    const buyer = await prisma.buyers.findUnique({ where: { userId } });
+    if (!buyer) {
+      throw { status: 403, message: 'Only registered buyers can confirm a pickup.' };
+    }
+
+    const order = await OrderRepository.getOrderById(orderId, prisma);
+    if (!order) throw { status: 404, message: 'Order not found.' };
+    if (order.buyerId !== buyer.id) {
+      throw { status: 403, message: 'Unauthorized. You do not own this order.' };
+    }
+
+    const payment = await prisma.payments.findFirst({
+      where: { orderId },
+      orderBy: { createdAt: 'desc' },
+      include: { paymentMethod: { select: { type: true } } },
+    });
+    if (payment?.paymentMethod?.type !== PAYMENTMETHODTYPE.CASH) {
+      throw { status: 400, message: 'This order is not paid by cash on pickup.' };
+    }
+
+    // A network retry or a double-tap before the button visually disables
+    // could otherwise both pass the code check before either delete runs,
+    // and both proceed into completeOrder concurrently — double inventory
+    // decrements, double settlements. This lock (not the code's own
+    // get-then-delete, which stays non-atomic on purpose — see below) is
+    // what actually closes that window: only one confirm attempt per order
+    // is ever inside the critical section at a time.
+    const lockKey = cashPickupLockKey(orderId);
+    const acquiredLock = await RedisUtil.client.set(lockKey, '1', {
+      NX: true,
+      expiration: { type: 'EX', value: 30 },
+    });
+    if (!acquiredLock) {
+      throw {
+        status: 409,
+        message: 'This order is already being confirmed — please wait a moment.',
+      };
+    }
+
+    try {
+      const storedCode = await RedisUtil.client.get(cashPickupCodeKey(orderId));
+      if (!storedCode) {
+        throw {
+          status: 400,
+          message: 'No pending confirmation code for this order — ask the seller to show it again.',
+        };
+      }
+      // Deliberately not consumed via an atomic get-and-delete: that would
+      // burn the real code on a single wrong guess or typo (manual entry is
+      // the fallback when scanning fails), forcing the seller to regenerate
+      // for what might just be a mis-scan. The lock above is what prevents
+      // concurrent double-spend, not this comparison.
+      if (storedCode.toUpperCase() !== code.trim().toUpperCase()) {
+        throw { status: 400, message: 'Incorrect confirmation code.' };
+      }
+
+      // Consumed before completion runs, not after — a failure inside
+      // completeOrder should not leave a still-valid code sitting around to
+      // be silently retried; the seller can just generate a fresh one.
+      await RedisUtil.client.del(cashPickupCodeKey(orderId));
+
+      const store = await ProductRepository.getStoreById(order.storeId);
+      if (!store) throw { status: 404, message: 'Store not found.' };
+
+      return await this.completeOrder(store.seller.userId, orderId, order.storeId);
+    } finally {
+      await RedisUtil.client.del(lockKey);
+    }
   }
 
   static async cancelOrder(userId: string, orderId: string) {

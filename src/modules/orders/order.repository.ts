@@ -71,6 +71,11 @@ export default class OrderRepository {
       include: {
         store: { select: { storeName: true } },
         orderitems: true,
+        payment: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { paymentMethod: { select: { code: true, type: true } } },
+        },
       },
     });
 
