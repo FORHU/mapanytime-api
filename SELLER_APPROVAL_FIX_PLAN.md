@@ -19,6 +19,7 @@ Cannot create/edit products (403 error)
 ## Root Cause
 
 **File:** `src/modules/auth/auth.repository.ts` (Lines 24-27)
+
 ```typescript
 static async createSeller(userId: string) {
   return prisma.sellers.create({
@@ -28,6 +29,7 @@ static async createSeller(userId: string) {
 ```
 
 **Default in Schema:** `prisma/schema.prisma`
+
 ```prisma
 model Sellers {
   applicationStatus     ApplicationStatus       @default(PENDING)
@@ -46,6 +48,7 @@ enum ApplicationStatus {
 ## Solution Options
 
 ### Option 1: Auto-Approve on Registration (Simple) ⭐ Recommended
+
 **For development/testing purposes**
 
 Change the default to `APPROVED`:
@@ -57,6 +60,7 @@ Change the default to `APPROVED`:
 ```
 
 Then create a migration:
+
 ```bash
 npx prisma migrate dev --name auto_approve_sellers
 ```
@@ -67,11 +71,13 @@ npx prisma migrate dev --name auto_approve_sellers
 ---
 
 ### Option 2: Create Admin Approval Endpoint (Production) ⭐⭐ Better
+
 **Requires admin to manually approve sellers**
 
 **Files to Create/Modify:**
 
 1. **`src/modules/sellers/seller.controller.ts`** (Create)
+
 ```typescript
 import { Request, Response, NextFunction } from 'express';
 import SellerService from './seller.service';
@@ -89,17 +95,14 @@ export default class SellerController {
 
     try {
       const userId = (req.user as { id: string })?.id;
-      
+
       // Check if user is admin
       const user = await getUserWithRoles(userId);
-      if (!user.roles.some(r => r.roleName === 'ADMIN')) {
+      if (!user.roles.some((r) => r.roleName === 'ADMIN')) {
         return responseError(res, 403, 'Only admins can approve sellers.');
       }
 
-      const seller = await SellerService.approveSeller(
-        value.sellerId,
-        value.approved
-      );
+      const seller = await SellerService.approveSeller(value.sellerId, value.approved);
 
       return responseSuccess(res, 200, seller, 'Seller approval updated.');
     } catch (error) {
@@ -110,6 +113,7 @@ export default class SellerController {
 ```
 
 2. **`src/modules/sellers/seller.service.ts`** (Create)
+
 ```typescript
 export default class SellerService {
   static async approveSeller(sellerId: string, approved: boolean) {
@@ -138,6 +142,7 @@ export default class SellerService {
 ```
 
 3. **Route in `src/routes/sellers.ts`** (Create)
+
 ```typescript
 // POST /api/v1/sellers/:id/approve
 // Body: { approved: true }
@@ -153,6 +158,7 @@ router.get('/pending-approval', authMiddleware, sellerController.getPendingAppro
 ---
 
 ### Option 3: Auto-Approve + Admin Can Reject (Balanced) ⭐⭐⭐ Best
+
 **Auto-approve on registration, but allow admins to reject**
 
 ```diff
@@ -199,7 +205,7 @@ The migration will automatically apply. All new sellers will start as APPROVED.
 ### Step 4: Fix Existing PENDING Sellers (If Any)
 
 ```sql
-UPDATE "Sellers" 
+UPDATE "Sellers"
 SET "applicationStatus" = 'APPROVED'
 WHERE "applicationStatus" = 'PENDING';
 ```
@@ -214,11 +220,11 @@ WHERE "applicationStatus" = 'PENDING';
 
 ## Implementation Timeline
 
-| Option | Effort | Time | When to Use |
-|--------|--------|------|------------|
-| Option 1 | 5 min | 5 min | Development/Testing |
+| Option   | Effort  | Time    | When to Use                   |
+| -------- | ------- | ------- | ----------------------------- |
+| Option 1 | 5 min   | 5 min   | Development/Testing           |
 | Option 2 | 2 hours | 2 hours | Production with admin control |
-| Option 3 | 1 hour | 1 hour | Production with balance |
+| Option 3 | 1 hour  | 1 hour  | Production with balance       |
 
 ---
 
@@ -261,6 +267,6 @@ src/modules/orders/order.service.ts
 Choose an option above and I'll implement it for you!
 
 **Option 1 (Quick):** Change default to APPROVED  
-**Option 3 (Production):** Auto-approve + admin can reject  
+**Option 3 (Production):** Auto-approve + admin can reject
 
 Which would you prefer?

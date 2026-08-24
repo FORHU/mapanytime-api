@@ -14,20 +14,13 @@ export default class ProductController {
       name: Joi.string().max(PRODUCT_LIMITS.NAME_MAX).required(),
       price: money().max(PRODUCT_LIMITS.PRICE_MAX).required(),
       brand: Joi.string().allow('', null).max(PRODUCT_LIMITS.BRAND_MAX).optional(),
-      description: Joi.string()
-        .allow('', null)
-        .max(PRODUCT_LIMITS.DESCRIPTION_MAX)
-        .optional(),
+      description: Joi.string().allow('', null).max(PRODUCT_LIMITS.DESCRIPTION_MAX).optional(),
       categoryId: Joi.string().required(),
       tags: Joi.array()
         .items(Joi.string().valid(...ALLOWED_PRODUCT_TAGS))
         .optional(),
       isActive: Joi.boolean().default(false),
-      initialStock: Joi.number()
-        .integer()
-        .min(0)
-        .max(PRODUCT_LIMITS.STOCK_MAX)
-        .default(0),
+      initialStock: Joi.number().integer().min(0).max(PRODUCT_LIMITS.STOCK_MAX).default(0),
       imageIds: Joi.array().items(Joi.string()).optional(),
     });
 
@@ -145,10 +138,7 @@ export default class ProductController {
       // legitimate edit. Joi rejects '' for a bare string(), which turned every
       // save of a brandless product into a 400. The service maps '' to null.
       brand: Joi.string().allow('', null).max(PRODUCT_LIMITS.BRAND_MAX).optional(),
-      description: Joi.string()
-        .allow('', null)
-        .max(PRODUCT_LIMITS.DESCRIPTION_MAX)
-        .optional(),
+      description: Joi.string().allow('', null).max(PRODUCT_LIMITS.DESCRIPTION_MAX).optional(),
       categoryId: Joi.string().optional(),
       isActive: Joi.boolean().optional(),
       // Applied in the same transaction as the product fields, so an edit can't
