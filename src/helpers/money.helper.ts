@@ -27,5 +27,4 @@ import Joi from 'joi';
 export const MAX_MONEY = 9_999_999_999.99;
 
 /** A non-negative amount that fits a Decimal(12, 2) column. */
-export const money = (): Joi.NumberSchema =>
-  Joi.number().min(0).max(MAX_MONEY).precision(2);
+export const money = (): Joi.NumberSchema => Joi.number().min(0).max(MAX_MONEY).precision(2);
