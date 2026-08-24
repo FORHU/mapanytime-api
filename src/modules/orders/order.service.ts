@@ -1,10 +1,12 @@
-import OrderRepository from './order.repository';
+import crypto from 'crypto';
+import OrderRepository, { LOW_STOCK_THRESHOLD } from './order.repository';
 import ProductRepository from '../products/product.repository';
 import { computeItemDiscount } from './pricing.util';
 import { validateOrderTransition } from './order.state';
 import { prisma } from '../../utils/prisma';
 import { emitNotificationToUser } from '../../infrastructure/socket';
 import { buildPage } from '../../helpers/pagination.helper';
+import RedisUtil from '../../utils/redis.util';
 import {
   CHARGEBENEFICIARY,
   CHARGEPAYER,
@@ -12,11 +14,14 @@ import {
   ORDERCHARGETYPE,
   ORDERSTATUS,
   PAYMENTMETHODTYPE,
+  PAYMENTSTATUS,
   Prisma,
 } from '@prisma/client';
 import PaymentService from '../payments/payment.service';
 import PricingEngineService from '../pricing/pricing-engine.service';
 import SettlementService from '../settlements/settlement.service';
+import NotificationService from '../notifications/notification.service';
+import logger from '../../utils/logger';
 
 /**
  * Grace period after the booked pickup time before the hold lapses. A buyer who
@@ -26,6 +31,18 @@ const PICKUP_GRACE_MS = 2 * 60 * 60 * 1000;
 
 /** Fallback hold for an order with no pickup time — the old flat TTL. */
 const DEFAULT_RESERVATION_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * How long a seller-generated cash-pickup confirmation code stays valid.
+ * Long enough to cover showing the QR and the buyer scanning it, short
+ * enough to bound how long a leaked/overheard code stays exploitable.
+ */
+const CASH_PICKUP_CODE_TTL_SECONDS = 15 * 60;
+
+const cashPickupCodeKey = (orderId: string) => `cash-pickup-code:${orderId}`;
+
+/** Mutex guarding confirmCashPickup's critical section — see its comment. */
+const cashPickupLockKey = (orderId: string) => `cash-pickup-lock:${orderId}`;
 
 /**
  * How long stock is held for an order.
@@ -367,7 +384,10 @@ export default class OrderService {
       throw { status: 403, message: 'You do not have administrative access to this branch.' };
     }
 
-    return prisma.$transaction(async (tx) => {
+    // Populated inside the transaction, read after it commits — see below.
+    const lowStockAlerts: { productId: string; productName: string; quantityOnHand: number }[] = [];
+
+    const completed = await prisma.$transaction(async (tx) => {
       const order = await OrderRepository.getOrderById(orderId, tx);
 
       if (!order) throw new Error('Order not found.');
@@ -413,6 +433,8 @@ export default class OrderService {
         if (!inventory)
           throw new Error(`Inventory tracking ledger missing for product ID ${item.productId}.`);
 
+        const newOnHand = inventory.quantityOnHand - item.quantity;
+
         await tx.inventory.update({
           where: { id: inventory.id },
           data: {
@@ -420,6 +442,17 @@ export default class OrderService {
             quantityReserved: { decrement: item.quantity },
           },
         });
+
+        // Alert on the crossing, not on every order once already low — otherwise
+        // the seller gets one notification per sale for the rest of the product's
+        // life at low stock.
+        if (inventory.quantityOnHand > LOW_STOCK_THRESHOLD && newOnHand <= LOW_STOCK_THRESHOLD) {
+          lowStockAlerts.push({
+            productId: item.productId,
+            productName: item.productName ?? 'A product',
+            quantityOnHand: newOnHand,
+          });
+        }
 
         await tx.products.update({
           where: { id: item.productId },
@@ -450,6 +483,156 @@ export default class OrderService {
 
       return completed;
     });
+
+    for (const alert of lowStockAlerts) {
+      try {
+        await NotificationService.sendNotification({
+          userId: seller.userId,
+          title: 'Low stock alert',
+          body: `${alert.productName} is down to ${alert.quantityOnHand} unit${alert.quantityOnHand === 1 ? '' : 's'} left.`,
+          metadata: {
+            type: 'LOW_STOCK',
+            productId: alert.productId,
+            quantityOnHand: alert.quantityOnHand,
+          },
+        });
+      } catch {
+        // Swallow — notification delivery is non-critical, and the order is
+        // already completed.
+      }
+    }
+
+    return completed;
+  }
+
+  /**
+   * Seller generates a short-lived, single-use code for a Cash on Pickup
+   * order — displayed to the buyer as a QR (and as plain text for manual
+   * fallback) instead of the seller unilaterally marking the order complete.
+   * The buyer scanning/entering it correctly is what proves cash actually
+   * changed hands; see {@link confirmCashPickup}, which is the only thing
+   * that can spend this code.
+   */
+  static async generateCashPickupCode(userId: string, orderId: string, storeId: string) {
+    const seller = await ProductRepository.getSellerByUserId(userId);
+    if (!seller || seller.applicationStatus !== 'APPROVED') {
+      throw { status: 403, message: 'User is not an approved seller profile.' };
+    }
+
+    const store = await ProductRepository.getStoreById(storeId);
+    if (!store || store.sellerId !== seller.id) {
+      throw { status: 403, message: 'You do not have administrative access to this branch.' };
+    }
+
+    const order = await OrderRepository.getOrderById(orderId, prisma);
+    if (!order) throw { status: 404, message: 'Order not found.' };
+    if (order.storeId !== storeId) {
+      throw { status: 403, message: 'This order does not belong to this branch.' };
+    }
+    if (order.status !== 'READY_FOR_PICKUP') {
+      throw {
+        status: 400,
+        message: 'Only orders that are ready for pickup can generate a confirmation code.',
+      };
+    }
+
+    const payment = await prisma.payments.findFirst({
+      where: { orderId },
+      orderBy: { createdAt: 'desc' },
+      include: { paymentMethod: { select: { type: true } } },
+    });
+    if (payment?.paymentMethod?.type !== PAYMENTMETHODTYPE.CASH) {
+      throw {
+        status: 400,
+        message: 'This order is not paid by cash on pickup.',
+      };
+    }
+
+    const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+    await RedisUtil.client.setEx(cashPickupCodeKey(orderId), CASH_PICKUP_CODE_TTL_SECONDS, code);
+
+    return { code, expiresInSeconds: CASH_PICKUP_CODE_TTL_SECONDS };
+  }
+
+  /**
+   * Buyer redeems the seller-shown code to confirm a Cash on Pickup order —
+   * the flipped counterpart of the seller-scans-buyer's-pass flow every other
+   * payment method uses. The code is the only proof of payment this endpoint
+   * trusts; it is consumed on first use (deleted from Redis before completion
+   * runs) so a screenshot or overheard code cannot confirm a second time.
+   * Completion itself still runs through {@link completeOrder} unchanged, so
+   * inventory, settlement, and low-stock alerting stay identical either way —
+   * only *who* is allowed to trigger it, and *why*, differs here.
+   */
+  static async confirmCashPickup(userId: string, orderId: string, code: string) {
+    const buyer = await prisma.buyers.findUnique({ where: { userId } });
+    if (!buyer) {
+      throw { status: 403, message: 'Only registered buyers can confirm a pickup.' };
+    }
+
+    const order = await OrderRepository.getOrderById(orderId, prisma);
+    if (!order) throw { status: 404, message: 'Order not found.' };
+    if (order.buyerId !== buyer.id) {
+      throw { status: 403, message: 'Unauthorized. You do not own this order.' };
+    }
+
+    const payment = await prisma.payments.findFirst({
+      where: { orderId },
+      orderBy: { createdAt: 'desc' },
+      include: { paymentMethod: { select: { type: true } } },
+    });
+    if (payment?.paymentMethod?.type !== PAYMENTMETHODTYPE.CASH) {
+      throw { status: 400, message: 'This order is not paid by cash on pickup.' };
+    }
+
+    // A network retry or a double-tap before the button visually disables
+    // could otherwise both pass the code check before either delete runs,
+    // and both proceed into completeOrder concurrently — double inventory
+    // decrements, double settlements. This lock (not the code's own
+    // get-then-delete, which stays non-atomic on purpose — see below) is
+    // what actually closes that window: only one confirm attempt per order
+    // is ever inside the critical section at a time.
+    const lockKey = cashPickupLockKey(orderId);
+    const acquiredLock = await RedisUtil.client.set(lockKey, '1', {
+      NX: true,
+      expiration: { type: 'EX', value: 30 },
+    });
+    if (!acquiredLock) {
+      throw {
+        status: 409,
+        message: 'This order is already being confirmed — please wait a moment.',
+      };
+    }
+
+    try {
+      const storedCode = await RedisUtil.client.get(cashPickupCodeKey(orderId));
+      if (!storedCode) {
+        throw {
+          status: 400,
+          message: 'No pending confirmation code for this order — ask the seller to show it again.',
+        };
+      }
+      // Deliberately not consumed via an atomic get-and-delete: that would
+      // burn the real code on a single wrong guess or typo (manual entry is
+      // the fallback when scanning fails), forcing the seller to regenerate
+      // for what might just be a mis-scan. The lock above is what prevents
+      // concurrent double-spend, not this comparison.
+      if (storedCode.toUpperCase() !== code.trim().toUpperCase()) {
+        throw { status: 400, message: 'Incorrect confirmation code.' };
+      }
+
+      // Consumed before completion runs, not after — a failure inside
+      // completeOrder should not leave a still-valid code sitting around to
+      // be silently retried; the seller can just generate a fresh one.
+      await RedisUtil.client.del(cashPickupCodeKey(orderId));
+
+      const store = await ProductRepository.getStoreById(order.storeId);
+      if (!store) throw { status: 404, message: 'Store not found.' };
+
+      return await this.completeOrder(store.seller.userId, orderId, order.storeId);
+    } finally {
+      await RedisUtil.client.del(lockKey);
+    }
   }
 
   static async cancelOrder(userId: string, orderId: string) {
@@ -461,14 +644,108 @@ export default class OrderService {
       throw { status: 403, message: 'Only registered buyers can cancel orders.' };
     }
 
+    const order = await prisma.orders.findUnique({
+      where: { id: orderId },
+      include: { orderitems: true },
+    });
+
+    if (!order) throw { status: 404, message: 'Order not found.' };
+    if (order.buyerId !== buyer.id) {
+      throw { status: 403, message: 'Unauthorized. You do not own this order.' };
+    }
+
+    try {
+      validateOrderTransition(order.status, 'CANCELLED');
+    } catch (error) {
+      const err = error as Error;
+      throw { status: 400, message: err.message };
+    }
+
+    // Cancelling a PENDING order (buyer never finished paying) just releases the
+    // hold. Cancelling a PROCESSING order means the gateway already captured
+    // real money — that must go back through the provider, not just be
+    // stamped FAILED. See PICKUP-NEXT.md S3.
+    const payment = await prisma.payments.findFirst({
+      where: { orderId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        paymentMethod: { select: { type: true } },
+        provider: { select: { code: true } },
+      },
+    });
+
+    const isCash = payment?.paymentMethod?.type === PAYMENTMETHODTYPE.CASH;
+    const needsRefund = payment?.status === PAYMENTSTATUS.COMPLETED && !isCash;
+
+    let refundReference: string | null = null;
+
+    if (needsRefund && payment) {
+      if (!payment.providerReference) {
+        throw {
+          status: 409,
+          message:
+            'This payment has no provider reference, so it cannot be refunded automatically. ' +
+            'Cancel it in the provider dashboard and reconcile manually.',
+        };
+      }
+
+      const adapter = PaymentService.getProviderAdapter(payment.provider?.code ?? 'MOCK');
+      if (!adapter.refundPayment) {
+        throw {
+          status: 501,
+          message: `The ${payment.provider?.code ?? 'configured'} provider does not support automated refunds.`,
+        };
+      }
+
+      // Mark the intent before calling out, so a refund that succeeds at the
+      // gateway but whose response we never see is visibly in flight rather
+      // than looking like it never happened. Mirrors ReturnService.executeRefund.
+      await prisma.payments.update({
+        where: { id: payment.id },
+        data: { status: PAYMENTSTATUS.REFUND_PENDING },
+      });
+
+      try {
+        const result = await adapter.refundPayment(
+          payment.providerReference,
+          Math.round(Number(payment.amount) * 100),
+          'requested_by_customer',
+        );
+        refundReference = result.refundId;
+      } catch (error) {
+        // Put the payment back where it was; the refund did not happen, so the
+        // order must not be cancelled either.
+        await prisma.payments.update({
+          where: { id: payment.id },
+          data: { status: payment.status },
+        });
+        logger.error(`[Cancel] Provider refund failed for order ${orderId}:`, error);
+        throw {
+          status: 502,
+          message:
+            'The payment provider rejected the refund. No money has moved; the order was not cancelled.',
+        };
+      }
+    }
+
     try {
       return await prisma.$transaction(async (tx) => {
-        const order = await OrderRepository.getOrderById(orderId, tx);
-
-        if (!order) throw new Error('Order not found.');
-        if (order.buyerId !== buyer.id) throw new Error('Unauthorized. You do not own this order.');
-
-        validateOrderTransition(order.status, 'CANCELLED');
+        // Re-validate against the live status: the refund call above was made
+        // outside this transaction, so the order may have moved on (e.g. the
+        // seller completed it) while the refund was in flight. Overwriting a
+        // COMPLETED/settled order back to CANCELLED here would double-account
+        // — refunded buyer, settled seller, same order.
+        const current = await tx.orders.findUniqueOrThrow({ where: { id: orderId } });
+        try {
+          validateOrderTransition(current.status, 'CANCELLED');
+        } catch {
+          throw new Error(
+            needsRefund
+              ? `Order status changed to ${current.status} while the refund was processing. ` +
+                  'The refund has already been issued at the provider — reconcile this order manually.'
+              : `Order status changed to ${current.status}; it can no longer be cancelled.`,
+          );
+        }
 
         for (const item of order.orderitems) {
           const inventory = await tx.inventory.findFirst({
@@ -490,6 +767,23 @@ export default class OrderService {
           where: { orderId: orderId, status: 'RESERVED' },
           data: { status: 'RELEASED' },
         });
+
+        if (needsRefund && payment) {
+          await tx.payments.update({
+            where: { id: payment.id },
+            data: {
+              status: PAYMENTSTATUS.REFUNDED,
+              refundedAmount: payment.amount,
+              refundReference,
+              refundedAt: new Date(),
+            },
+          });
+          return tx.orders.update({
+            where: { id: orderId },
+            data: { status: 'CANCELLED' },
+            include: { orderitems: true, payment: true },
+          });
+        }
 
         return OrderRepository.updateOrderStatus(orderId, 'CANCELLED', 'FAILED', tx);
       });

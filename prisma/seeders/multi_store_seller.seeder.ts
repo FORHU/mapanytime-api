@@ -1,5 +1,4 @@
 import { PrismaClient, ApplicationStatus, STOREAPPROVALSTATUS } from '@prisma/client';
-import crypto from 'crypto';
 
 /**
  * One seller owning four stores: three approved and stocked, one still awaiting
@@ -18,13 +17,6 @@ import crypto from 'crypto';
 
 const SELLER_EMAIL = 'seller.multistore@mapanytime.test';
 const SELLER_PASSWORD = 'Seller123';
-
-/** Matches the salt:hash pbkdf2 format users.seeder.ts writes. */
-function hashPassword(raw: string): string {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(raw, salt, 1000, 64, 'sha512').toString('hex');
-  return `${salt}:${hash}`;
-}
 
 /** Mon–Sat 08:00–19:00, closed Sunday. */
 const WEEKLY_HOURS = [0, 1, 2, 3, 4, 5, 6].map((dayOfWeek) => ({
@@ -141,23 +133,15 @@ export async function seedMultiStoreSeller(prisma: PrismaClient) {
   console.log('🌱 Seeding multi-store seller scenario...');
 
   // ── 1. Seller user ────────────────────────────────────────────────────────
-  let user = await prisma.users.findUnique({ where: { email: SELLER_EMAIL } });
-
+  // Created by users.seeder.ts, which seed.ts always runs first — this seeder
+  // only attaches the multi-store scenario to that existing user, it does not
+  // own the account.
+  const user = await prisma.users.findUnique({ where: { email: SELLER_EMAIL } });
   if (!user) {
-    user = await prisma.users.create({
-      data: {
-        email: SELLER_EMAIL,
-        firstName: 'Nora',
-        lastName: 'Bumanglag',
-        passwordHash: hashPassword(SELLER_PASSWORD),
-        isEmailVerified: true,
-        countryCode: 'PH',
-        roles: { connect: [{ roleName: 'SELLER' }] },
-      },
-    });
-    console.log(`  ✅ Created user: ${SELLER_EMAIL} / ${SELLER_PASSWORD}`);
-  } else {
-    console.log(`  ℹ️  User already exists: ${SELLER_EMAIL}`);
+    throw new Error(
+      `seedMultiStoreSeller: no user found for ${SELLER_EMAIL}. ` +
+        'seedUsers(prisma) must run before seedMultiStoreSeller(prisma) — it owns creating this account.',
+    );
   }
 
   // ── 2. Seller profile ─────────────────────────────────────────────────────

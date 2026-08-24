@@ -1,4 +1,17 @@
 import { prisma } from '../../utils/prisma';
+import S3Util from '../../utils/s3.util';
+import { S3_CDN_URL } from '../../config';
+
+/**
+ * Same pattern as product.repository.ts / store.service.ts / merchantAds.service.ts.
+ * TODO: extract to a shared util (4th copy now) — also unlike S3Util.getPublicUrl,
+ * this doesn't strip a trailing slash from S3_CDN_URL, so a trailing-slash config
+ * produces double-slash (404-prone) URLs.
+ */
+async function resolveImageUrl(file: { path: string; bucket?: string | null }): Promise<string> {
+  if (S3_CDN_URL) return `${S3_CDN_URL}/${file.path}`;
+  return S3Util.getFileUrl(file.path);
+}
 
 /**
  * Buyer wishlists.
@@ -50,7 +63,21 @@ export default class WishlistService {
       },
     });
 
-    const items = wishlist?.items ?? [];
+    const rawItems = wishlist?.items ?? [];
+    const items = await Promise.all(
+      rawItems.map(async (item) => ({
+        ...item,
+        product: {
+          ...item.product,
+          productImages: await Promise.all(
+            (item.product?.productImages ?? []).map(async (pi) => ({
+              ...pi,
+              file: { ...pi.file, url: await resolveImageUrl(pi.file) },
+            })),
+          ),
+        },
+      })),
+    );
     return { id: wishlist?.id ?? null, items, count: items.length };
   }
 

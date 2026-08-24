@@ -1,6 +1,14 @@
 import { PrismaClient } from '@prisma/client';
-import { SYSTEM_ROLES, ADMIN_ROLES, SystemRole } from '../../src/constants/roles.constant';
-import { PERMISSIONS, SYSTEM_PERMISSIONS } from '../../src/constants/permissions.constant';
+import {
+  SYSTEM_ROLES,
+  ADMIN_ROLES,
+  ROLE_DESCRIPTIONS,
+  SystemRole,
+} from '../../src/constants/roles.constant';
+import {
+  SYSTEM_PERMISSIONS,
+  NON_ADMIN_ROLE_PERMISSIONS,
+} from '../../src/constants/permissions.constant';
 
 interface PermissionSeederRecord {
   id: string;
@@ -36,55 +44,22 @@ export async function seedRoles(prisma: PrismaClient) {
     seededPermissions[perm.code] = created.id;
   }
 
-  const roles = [
-    {
-      roleName: SYSTEM_ROLES.SUPER_ADMIN,
-      description:
-        'Platform super administrator with unrestricted system control and invite privileges',
-    },
-    {
-      roleName: SYSTEM_ROLES.DEVELOPER,
-      description:
-        'Platform software engineer with access to system API logs, webhooks, and developer tools',
-    },
-    {
-      roleName: SYSTEM_ROLES.BUYER,
-      description: 'Buyer account for map discovery and local checkout',
-    },
-    {
-      roleName: SYSTEM_ROLES.SELLER,
-      description: 'Merchant seller account for managing storefronts and catalog',
-    },
-    {
-      roleName: SYSTEM_ROLES.ADMIN,
-      description: 'Platform administrator with system management permissions',
-    },
-    {
-      roleName: SYSTEM_ROLES.SUPPORT_AGENT,
-      description: 'Customer support agent for reviewing orders and store inquiries',
-    },
-  ];
-
-  for (const roleData of roles) {
+  // Iterates SYSTEM_ROLES directly — adding a role there is enough for it to
+  // reach the DB; ROLE_DESCRIPTIONS being Record<SystemRole, string> means a
+  // missing description is a compile error, not a role that silently never
+  // gets created.
+  for (const roleName of Object.values(SYSTEM_ROLES)) {
     const role = await prisma.roles.upsert({
-      where: { roleName: roleData.roleName },
-      update: { description: roleData.description },
-      create: roleData,
+      where: { roleName },
+      update: { description: ROLE_DESCRIPTIONS[roleName] },
+      create: { roleName, description: ROLE_DESCRIPTIONS[roleName] },
     });
 
-    // Assign default permissions to roles
-    let assignedCodes: string[] = [];
-    if (ADMIN_ROLES.includes(roleData.roleName as SystemRole)) {
-      assignedCodes = Object.keys(seededPermissions);
-    } else if (roleData.roleName === SYSTEM_ROLES.SELLER) {
-      assignedCodes = [
-        PERMISSIONS.STORES_MANAGE,
-        PERMISSIONS.ORDERS_VIEW,
-        PERMISSIONS.ANALYTICS_VIEW,
-      ];
-    } else if (roleData.roleName === SYSTEM_ROLES.SUPPORT_AGENT) {
-      assignedCodes = [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.STORES_MANAGE];
-    }
+    // Administrators get every seeded permission; everyone else gets whatever
+    // NON_ADMIN_ROLE_PERMISSIONS lists for them (nothing, if unlisted).
+    const assignedCodes: string[] = ADMIN_ROLES.includes(roleName as SystemRole)
+      ? Object.keys(seededPermissions)
+      : (NON_ADMIN_ROLE_PERMISSIONS[roleName as SystemRole] ?? []);
 
     for (const code of assignedCodes) {
       const permId = seededPermissions[code];

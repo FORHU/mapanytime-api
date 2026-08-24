@@ -1,3 +1,5 @@
+import { SystemRole } from './roles.constant';
+
 /**
  * Granular permission codes.
  *
@@ -91,3 +93,14 @@ export const NON_ADMIN_HELD_PERMISSIONS: PermissionCode[] = [
   PERMISSIONS.ORDERS_VIEW,
   PERMISSIONS.ANALYTICS_VIEW,
 ];
+
+/**
+ * What `roles.seeder.ts` assigns to each non-admin role. Administrators
+ * (ADMIN_ROLES) always get every seeded permission instead — see the seeder —
+ * so they are intentionally absent here. A role with no entry gets none,
+ * which is the safe default for a role nobody has explicitly granted yet.
+ */
+export const NON_ADMIN_ROLE_PERMISSIONS: Partial<Record<SystemRole, PermissionCode[]>> = {
+  SELLER: [PERMISSIONS.STORES_MANAGE, PERMISSIONS.ORDERS_VIEW, PERMISSIONS.ANALYTICS_VIEW],
+  SUPPORT_AGENT: [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.STORES_MANAGE],
+};
