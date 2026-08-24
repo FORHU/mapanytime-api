@@ -11,7 +11,7 @@
 This is not a one-day feature. As written, it spans:
 
 - **New backend domain**: an immutable ledger table, a balance/summary table, campaign rules, redemption rules, loyalty-level config, fraud/idempotency guards — plus ~15 new/changed REST endpoints across buyer, seller, and admin surfaces.
-- **New Flutter feature module** (`lib/features/mapPoints/`) with a wallet screen, transaction history, an earn-hub, a rewards marketplace with redemption modals, an earn animation, a loyalty/level screen, home-widget, store-page/product-page hooks, checkout integration, and order-completion integration — plus wiring into two *existing* screens (checkout, order confirmation) that already have real logic (pricing engine, payment methods) this has to slot into without breaking.
+- **New Flutter feature module** (`lib/features/mapPoints/`) with a wallet screen, transaction history, an earn-hub, a rewards marketplace with redemption modals, an earn animation, a loyalty/level screen, home-widget, store-page/product-page hooks, checkout integration, and order-completion integration — plus wiring into two _existing_ screens (checkout, order confirmation) that already have real logic (pricing engine, payment methods) this has to slot into without breaking.
 - **New web surfaces**: `/seller/promotions` gets a MAP campaign builder (7-step wizard) and analytics cards; `/admin/map-points` gets a full control center (rules, campaigns, loyalty levels, user balances, transaction inspection with filters, fraud monitoring).
 - **Cross-cutting concerns**: Socket.IO notification events, RabbitMQ-based async awarding (to keep order/review/referral flows fast, matching the existing `EmailConsumer`/`AnalyticsConsumer` pattern), audit logging for every admin balance adjustment, and idempotency keys so `ORDER_COMPLETED:{orderId}` can never double-award.
 
@@ -28,6 +28,7 @@ Realistically this is **weeks of work across all three repos**, not a single ses
    4. Two read-only endpoints — `GET /v1/map-points/balance` and `GET /v1/map-points/transactions` — no UI, just data queryable directly (e.g. via curl/Postman) to confirm the ledger behaves correctly before anything is built on top of it.
 
    Nothing else — no wallet screen, no animation, no rewards marketplace, no seller/admin tooling — happens until this is confirmed working: balances always match the sum of their transaction log, and no order ever double-credits.
+
 2. **Phase 1b — Buyer wallet UI (mobile).** Wallet screen (balance, lifetime earned/spent, transaction history) reading real data from 1a. Home-screen widget. No redemption yet — read-only.
 3. **Phase 1c — Earning surfaces.** Store/product "Earn N MAP" badges (backend-driven, no hardcoded values per the spec's own requirement), the earn animation, review/referral/store-visit triggers.
 4. **Phase 1d — Redemption.** Rewards marketplace, redemption confirmation modal, checkout MAP application — this is the highest-risk phase since it touches money math and must be server-validated end to end (never trust a client-computed discount).
@@ -47,7 +48,7 @@ Don't start Phase 1b before 1a is solid — a wallet UI over a half-finished led
 
 ### Cash withdrawal — a separate, bigger decision
 
-You asked whether MAP could also be *withdrawn* (cashed out to a bank account or e-wallet), not just redeemed in-app for discounts/free items. The original spec never mentions this — every example is an in-platform reward (₱ discount, free item, store reward). That's not an oversight; it's a meaningful line:
+You asked whether MAP could also be _withdrawn_ (cashed out to a bank account or e-wallet), not just redeemed in-app for discounts/free items. The original spec never mentions this — every example is an in-platform reward (₱ discount, free item, store reward). That's not an oversight; it's a meaningful line:
 
 - **In-app redemption** (MAP → discount on your next order) is a marketing/loyalty mechanic. It never leaves the platform's books.
 - **Cash withdrawal** (MAP → money in your bank/GCash) turns MAP into something functionally close to e-money. In the Philippines that's BSP-regulated territory (the same reason PayMongo itself is a licensed gateway, not something built in-house) — offering cash-out on your own reward points risks needing an EMI license or equivalent, independent of whether blockchain is involved. This is a legal/compliance question, not an engineering one, and it's bigger than "add a feature."
@@ -56,35 +57,41 @@ Recommendation: keep withdrawal **off by default and behind an explicit admin to
 
 ### Admin-configurable Points Settings
 
-The spec's admin control center (section 14) lists *what* admins manage but not the actual knobs. These are the settings that should be database-backed config (mirroring how `PricingConfigurations`/`PricingComponents` already version commission rules), never hardcoded constants:
+The spec's admin control center (section 14) lists _what_ admins manage but not the actual knobs. These are the settings that should be database-backed config (mirroring how `PricingConfigurations`/`PricingComponents` already version commission rules), never hardcoded constants:
 
 **Earning rules**
+
 - MAP-per-action rates: purchase (flat, or % of order subtotal, or both with a cap), review, referral, store visit, streak milestones.
 - Per-user earn caps: daily/weekly/monthly ceilings per action type, to bound fraud/abuse exposure.
 - Which actions are currently active (kill switch per earning type, independent of campaigns).
 
 **Redemption rules**
+
 - MAP-to-₱ exchange rate (and whether it's fixed platform-wide or can vary by seller/reward).
 - Minimum and maximum MAP redeemable per transaction/per day.
 - Which reward types are enabled (₱ discount, free item, store-specific reward).
 - Whether redemption can combine with other discounts/promo codes on the same order, or is exclusive.
 
 **Expiration policy**
+
 - Rolling (N days after each earn) vs. calendar-based (e.g. end of year) — pick one, since it changes the ledger query shape (see open question below).
 - Expiration warning lead time (the spec's "200 MAP will expire in 7 days" notification — that "7" should be configurable, not literal).
 - Whether expired MAP is a hard loss or converts to something else (it should be a hard loss — that's what makes "MAP Liability" in the KPI dashboard meaningful).
 
 **Withdrawal rules** (all default OFF until the compliance question above is resolved)
+
 - Master on/off toggle.
 - Minimum withdrawable balance.
 - Withdrawal fee (flat or %) if any.
 - Per-user withdrawal frequency/amount limits.
 
 **Loyalty levels**
+
 - Level thresholds and names (already flagged as "must be configurable" in the spec — same table shape as earning/redemption rules).
 - Per-level benefit multipliers (e.g. Local Hero earns 1.1x MAP on purchases).
 
 **Fraud/anti-abuse thresholds**
+
 - Velocity limits that trigger a manual-review flag instead of auto-crediting (e.g. more than N referrals in 24h, more than N store visits at the same store in a day).
 - Whether flagged transactions auto-hold (pending) until an admin clears them, or auto-reject.
 
@@ -113,8 +120,9 @@ The implementation must include BOTH:
 The MAP Points experience should feel like a premium, native MapAnytime feature — not like a basic points counter added to the application.
 
 ==================================================
+
 1. MAP POINTS CORE
-==================================================
+   \==================================================
 
 Name:
 MAP Points
@@ -145,8 +153,7 @@ The system must use an immutable transaction ledger.
 
 Never modify a user's MAP balance without creating a corresponding transaction record.
 
-==================================================
-2. BUYER UI/UX
+================================================== 2. BUYER UI/UX
 ==================================================
 
 Add a dedicated MAP Points experience to the Flutter mobile application.
@@ -176,13 +183,12 @@ lib/features/mapPoints/
 ├── data/
 ├── domain/
 ├── presentation/
-│   ├── pages/
-│   ├── widgets/
-│   └── controllers/
+│ ├── pages/
+│ ├── widgets/
+│ └── controllers/
 └── map_points.dart
 
-==================================================
-3. MAP POINTS WALLET UI
+================================================== 3. MAP POINTS WALLET UI
 ==================================================
 
 Create a premium MAP Points wallet screen.
@@ -212,8 +218,7 @@ Include:
 
 The balance should have a subtle animated counter when the screen loads.
 
-==================================================
-4. MAP POINTS TRANSACTION HISTORY
+================================================== 4. MAP POINTS TRANSACTION HISTORY
 ==================================================
 
 Create a transaction history interface.
@@ -247,8 +252,7 @@ Each transaction should display:
 
 Use positive/negative visual hierarchy to make earning and spending immediately understandable.
 
-==================================================
-5. MAP EARNING UI
+================================================== 5. MAP EARNING UI
 ==================================================
 
 Create an "Earn MAP" section.
@@ -256,41 +260,40 @@ Create an "Earn MAP" section.
 Example cards:
 
 ┌─────────────────────────────┐
-│ 🛒 Shop & Earn              │
-│ Earn MAP when you complete  │
-│ purchases.                  │
-│                             │
-│        +50 MAP              │
+│ 🛒 Shop & Earn │
+│ Earn MAP when you complete │
+│ purchases. │
+│ │
+│ +50 MAP │
 └─────────────────────────────┘
 
 ┌─────────────────────────────┐
-│ ⭐ Review a Purchase        │
-│ Share your experience.      │
-│                             │
-│        +10 MAP              │
+│ ⭐ Review a Purchase │
+│ Share your experience. │
+│ │
+│ +10 MAP │
 └─────────────────────────────┘
 
 ┌─────────────────────────────┐
-│ 👥 Refer a Friend           │
+│ 👥 Refer a Friend │
 │ Invite friends to MapAnytime│
-│                             │
-│       +100 MAP              │
+│ │
+│ +100 MAP │
 └─────────────────────────────┘
 
 ┌─────────────────────────────┐
-│ 📍 Visit Local Stores       │
-│ Discover participating      │
-│ stores near you.            │
-│                             │
-│        +20 MAP              │
+│ 📍 Visit Local Stores │
+│ Discover participating │
+│ stores near you. │
+│ │
+│ +20 MAP │
 └─────────────────────────────┘
 
 The actual reward values must be configurable from the backend.
 
 Do not hardcode reward amounts.
 
-==================================================
-6. MAP REWARDS MARKETPLACE
+================================================== 6. MAP REWARDS MARKETPLACE
 ==================================================
 
 Create a dedicated Rewards section where users can redeem MAP.
@@ -339,8 +342,7 @@ Remaining:
 
 [ Cancel ] [ Redeem ]
 
-==================================================
-7. MAP EARN ANIMATION
+================================================== 7. MAP EARN ANIMATION
 ==================================================
 
 Create a special MAP earning animation.
@@ -370,8 +372,7 @@ Use this animation for:
 - Campaign rewards
 - Special bonuses
 
-==================================================
-8. MAP LEVEL / LOYALTY SYSTEM
+================================================== 8. MAP LEVEL / LOYALTY SYSTEM
 ==================================================
 
 Prepare the UI architecture for future MAP loyalty levels.
@@ -417,8 +418,7 @@ Benefits may eventually include:
 
 The loyalty levels must be configurable rather than hardcoded.
 
-==================================================
-9. MAP POINTS ON STORE PAGES
+================================================== 9. MAP POINTS ON STORE PAGES
 ==================================================
 
 Add MAP earning information directly to participating store pages.
@@ -426,12 +426,12 @@ Add MAP earning information directly to participating store pages.
 Example:
 
 ┌─────────────────────────────┐
-│ ⭐ Verified Store           │
-│                             │
-│ Earn up to 50 MAP           │
-│ on eligible purchases       │
-│                             │
-│ [ View Products ]           │
+│ ⭐ Verified Store │
+│ │
+│ Earn up to 50 MAP │
+│ on eligible purchases │
+│ │
+│ [ View Products ] │
 └─────────────────────────────┘
 
 Products may also display:
@@ -444,8 +444,7 @@ Earn 20 MAP with this purchase
 
 This should be driven by backend campaign rules.
 
-==================================================
-10. CHECKOUT MAP UI
+================================================== 10. CHECKOUT MAP UI
 ==================================================
 
 Add MAP information to checkout.
@@ -464,12 +463,12 @@ Available Reward:
 
 After applying:
 
-Subtotal             ₱1,000
-Discount              -₱100
-Platform Fee           ₱XX
-Tax                    ₱XX
+Subtotal ₱1,000
+Discount -₱100
+Platform Fee ₱XX
+Tax ₱XX
 ────────────────────────
-Total                  ₱XXX
+Total ₱XXX
 
 MAP Used:
 950 MAP
@@ -481,8 +480,7 @@ The MAP discount/reward must be validated server-side.
 
 Never trust the amount calculated by the mobile client.
 
-==================================================
-11. ORDER COMPLETION UI
+================================================== 11. ORDER COMPLETION UI
 ==================================================
 
 After a successful order:
@@ -502,8 +500,7 @@ After a successful order:
 
 This should be one of the most important MAP touchpoints.
 
-==================================================
-12. SELLER UI
+================================================== 12. SELLER UI
 ==================================================
 
 Add MAP functionality to:
@@ -551,8 +548,7 @@ Budget / Maximum Rewards
 Step 7:
 Review & Publish
 
-==================================================
-13. SELLER MAP ANALYTICS
+================================================== 13. SELLER MAP ANALYTICS
 ==================================================
 
 Add analytics cards:
@@ -584,8 +580,7 @@ New Customers
 ROI
 3.8x
 
-==================================================
-14. ADMIN MAP CONTROL CENTER
+================================================== 14. ADMIN MAP CONTROL CENTER
 ==================================================
 
 Add:
@@ -615,8 +610,7 @@ MAP Liability
 Active Campaigns
 MAP Users
 
-==================================================
-15. ADMIN MAP TRANSACTION INSPECTION
+================================================== 15. ADMIN MAP TRANSACTION INSPECTION
 ==================================================
 
 Admin must be able to inspect every MAP transaction.
@@ -656,8 +650,7 @@ Manual adjustments must require:
 
 Every administrative adjustment must be written to AuditLogs.
 
-==================================================
-16. AGENT UI
+================================================== 16. AGENT UI
 ==================================================
 
 Agents can see MAP-related referral rewards.
@@ -680,8 +673,7 @@ PAID
 
 This should be connected to the existing agent recruitment system.
 
-==================================================
-17. NOTIFICATIONS
+================================================== 17. NOTIFICATIONS
 ==================================================
 
 Create MAP-specific notifications.
@@ -700,8 +692,7 @@ Examples:
 
 Notifications should work with the existing Socket.IO notification architecture.
 
-==================================================
-18. HOME SCREEN MAP WIDGET
+================================================== 18. HOME SCREEN MAP WIDGET
 ==================================================
 
 Add a compact MAP Points widget to the buyer home screen.
@@ -709,19 +700,18 @@ Add a compact MAP Points widget to the buyer home screen.
 Example:
 
 ┌─────────────────────────────┐
-│        MAP POINTS           │
-│                             │
-│         1,250 MAP           │
-│                             │
-│   +50 MAP from last order   │
-│                             │
-│ [ Earn ]       [ Rewards ]  │
+│ MAP POINTS │
+│ │
+│ 1,250 MAP │
+│ │
+│ +50 MAP from last order │
+│ │
+│ [ Earn ] [ Rewards ] │
 └─────────────────────────────┘
 
 The widget should be visually attractive but not dominate the main MapAnytime map/discovery experience.
 
-==================================================
-19. MAP VISUAL IDENTITY
+================================================== 19. MAP VISUAL IDENTITY
 ==================================================
 
 Create a unique visual identity for MAP Points.
@@ -750,8 +740,7 @@ REWARDS
 COMMERCE
 COMMUNITY
 
-==================================================
-20. SPECIAL MAP FEATURE — "DISCOVER & EARN"
+================================================== 20. SPECIAL MAP FEATURE — "DISCOVER & EARN"
 ==================================================
 
 Add a special MapAnytime feature called:
@@ -782,8 +771,7 @@ THE MAP.
 
 The goal is to make MAP useful not only when purchasing, but also when exploring the local marketplace.
 
-==================================================
-21. SPECIAL MAP FEATURE — "MAP STREAK"
+================================================== 21. SPECIAL MAP FEATURE — "MAP STREAK"
 ==================================================
 
 Prepare a future loyalty feature:
@@ -813,8 +801,7 @@ Example:
 
 All values must be configurable from the backend.
 
-==================================================
-22. SPECIAL MAP FEATURE — "LOCAL HERO"
+================================================== 22. SPECIAL MAP FEATURE — "LOCAL HERO"
 ==================================================
 
 Create a future achievement system.
@@ -837,39 +824,37 @@ Reward:
 
 This encourages users to discover and support more local merchants.
 
-==================================================
-23. BACKEND API
+================================================== 23. BACKEND API
 ==================================================
 
 Add appropriate endpoints such as:
 
-GET    /v1/map-points
-GET    /v1/map-points/balance
-GET    /v1/map-points/transactions
-GET    /v1/map-points/rewards
-GET    /v1/map-points/campaigns
+GET /v1/map-points
+GET /v1/map-points/balance
+GET /v1/map-points/transactions
+GET /v1/map-points/rewards
+GET /v1/map-points/campaigns
 
-POST   /v1/map-points/redeem
-POST   /v1/map-points/referral
-POST   /v1/map-points/store-visit
+POST /v1/map-points/redeem
+POST /v1/map-points/referral
+POST /v1/map-points/store-visit
 
 Admin:
 
-GET    /v1/admin/map-points
-POST   /v1/admin/map-points/campaigns
-POST   /v1/admin/map-points/adjust
-PATCH  /v1/admin/map-points/rules
+GET /v1/admin/map-points
+POST /v1/admin/map-points/campaigns
+POST /v1/admin/map-points/adjust
+PATCH /v1/admin/map-points/rules
 
 Seller:
 
-GET    /v1/seller/map-points
-POST   /v1/seller/map-points/campaigns
-PATCH  /v1/seller/map-points/campaigns/:id
+GET /v1/seller/map-points
+POST /v1/seller/map-points/campaigns
+PATCH /v1/seller/map-points/campaigns/:id
 
 Use the existing authentication, RBAC, permission middleware, Prisma, PostgreSQL, Redis, RabbitMQ, and Socket.IO architecture.
 
-==================================================
-24. SECURITY & ANTI-FRAUD
+================================================== 24. SECURITY & ANTI-FRAUD
 ==================================================
 
 MAP Points must never be treated as trusted client-side data.
@@ -902,8 +887,7 @@ ORDER_COMPLETED:ORDER_12345
 
 must only generate the corresponding MAP reward once.
 
-==================================================
-25. PHASE 1 — NO BLOCKCHAIN
+================================================== 25. PHASE 1 — NO BLOCKCHAIN
 ==================================================
 
 Do NOT implement:
@@ -918,8 +902,7 @@ Do NOT implement:
 
 MAP Points are an internal MapAnytime reward system during Phase 1.
 
-==================================================
-26. FUTURE PHASE — OPTIONAL MAP TOKEN
+================================================== 26. FUTURE PHASE — OPTIONAL MAP TOKEN
 ==================================================
 
 Only after MapAnytime has proven:
@@ -950,43 +933,43 @@ MapAnytime + Random Cryptocurrency
 The user should naturally encounter MAP while using the platform:
 
 Discover a store
-      ↓
+↓
 Shop
-      ↓
+↓
 Complete purchase
-      ↓
+↓
 Earn MAP
-      ↓
+↓
 Redeem rewards
-      ↓
+↓
 Discover another local store
-      ↓
+↓
 Earn more MAP
-      ↓
+↓
 Return to MapAnytime
 
 This creates the core MapAnytime economic loop:
 
 BUYERS
-   ↓
+↓
 DISCOVER LOCAL STORES
-   ↓
+↓
 PURCHASE
-   ↓
+↓
 EARN MAP
-   ↓
+↓
 REDEEM / SAVE
-   ↓
+↓
 RETURN TO MAPANYTIME
-   ↓
+↓
 MORE LOCAL COMMERCE
-   ↓
+↓
 SELLERS GET MORE CUSTOMERS
-   ↓
+↓
 SELLERS FUND MORE PROMOTIONS
-   ↓
+↓
 MORE DISCOVERY
-   ↓
+↓
 MORE BUYERS
 
 FINAL DECISION:
