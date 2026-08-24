@@ -9,8 +9,6 @@ flagged-only) live in
 [`mapanytime-market-app/docs/PICKUP-NEXT.md`](../../mapanytime-market-app/docs/PICKUP-NEXT.md)
 under "Review session, 2026-08-23".
 
-
-
 ---
 
 ## `chore(deploy): wire PayMongo secrets into env and CI`
