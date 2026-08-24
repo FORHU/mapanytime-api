@@ -5,21 +5,29 @@ import { responseSuccess, responseError } from '../../helpers/response.helper';
 import { parsePagination } from '../../helpers/pagination.helper';
 import { money } from '../../helpers/money.helper';
 import { ALLOWED_PRODUCT_TAGS } from '../../helpers/product-tags';
+import { PRODUCT_LIMITS } from '../../constants/product-limits.constant';
 
 export default class ProductController {
   static async create(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
       storeId: Joi.string().required(),
-      name: Joi.string().required(),
-      price: money().required(),
-      brand: Joi.string().optional(),
-      description: Joi.string().optional(),
+      name: Joi.string().max(PRODUCT_LIMITS.NAME_MAX).required(),
+      price: money().max(PRODUCT_LIMITS.PRICE_MAX).required(),
+      brand: Joi.string().allow('', null).max(PRODUCT_LIMITS.BRAND_MAX).optional(),
+      description: Joi.string()
+        .allow('', null)
+        .max(PRODUCT_LIMITS.DESCRIPTION_MAX)
+        .optional(),
       categoryId: Joi.string().required(),
       tags: Joi.array()
         .items(Joi.string().valid(...ALLOWED_PRODUCT_TAGS))
         .optional(),
       isActive: Joi.boolean().default(false),
-      initialStock: Joi.number().integer().min(0).default(0),
+      initialStock: Joi.number()
+        .integer()
+        .min(0)
+        .max(PRODUCT_LIMITS.STOCK_MAX)
+        .default(0),
       imageIds: Joi.array().items(Joi.string()).optional(),
     });
 
@@ -131,12 +139,26 @@ export default class ProductController {
 
   static async update(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
-      name: Joi.string().optional(),
-      price: money().optional(),
-      brand: Joi.string().optional(),
-      description: Joi.string().optional(),
+      name: Joi.string().max(PRODUCT_LIMITS.NAME_MAX).optional(),
+      price: money().max(PRODUCT_LIMITS.PRICE_MAX).optional(),
+      // `brand` and `description` are nullable columns, so clearing them is a
+      // legitimate edit. Joi rejects '' for a bare string(), which turned every
+      // save of a brandless product into a 400. The service maps '' to null.
+      brand: Joi.string().allow('', null).max(PRODUCT_LIMITS.BRAND_MAX).optional(),
+      description: Joi.string()
+        .allow('', null)
+        .max(PRODUCT_LIMITS.DESCRIPTION_MAX)
+        .optional(),
       categoryId: Joi.string().optional(),
       isActive: Joi.boolean().optional(),
+      // Applied in the same transaction as the product fields, so an edit can't
+      // half-land the way two sequential requests could.
+      stock: Joi.number().integer().min(0).max(PRODUCT_LIMITS.STOCK_MAX).optional(),
+      // Replace-all semantics: an array replaces the product's tags wholesale;
+      // omitting the key leaves existing tags untouched.
+      tags: Joi.array()
+        .items(Joi.string().valid(...ALLOWED_PRODUCT_TAGS))
+        .optional(),
     });
 
     const { error, value } = schema.validate(req.body);

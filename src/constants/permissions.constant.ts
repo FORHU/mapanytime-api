@@ -29,6 +29,7 @@ import { SystemRole } from './roles.constant';
  */
 export const PERMISSIONS = {
   STORES_APPROVE: 'stores.approve',
+  SELLERS_APPROVE: 'sellers.approve',
   STORES_MANAGE: 'stores.manage',
   CATEGORIES_MANAGE: 'categories.manage',
   USERS_MANAGE: 'users.manage',
@@ -51,6 +52,11 @@ export const SYSTEM_PERMISSIONS: SystemPermission[] = [
     code: PERMISSIONS.STORES_APPROVE,
     name: 'Approve Merchant Stores',
     description: 'Can review and verify pending seller store requests',
+  },
+  {
+    code: PERMISSIONS.SELLERS_APPROVE,
+    name: 'Approve Sellers',
+    description: 'Can review and approve pending seller profiles',
   },
   {
     code: PERMISSIONS.STORES_MANAGE,

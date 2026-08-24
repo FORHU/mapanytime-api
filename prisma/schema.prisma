@@ -34,6 +34,7 @@ model Users {
   session            Session[]
   passwordResets     PasswordResetTokens[]
   seller             Sellers?
+  reviewedSellers    Sellers[]               @relation("SellerReviewer")
   buyer              Buyers?
   verifiedDocuments  DocumentVerifications[]
   sentAdminInvites   AdminInvites[]
@@ -161,6 +162,9 @@ model Sellers {
   updatedAt             DateTime                @updatedAt
   deletedAt             DateTime?
   applicationStatus     ApplicationStatus       @default(PENDING)
+  rejectionReason       String?
+  reviewedAt            DateTime?
+  reviewedById          String?
   sellerPlan            String?
   agentNotes            String?
   onboardingStep        Int                     @default(0)
@@ -168,11 +172,15 @@ model Sellers {
   onboardedAt           DateTime?
   documentVerifications DocumentVerifications[]
   users                 Users                   @relation(fields: [userId], references: [id])
+  reviewedBy            Users?                  @relation("SellerReviewer", fields: [reviewedById], references: [id])
   stores                Stores[]
   supplierProducts      SupplierProducts[]
   settlements           Settlements[]
   payouts               SellerPayouts[]
   returnRequests        ReturnRequests[]
+
+  @@index([applicationStatus])
+  @@index([reviewedAt])
 }
 
 model PropertiesFiles {

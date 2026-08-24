@@ -130,10 +130,27 @@ export default class ProductRepository {
     });
   }
 
-  static async updateProduct(productId: string, data: Prisma.ProductsUpdateInput) {
-    return prisma.products.update({
+  /**
+   * `client` lets a caller run this inside an existing transaction — a product
+   * edit changes fields and stock together, and both must land or neither.
+   *
+   * The include matches what the list endpoint returns so the PUT response is
+   * usable; it previously came back without tags, category or inventory, which
+   * left the client with nothing to do but rebuild the row locally.
+   */
+  static async updateProduct(
+    productId: string,
+    data: Prisma.ProductsUpdateInput,
+    client: Prisma.TransactionClient = prisma,
+  ) {
+    return client.products.update({
       where: { id: productId },
       data,
+      include: {
+        category: true,
+        tags: { include: { tag: true } },
+        inventory: true,
+      },
     });
   }
 
