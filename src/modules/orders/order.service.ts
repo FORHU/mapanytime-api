@@ -1,6 +1,5 @@
 import OrderRepository from './order.repository';
 import ProductRepository from '../products/product.repository';
-import TaxationService from '../taxation/taxation.service';
 import { computeItemDiscount } from './pricing.util';
 import { validateOrderTransition } from './order.state';
 import { prisma } from '../../utils/prisma';
@@ -17,6 +16,38 @@ import {
 } from '@prisma/client';
 import PaymentService from '../payments/payment.service';
 import PricingEngineService from '../pricing/pricing-engine.service';
+import SettlementService from '../settlements/settlement.service';
+
+/**
+ * Grace period after the booked pickup time before the hold lapses. A buyer who
+ * turns up a little late should still find their goods there.
+ */
+const PICKUP_GRACE_MS = 2 * 60 * 60 * 1000;
+
+/** Fallback hold for an order with no pickup time — the old flat TTL. */
+const DEFAULT_RESERVATION_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * How long stock is held for an order.
+ *
+ * The flat 15 minutes assumed checkout followed immediately, which is true of a
+ * web basket and false of this business: the buyer reserves online and collects
+ * at the stall, possibly days later. Every reservation expired long before they
+ * arrived, releasing stock they had already paid for. Held to the pickup slot
+ * they actually booked instead, plus a grace window.
+ *
+ * Settled 2026-08-20; see FIX-PLAN.md item 14.
+ */
+function resolveReservationExpiry(pickupAt?: Date | null): Date {
+  if (!pickupAt) return new Date(Date.now() + DEFAULT_RESERVATION_TTL_MS);
+
+  const expiry = new Date(new Date(pickupAt).getTime() + PICKUP_GRACE_MS);
+
+  // A pickup time in the past would expire the hold instantly. Order creation
+  // validates `pickupAt` is in the future, so this is belt and braces.
+  const floor = new Date(Date.now() + DEFAULT_RESERVATION_TTL_MS);
+  return expiry > floor ? expiry : floor;
+}
 
 export default class OrderService {
   static async createOrder(payload: {
@@ -122,7 +153,7 @@ export default class OrderService {
             buyerId: payload.buyerId,
             quantity: item.quantity,
             status: 'RESERVED',
-            expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15-minute TTL
+            expiresAt: resolveReservationExpiry(payload.pickupAt),
           },
         });
       }
@@ -136,18 +167,16 @@ export default class OrderService {
       });
 
       // 2. Dynamically calculate order pricing, provider processing fee, payer policy, and marketplace commission
-      const taxAmount = TaxationService.calculateTax(subtotalAmount);
-
       const pricingResult = await PricingEngineService.calculateOrderPricing({
         subtotalAmount,
         discountAmount: totalDiscount,
-        taxAmount,
         storeId: payload.storeId,
         sellerId: store.sellerId,
         categoryId: primaryCategoryId,
         providerId: method.providerId,
         paymentMethodId: method.id,
         paymentMethodCode: method.code,
+        paymentMethodType: method.type,
       });
 
       const charges: Prisma.OrderChargesUncheckedCreateWithoutOrderInput[] = [
@@ -158,28 +187,6 @@ export default class OrderService {
           payer: CHARGEPAYER.BUYER,
           beneficiary: CHARGEBENEFICIARY.SELLER,
         },
-        ...(pricingResult.shippingAmount > 0
-          ? [
-              {
-                type: ORDERCHARGETYPE.SHIPPING,
-                source: 'Delivery Fee',
-                amount: pricingResult.shippingAmount,
-                payer: CHARGEPAYER.BUYER,
-                beneficiary: CHARGEBENEFICIARY.COURIER,
-              },
-            ]
-          : []),
-        ...(pricingResult.taxAmount > 0
-          ? [
-              {
-                type: ORDERCHARGETYPE.TAX,
-                source: 'VAT (12%)',
-                amount: pricingResult.taxAmount,
-                payer: CHARGEPAYER.BUYER,
-                beneficiary: CHARGEBENEFICIARY.GOVERNMENT,
-              },
-            ]
-          : []),
         ...(pricingResult.discountAmount > 0
           ? [
               {
@@ -227,7 +234,6 @@ export default class OrderService {
         totalAmount: pricingResult.buyerTotalAmount,
         subtotalAmount: pricingResult.subtotalAmount,
         discountAmount: pricingResult.discountAmount,
-        taxAmount: pricingResult.taxAmount,
         marketplaceFeeAmount: pricingResult.sellerMarketplaceCommission.amount,
         sellerNetAmount: pricingResult.sellerNetAmount,
 
@@ -282,6 +288,7 @@ export default class OrderService {
         currency: 'PHP',
         description: `Payment for Order ${createdOrder.id}`,
         lineItems,
+        paymentMethodCode: method.code,
       });
 
       await tx.payments.updateMany({
@@ -427,7 +434,21 @@ export default class OrderService {
         data: { status: 'CONSUMED' },
       });
 
-      return OrderRepository.updateOrderStatus(orderId, 'COMPLETED', 'COMPLETED', tx);
+      const completed = await OrderRepository.updateOrderStatus(
+        orderId,
+        'COMPLETED',
+        'COMPLETED',
+        tx,
+      );
+
+      // Book what the platform now owes the seller. This is the only writer of
+      // `Settlements` — without it `PayoutService` filters on RELEASED rows
+      // that never exist, and no seller is ever paid. Inside the same
+      // transaction as the completion, so the ledger cannot record a debt for
+      // an order that did not finish completing. See FLAGS.md LED-3.
+      await SettlementService.createForCompletedOrder(tx, orderId);
+
+      return completed;
     });
   }
 
@@ -539,6 +560,33 @@ export default class OrderService {
     // the client renders the page it asked for instead of post-processing
     // the store's entire order history.
     const { items, total } = await OrderRepository.getStoreOrdersPage(storeIds, {
+      status: query.status,
+      search: query.search,
+      sortOrder: query.sortOrder,
+      skip: query.skip,
+      take: query.limit,
+    });
+
+    return buildPage(items, total, { page: query.page, limit: query.limit });
+  }
+
+  /**
+   * Every order on the platform, for the admin console.
+   *
+   * `getStoreOrders` resolves the caller's seller profile and 403s without one,
+   * so an administrator could not use it — which is why `/admin/orders` was
+   * rendering a hardcoded array of invented US orders in dollars instead.
+   * See FLAGS.md ADM-3. Authorization is the route's `requireAdmin`.
+   */
+  static async getAllOrders(query: {
+    status?: ORDERSTATUS;
+    search?: string;
+    sortOrder?: 'asc' | 'desc';
+    page: number;
+    limit: number;
+    skip: number;
+  }) {
+    const { items, total } = await OrderRepository.getStoreOrdersPage(null, {
       status: query.status,
       search: query.search,
       sortOrder: query.sortOrder,

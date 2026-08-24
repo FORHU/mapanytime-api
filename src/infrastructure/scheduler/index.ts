@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import logger from '../../utils/logger';
 import InventoryReservationService from '../../modules/inventory/inventoryReservation.service';
+import SettlementService from '../../modules/settlements/settlement.service';
 
 /**
  * Scheduled Jobs Registry
@@ -23,6 +24,21 @@ export const startScheduler = () => {
       }
     } catch (err) {
       logger.error('[Scheduler] Failed to process expired reservations:', err);
+    }
+  });
+
+  // ── Settlement maturation — runs hourly ─────────────────────────────────
+  // Flips settlements past their hold to RELEASED, which is the only state a
+  // payout can sweep. Nothing did this before, so every settlement would have
+  // sat at PENDING forever. See FLAGS.md LED-4.
+  cron.schedule('0 * * * *', async () => {
+    try {
+      const released = await SettlementService.releaseMaturedSettlements();
+      if (released > 0) {
+        logger.info(`[Scheduler] Released ${released} matured settlement(s) for payout.`);
+      }
+    } catch (err) {
+      logger.error('[Scheduler] Failed to release matured settlements:', err);
     }
   });
 

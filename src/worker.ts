@@ -6,7 +6,7 @@ import http from 'http';
 import { rabbitmq } from './infrastructure/rabbitmq';
 import { redis } from './infrastructure/redis';
 import { startEmailConsumer } from './consumers/email.consumer';
-import { startAiConsumer } from './consumers/ai.consumer';
+import { verifyMailer } from './utils/mailer';
 import { startAnalyticsConsumer } from './consumers/analytics.consumer';
 import { workerMetrics } from './utils/worker-metrics';
 import { startScheduler } from './infrastructure/scheduler';
@@ -60,9 +60,13 @@ const startWorker = async () => {
   await rabbitmq.connect();
   await redis.connect();
 
+  // Check the mail transport up front, rather than discovering it is broken
+  // the first time someone locks themselves out of their account. Never fatal —
+  // it logs loudly and the worker carries on.
+  await verifyMailer();
+
   // Register all consumers
   await startEmailConsumer();
-  await startAiConsumer();
   await startAnalyticsConsumer();
 
   // Start scheduled jobs (cron)

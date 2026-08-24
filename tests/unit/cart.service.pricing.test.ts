@@ -1,13 +1,17 @@
 import CartService from '../../src/modules/cart/cart.service';
 import ProductRepository from '../../src/modules/products/product.repository';
-import TaxationRepository from '../../src/modules/taxation/taxation.repository';
 import RedisUtil from '../../src/utils/redis.util';
 import { prisma } from '../../src/utils/prisma';
+import PricingEngineService from '../../src/modules/pricing/pricing-engine.service';
 
 jest.mock('../../src/modules/products/product.repository');
-jest.mock('../../src/modules/taxation/taxation.repository');
 jest.mock('../../src/utils/prisma', () => ({
-  prisma: { merchantAdProducts: { findMany: jest.fn() } },
+  prisma: {
+    merchantAdProducts: { findMany: jest.fn() },
+    // The preview prices through PricingEngineService now, which reads these.
+    pricingConfigurations: { findFirst: jest.fn().mockResolvedValue(null) },
+    pricingComponents: { findMany: jest.fn().mockResolvedValue([]) },
+  },
 }));
 
 const PRICE = 100;
@@ -28,7 +32,6 @@ function mockProduct(productId: string, overrides: Record<string, unknown> = {})
 
 beforeEach(() => {
   jest.clearAllMocks();
-  (TaxationRepository.getCommissionRuleForCategory as jest.Mock).mockResolvedValue(null);
   (prisma.merchantAdProducts.findMany as jest.Mock).mockResolvedValue([]);
 });
 
@@ -56,7 +59,8 @@ describe('CartService.previewPricing', () => {
     ]);
     expect(pricing.subtotalAmount).toBe(2 * PRICE);
     expect(pricing.discountAmount).toBe(0);
-    expect(pricing.totalAmount).toBe(pricing.subtotalAmount + pricing.taxAmount);
+    // No tax term: the preview total is the goods total, nothing added on top.
+    expect(pricing.totalAmount).toBe(pricing.subtotalAmount);
   });
 
   it('applies an active percentage discount, matching order-creation math', async () => {
@@ -127,6 +131,36 @@ describe('CartService.previewPricing', () => {
 
     await expect(CartService.previewPricing('user-1', ['product-missing'])).rejects.toMatchObject({
       status: 400,
+    });
+  });
+
+  describe('agreement with checkout', () => {
+    // The preview used to run a second engine (TaxationService, 5% commission)
+    // while checkout ran PricingEngineService at 2%. See FLAGS.md F28.
+    it('quotes the same goods total the engine charges from', async () => {
+      mockCart([{ productId: 'product-1', quantity: 3, unitPrice: PRICE }]);
+      mockProduct('product-1');
+
+      const pricing = await CartService.previewPricing('user-1');
+      const engine = await PricingEngineService.calculateOrderPricing({
+        subtotalAmount: pricing.subtotalAmount,
+        discountAmount: pricing.discountAmount,
+      });
+
+      expect(pricing.totalAmount).toBe(engine.orderAmount);
+    });
+
+    it('excludes the payment fee and says so — the method is not chosen yet', async () => {
+      mockCart([{ productId: 'product-1', quantity: 1, unitPrice: PRICE }]);
+      mockProduct('product-1');
+
+      const pricing = await CartService.previewPricing('user-1');
+
+      // The fee differs per method (GCash 2.23%, Maya 1.79%, card 3.125% +
+      // P13.39), so there is no honest single number to show before the buyer
+      // picks one. GET /payments/methods?amount= quotes each.
+      expect(pricing.paymentFeeIncluded).toBe(false);
+      expect(pricing.totalAmount).toBe(pricing.subtotalAmount - pricing.discountAmount);
     });
   });
 });

@@ -17,6 +17,12 @@ export interface CreateCheckoutInput {
   successUrl?: string;
   cancelUrl?: string;
   metadata?: Record<string, string>;
+  /**
+   * The `PaymentMethods.code` the buyer selected. Providers restrict the
+   * session to this one method so the rate the order was priced at is the rate
+   * that actually gets billed.
+   */
+  paymentMethodCode?: string;
 }
 
 export interface CheckoutResult {

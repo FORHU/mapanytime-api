@@ -1,8 +1,22 @@
 import { Request, Response, NextFunction } from 'express';
 import PayoutService from './payout.service';
 import { responseSuccess } from '../../helpers/response.helper';
+import { prisma } from '../../utils/prisma';
 
 export default class PayoutController {
+  /** The authenticated seller's own payout history — no id taken from the client. */
+  static async getMyPayouts(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req.user as { id: string })?.id;
+      const seller = await prisma.sellers.findUnique({ where: { userId } });
+      if (!seller) throw { status: 403, message: 'No seller profile for this account.' };
+      const payouts = await PayoutService.getPayoutsBySeller(seller.id);
+      return responseSuccess(res, 200, payouts, 'Seller payouts fetched successfully.');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async getSellerPayouts(req: Request, res: Response, next: NextFunction) {
     try {
       const { sellerId } = req.params;

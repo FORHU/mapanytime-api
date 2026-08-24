@@ -10,6 +10,7 @@ export interface NearbyStore {
   distanceKm: number;
   coordinates: { lat: number; lng: number };
   logoUrl: string | null;
+  markerPhotoUrl: string | null;
   rating: number;
   ratingCount: number;
   categoryId: string | null;
@@ -29,6 +30,7 @@ interface NearbyRow {
   description: string | null;
   isActive: boolean;
   logoUrl: string | null;
+  markerPhotoUrl: string | null;
   ratingAverage: number;
   ratingCount: number;
   categoryId: string | null;
@@ -123,6 +125,7 @@ export default class StoreRepository {
       SELECT DISTINCT
         s."id", s."storeName", s."description", s."isActive",
         f."path" AS "logoUrl",
+        f2."path" AS "markerPhotoUrl",
         s."ratingAverage", s."ratingCount",
         s."primaryCategoryId" AS "categoryId",
         h."isClosed" AS "hoursIsClosed", h."openMinutes", h."closeMinutes",
@@ -139,6 +142,7 @@ export default class StoreRepository {
       FROM "Stores" s
       JOIN "StoreLocations" l ON l."storeId" = s."id"
       LEFT JOIN "Files" f ON f."id" = s."logoId"
+      LEFT JOIN "Files" f2 ON f2."id" = s."bannerId"
       LEFT JOIN "StoreHours" h ON h."storeId" = s."id" AND h."dayOfWeek" = ${dow}
       ${categoryJoin}
       WHERE ${inViewport}
@@ -160,6 +164,7 @@ export default class StoreRepository {
       description: r.description,
       isActive: r.isActive,
       logoUrl: S3Util.getPublicUrl(r.logoUrl),
+      markerPhotoUrl: S3Util.getPublicUrl(r.markerPhotoUrl),
       rating: Number(r.ratingAverage),
       ratingCount: r.ratingCount,
       categoryId: r.categoryId,
@@ -196,6 +201,8 @@ export default class StoreRepository {
         },
         categories: true,
         primaryCategory: true,
+        logoFile: true,
+        bannerFile: true,
         merchantAds: {
           where: { isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
           include: {

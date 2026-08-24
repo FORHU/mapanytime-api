@@ -1,6 +1,6 @@
 import RedisUtil from '../../utils/redis.util';
 import ProductRepository from '../products/product.repository';
-import TaxationService from '../taxation/taxation.service';
+import PricingEngineService from '../pricing/pricing-engine.service';
 import { computeItemDiscount, applyBogoBonus } from '../orders/pricing.util';
 import { prisma } from '../../utils/prisma';
 
@@ -132,10 +132,19 @@ export default class CartService {
   }
 
   /**
-   * Read-only pricing preview for the buyer's cart (or a selected subset of
-   * it) — subtotal, auto-applied discounts, tax, and total, computed with
-   * the exact same logic `OrderService.createOrder` uses so what's shown
-   * before checkout never drifts from what's actually charged.
+   * Read-only pricing preview for the buyer's cart (or a selected subset of it).
+   *
+   * Goes through `PricingEngineService` — the same engine
+   * `OrderService.createOrder` charges from — so the goods maths cannot drift
+   * from checkout. It previously used `TaxationService`, a second engine with
+   * its own 5% commission fallback against the engine's 2%. See FLAGS.md F28.
+   *
+   * The payment fee is deliberately **not** included. It depends on the method
+   * the buyer has not chosen yet, and it genuinely differs per method — GCash
+   * 2.23%, Maya 1.79%, card 3.125% + ₱13.39. `GET /payments/methods?amount=`
+   * returns the fee and final total for each method once there is a total to
+   * quote against. So `totalAmount` here is what the goods cost, not the final
+   * charge, and the client must present it that way.
    */
   static async previewPricing(userId: string, productIds?: string[]) {
     const cart = await this.getCart(userId);
@@ -186,18 +195,24 @@ export default class CartService {
       });
     }
 
-    const financials = await TaxationService.calculateOrderFinancials({
+    const pricing = await PricingEngineService.calculateOrderPricing({
       subtotalAmount,
-      categoryId: primaryCategoryId,
       discountAmount: totalDiscount,
+      storeId: cart.storeId,
+      categoryId: primaryCategoryId,
     });
 
     return {
       items: itemBreakdowns,
-      subtotalAmount: financials.subtotalAmount,
-      discountAmount: financials.discountAmount,
-      taxAmount: financials.taxAmount,
-      totalAmount: financials.totalAmount,
+      subtotalAmount: pricing.subtotalAmount,
+      discountAmount: pricing.discountAmount,
+      /** Cost of the goods. The payment fee is added at method selection. */
+      totalAmount: pricing.orderAmount,
+      /**
+       * Flags to the client that this is not yet the amount that will be
+       * charged, so a cart total is never mistaken for a checkout total.
+       */
+      paymentFeeIncluded: false,
     };
   }
 }

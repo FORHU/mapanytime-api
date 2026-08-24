@@ -23,10 +23,35 @@ export const WORKER_HEALTH_PORT = parseInt(process.env.WORKER_HEALTH_PORT || '80
 
 export const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
 
-export const SMTP_HOST = process.env.SMTP_HOST || 'smtp.ethereal.email';
-export const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587');
-export const SMTP_USER = process.env.SMTP_USER || '';
-export const SMTP_PASS = process.env.SMTP_PASS || '';
+/**
+ * Mail transport.
+ *
+ * Both `MAILER_*` and `SMTP_*` spellings are written by the deploy workflows
+ * and both appear in `.env.example`, but only `SMTP_*` was ever read — so every
+ * `MAILER_*` value CI carefully plumbed through went nowhere. Each name now
+ * falls back to the other, so whichever half an environment sets is the half
+ * that works.
+ */
+export const MAILER_TRANSPORT_HOST =
+  process.env.MAILER_TRANSPORT_HOST || process.env.SMTP_HOST || 'smtp.ethereal.email';
+export const MAILER_TRANSPORT_PORT = parseInt(
+  process.env.MAILER_TRANSPORT_PORT || process.env.SMTP_PORT || '587',
+);
+/** Implicit TLS. True for 465 unless explicitly overridden. */
+export const MAILER_TRANSPORT_SECURE = process.env.MAILER_TRANSPORT_SECURE
+  ? process.env.MAILER_TRANSPORT_SECURE === 'true'
+  : MAILER_TRANSPORT_PORT === 465;
+export const MAILER_EMAIL = process.env.MAILER_EMAIL || process.env.SMTP_USER || '';
+export const MAILER_PASSWORD = process.env.MAILER_PASSWORD || process.env.SMTP_PASS || '';
+/** Display name on the From header. */
+export const MAILER_FROM_NAME = process.env.MAILER_FROM_NAME || 'MapAnytime';
+
+// Retained under their original names — the email consumer and anything else
+// importing these keeps working, and they now resolve identically.
+export const SMTP_HOST = MAILER_TRANSPORT_HOST;
+export const SMTP_PORT = MAILER_TRANSPORT_PORT;
+export const SMTP_USER = MAILER_EMAIL;
+export const SMTP_PASS = MAILER_PASSWORD;
 
 export const AWS_REGION = process.env.AWS_REGION || 'ap-southeast-1';
 export const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY || '';

@@ -178,6 +178,36 @@ export default class OrderController {
     }
   }
 
+  /** Platform-wide orders for the admin console. Gated by `requireAdmin`. */
+  static async allOrders(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({
+      status: Joi.string()
+        .valid('PENDING', 'PROCESSING', 'READY_FOR_PICKUP', 'COMPLETED', 'CANCELLED', 'FAILED')
+        .optional(),
+      search: Joi.string().trim().allow('').max(200).optional(),
+      sortOrder: Joi.string().valid('asc', 'desc').optional(),
+    }).unknown(true);
+
+    const { error, value } = schema.validate(req.query);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const { page, limit, skip } = parsePagination(req.query as Record<string, unknown>);
+
+      const data = await OrderService.getAllOrders({
+        status: value.status,
+        search: value.search,
+        sortOrder: value.sortOrder,
+        page,
+        limit,
+        skip,
+      });
+      return responseSuccess(res, 200, data, 'Orders retrieved successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async storeOrders(req: Request, res: Response, next: NextFunction) {
     // page/limit/sortOrder are normalized by parsePagination; status/search
     // are validated here. Unknown keys (e.g. page/limit) pass through.

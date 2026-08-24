@@ -29,7 +29,9 @@ export default class ReturnController {
 
   static async getSellerReturns(req: Request, res: Response, next: NextFunction) {
     try {
-      const { sellerId } = req.params;
+      // Scoped to the caller's own seller profile for the same reason
+      // getBuyerReturns is — a path id would expose another seller's returns.
+      const sellerId = await ReturnService.resolveOwnSellerId(req.user?.id);
       const returns = await ReturnService.getReturnsBySeller(sellerId);
       return responseSuccess(res, 200, returns, 'Seller return requests fetched successfully.');
     } catch (error) {
@@ -41,7 +43,7 @@ export default class ReturnController {
     try {
       const { id } = req.params;
       const { status } = req.body;
-      const updated = await ReturnService.updateReturnStatus(id, status);
+      const updated = await ReturnService.updateReturnStatus(id, status, req.user?.id);
       return responseSuccess(res, 200, updated, 'Return request status updated successfully.');
     } catch (error) {
       next(error);

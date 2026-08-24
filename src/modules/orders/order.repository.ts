@@ -100,12 +100,19 @@ export default class OrderRepository {
    * name/SKU) and date sort all happen in the database — the indexes on
    * [storeId, status] and createdAt keep this cheap.
    */
-  static async getStoreOrdersPage(storeIds: string[], query: StoreOrdersPageQuery) {
-    if (storeIds.length === 0) return { items: [], total: 0 };
+  /**
+   * One page of orders.
+   *
+   * `storeIds` of `null` means every store on the platform — the admin view.
+   * An empty array means "this seller has no stores" and returns nothing, which
+   * is why the two cases cannot share a representation.
+   */
+  static async getStoreOrdersPage(storeIds: string[] | null, query: StoreOrdersPageQuery) {
+    if (storeIds !== null && storeIds.length === 0) return { items: [], total: 0 };
 
     const term = query.search?.trim();
     const where: Prisma.OrdersWhereInput = {
-      storeId: { in: storeIds },
+      ...(storeIds !== null && { storeId: { in: storeIds } }),
       deletedAt: null,
       ...(query.status && { status: query.status }),
       ...(term && {
@@ -134,7 +141,15 @@ export default class OrderRepository {
         take: query.take,
         include: {
           store: { select: { storeName: true } },
-          buyer: { select: { displayName: true } },
+          // `users` carries the contact number; `Buyers` itself has only the
+          // display name. Both the seller board and admin oversight need a way
+          // to reach the buyer about a pickup.
+          buyer: { select: { displayName: true, users: { select: { phoneNumber: true } } } },
+          payment: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { paymentMethod: { select: { code: true, name: true, type: true } } },
+          },
           orderitems: true,
         },
       }),
