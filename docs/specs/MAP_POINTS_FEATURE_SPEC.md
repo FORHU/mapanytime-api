@@ -1,4 +1,5 @@
 # MAPANYTIME — REWARD, INCENTIVE & COMMISSION SYSTEM
+
 ## MASTER TECHNICAL ARCHITECTURE & BUSINESS SPECIFICATION
 
 **STATUS:** RECOMMENDED ARCHITECTURE — SOURCE OF TRUTH
@@ -26,17 +27,18 @@ MapAnytime separates marketplace economics into three distinct, dedicated system
       RewardConfiguration        SellerCampaignConfig       AgentCommissionConfig
 ```
 
-| System | Role | Entity Name | Currency / Unit | Economic Meaning |
-| :--- | :--- | :--- | :--- | :--- |
-| **1. Buyer Rewards** | Buyer | `RewardWallet` + `RewardTransaction` | **Reward Points** (Off-chain points) | Loyalty discount on future purchases (100 pts = ₱10, max 20% cap). Not cash. |
-| **2. Seller Incentives** | Seller | `SellerCampaign` + `SellerCampaignTransaction` | **Campaign Marketing Spend** (PHP / Points budget) | Merchant-funded promotions to attract buyers (e.g. "Spend ₱500 get 50 pts"). Tracks ROI. |
-| **3. Agent Commissions** | Agent | `AgentCommissionAccount` + `AgentCommissionTransaction` | **Philippine Peso (₱)** (Real Money) | Recruiter commission earned when recruited sellers generate successful sales. Payout-eligible. |
+| System                   | Role   | Entity Name                                             | Currency / Unit                                    | Economic Meaning                                                                               |
+| :----------------------- | :----- | :------------------------------------------------------ | :------------------------------------------------- | :--------------------------------------------------------------------------------------------- |
+| **1. Buyer Rewards**     | Buyer  | `RewardWallet` + `RewardTransaction`                    | **Reward Points** (Off-chain points)               | Loyalty discount on future purchases (100 pts = ₱10, max 20% cap). Not cash.                   |
+| **2. Seller Incentives** | Seller | `SellerCampaign` + `SellerCampaignTransaction`          | **Campaign Marketing Spend** (PHP / Points budget) | Merchant-funded promotions to attract buyers (e.g. "Spend ₱500 get 50 pts"). Tracks ROI.       |
+| **3. Agent Commissions** | Agent  | `AgentCommissionAccount` + `AgentCommissionTransaction` | **Philippine Peso (₱)** (Real Money)               | Recruiter commission earned when recruited sellers generate successful sales. Payout-eligible. |
 
 ---
 
 ## 2. BUYER REWARD SYSTEM (MAPANYTIME REWARDS)
 
 ### A. Core Economics
+
 - **User-Facing Name:** Reward Points (e.g. "1,250 Reward Points $\approx$ ₱125 in discount value").
 - **Default Earning Rate:** **₱100 eligible purchase = 1 Reward Point** (~1% reward rate).
 - **Calculation Base:** Calculated strictly on eligible net goods subtotal (`subtotal - merchant discounts`), excluding buyer fees (2.23%), payment gateway fees, platform commissions, shipping, and taxes.
@@ -45,6 +47,7 @@ MapAnytime separates marketplace economics into three distinct, dedicated system
 - **Expiration Policy:** **12-month rolling expiration** (`expiresAt` timestamp per earning lot).
 
 ### B. Buyer Database Schema (`prisma/schema.prisma`)
+
 ```prisma
 model RewardWallet {
   id             String              @id @default(cuid())
@@ -138,11 +141,14 @@ enum REWARDTRANSACTIONTYPE {
 ## 3. SELLER INCENTIVES & PROMOTION CAMPAIGNS
 
 ### A. Purpose & Separation
+
 Sellers do not hold a buyer reward wallet. Instead, sellers run **promotional campaigns** that distribute `RewardPoints` to buyers from a merchant-funded marketing budget:
-- *Example:* Store ABC creates a *"Spend ₱500 and earn 50 Reward Points"* campaign with a budget of 5,000 points.
+
+- _Example:_ Store ABC creates a _"Spend ₱500 and earn 50 Reward Points"_ campaign with a budget of 5,000 points.
 - When a buyer qualifies, the buyer receives 50 points; the seller's campaign ledger records the points granted, marketing cost, and resulting GMV.
 
 ### B. Seller Campaign Database Schema
+
 ```prisma
 model SellerCampaigns {
   id              String                @id @default(cuid())
@@ -207,7 +213,9 @@ enum CAMPAIGNSTATUS {
 ## 4. AGENT COMMISSION & RECRUITMENT EARNINGS
 
 ### A. Purpose & Economics
+
 Agents recruit merchants onto the MapAnytime marketplace. When a recruited seller generates a successful sale, the agent earns real **Commission (₱)**:
+
 - **Configurable Commission Base:**
   - `GMV`: Commission is calculated on seller's gross merchandise value (e.g. ₱1,000 order $\times$ 0.05% = ₱0.50).
   - `MARKETPLACE_FEE`: Commission is calculated on platform revenue (e.g. ₱20 platform fee $\times$ 5% = ₱1.00).
@@ -215,6 +223,7 @@ Agents recruit merchants onto the MapAnytime marketplace. When a recruited selle
 - **Payout:** Agents can request withdrawal (`AgentPayout`) to their registered bank account or e-wallet once `availableBalance >= payoutMinimum`.
 
 ### B. Agent Database Schema
+
 ```prisma
 model AgentCommissionAccount {
   id               String                        @id @default(cuid())
@@ -343,24 +352,24 @@ sequenceDiagram
 
     Seller->>OrderService: Confirm Cash Pickup / Order Pickup
     OrderService->>DB: Begin $transaction
-    
+
     DB->>DB: 1. Update Order status = COMPLETED, stamp completedAt
     DB->>Settlement: 2. Create Settlement (Platform owes Seller net goods amount)
-    
+
     %% Buyer Award
     DB->>Rewards: 3. Calculate Reward Points (₱100 eligible subtotal = 1 pt)
     DB->>Rewards: Insert RewardTransactions (PURCHASE, ref: ORDER_COMPLETED:{id})
     DB->>Rewards: Update RewardWallet.balance += points
-    
+
     %% Agent Commission (if seller was recruited by an agent)
     opt Seller has active agent recruiter
         DB->>AgentLedger: 4. Calculate Agent Commission (GMV * 0.05%)
         DB->>AgentLedger: Insert AgentCommissionTransactions (PENDING, ref: AGENT_COMMISSION:{id})
         DB->>AgentLedger: Update AgentCommissionAccount.pendingBalance += commission
     end
-    
+
     DB-->>OrderService: Commit $transaction (All or Nothing)
-    
+
     %% Async Notifications (Off request path)
     OrderService-->>Buyer: Push: "You earned 10 Reward Points!"
     OrderService-->>Agent: Push: "You have ₱0.50 pending commission from Store ABC!"
@@ -374,6 +383,7 @@ sequenceDiagram
 ## 6. REFUND & CANCELLATION LEDGER INTEGRITY
 
 When a completed order is refunded or cancelled:
+
 1. **Original records are NEVER deleted.**
 2. **Buyer Points:** A `-REVERSAL` row is inserted into `RewardTransactions` for the points earned on the refunded amount.
 3. **Agent Commission:** A `-COMMISSION_REVERSAL` row is inserted into `AgentCommissionTransactions` deducting the unearned commission from the agent's pending/available balance.
@@ -383,6 +393,7 @@ When a completed order is refunded or cancelled:
 ## 7. DEDICATED API STRUCTURE
 
 ### Buyer API (`/v1/rewards`)
+
 - `GET /v1/rewards/wallet`: Balance, estimated ₱ discount value, lifetime stats, upcoming expiring points.
 - `GET /v1/rewards/transactions`: Paginated ledger history with type and date filters.
 - `GET /v1/rewards/config`: Active public reward rules (rates, 20% cap).
@@ -390,18 +401,21 @@ When a completed order is refunded or cancelled:
 - `POST /v1/rewards/redeem`: Concurrency-safe point deduction during order checkout.
 
 ### Seller Incentives API (`/v1/seller/incentives`)
+
 - `GET /v1/seller/incentives/analytics`: Total bonus points distributed, campaign spend, GMV generated, ROI.
 - `GET /v1/seller/incentives/campaigns`: List store's active and historical campaigns.
 - `POST /v1/seller/incentives/campaigns`: Create a merchant-funded buyer point campaign with budget cap.
 - `PATCH /v1/seller/incentives/campaigns/:id`: Pause, resume, or adjust campaign budgets.
 
 ### Agent Commissions API (`/v1/agent/commissions`)
+
 - `GET /v1/agent/commissions/dashboard`: Summary (Pending commission, Available commission, Lifetime earned, Recruited sellers).
 - `GET /v1/agent/commissions/transactions`: Detailed transaction history per recruited seller and order.
 - `GET /v1/agent/commissions/payouts`: Payout history and status.
 - `POST /v1/agent/commissions/payouts`: Request commission payout to bank/GCash (`availableBalance >= ₱500`).
 
 ### Admin Control Center (`/admin/...`)
+
 - `/admin/rewards`: Buyer reward settings (`PUT /v1/admin/rewards/config`).
 - `/admin/seller-incentives`: Overview of all merchant campaigns and platform subsidies.
 - `/admin/agent-commissions`: Agent commission settings (`PUT /v1/admin/agent-commissions/config`), payout approvals, and audited adjustments.

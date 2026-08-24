@@ -15,14 +15,14 @@ scattered per-project findings docs.
 These are settled. Regression tests in `tests/unit/pricing.engine.financial-rules.test.ts`
 enforce them — treat a failure there as a business-rule breach, not a broken test.
 
-| Rule | Value |
-| :--- | :--- |
-| **Tax** | **None. The platform is a marketplace intermediary and collects no VAT** — decided 2026-08-20, superseding the earlier 12% rule |
-| Marketplace commission | 2.00% of subtotal, charged to the seller |
-| Marketplace commission base | **Subtotal only** — never shipping or payment fees |
-| Buyer transaction fee | 2.23% of order amount = 2.00% gateway pass-through + 0.23% platform handling |
-| Payment fees | Must come from configured provider rates, not a universal fallback |
-| Payer policy | `BUYER` / `SELLER` / `PLATFORM`, resolved server-side; checkout must never override it |
+| Rule                        | Value                                                                                                                           |
+| :-------------------------- | :------------------------------------------------------------------------------------------------------------------------------ |
+| **Tax**                     | **None. The platform is a marketplace intermediary and collects no VAT** — decided 2026-08-20, superseding the earlier 12% rule |
+| Marketplace commission      | 2.00% of subtotal, charged to the seller                                                                                        |
+| Marketplace commission base | **Subtotal only** — never shipping or payment fees                                                                              |
+| Buyer transaction fee       | 2.23% of order amount = 2.00% gateway pass-through + 0.23% platform handling                                                    |
+| Payment fees                | Must come from configured provider rates, not a universal fallback                                                              |
+| Payer policy                | `BUYER` / `SELLER` / `PLATFORM`, resolved server-side; checkout must never override it                                          |
 
 ### Why no tax
 
@@ -32,7 +32,7 @@ against their own BIR registration, so the platform neither charges it to the
 buyer nor holds it for remittance. Listed prices are seller-set and treated as
 tax-inclusive.
 
-This reverses F11, which recorded VAT dropping to 0 as a *defect*. It was a
+This reverses F11, which recorded VAT dropping to 0 as a _defect_. It was a
 defect then — the code had lost a rule nobody had retired. It is the rule now.
 A `TAX` charge row appearing on an order is a regression.
 
@@ -99,7 +99,6 @@ have exactly one home: `PricingComponents` (see F2).
 
 **Settled: commission now follows the **discounted** subtotal (`subtotal - discount`). A seller funding a promotion no longer pays commission on money nobody handed them. Pinned by `tests/unit/pricing.engine.financial-rules.test.ts`.**
 
-
 The engine charges commission on the **gross, pre-discount** subtotal, preserved
 from `TaxationService`. That means a seller funding a 20% discount pays
 commission on money they never received. Preserved deliberately rather than
@@ -108,7 +107,6 @@ changed — but it needs checking against the actual seller agreement.
 ### ~~F5. Staging deploy cannot be run from this machine~~ — RESOLVED 2026-08-20
 
 **Mitigated: `scripts/check-db-target.ts` prints the database any command is about to write to, and `db:setup` / `db:seed` refuse a non-local host outright.**
-
 
 `DATABASE_URL` in `.env` points at `localhost`; the staging RDS URL sits
 commented out on line 6. This is a property of the machine, not the checkout,
@@ -119,27 +117,27 @@ here would hit localhost.
 
 ## 🟠 Correctness — fixed, but worth knowing
 
-| # | Was | Now |
-| :-- | :--- | :--- |
-| F6 | `prisma validate` failed outright: `FEECALCULATIONTYPE` referenced but never defined, plus 3 relations on `PricingComponents` with no opposite field | Valid |
-| F7 | `tsc` passed only against a **stale generated client** still holding `CommissionRules` and no `OrderCharges` — a meaningless green | Client regenerated; genuinely clean |
-| F8 | `CommissionRules` deleted from the schema while `taxation.repository.ts` and two seeders still called it | Restored |
-| F9 | `beneficiary: 'BUYER'` written to `OrderCharges` — the enum had no such value, so **every discounted order would throw** | `BUYER` added to `CHARGEBENEFICIARY` |
-| F10 | Four `@@unique` constraints dropped (`CartItems`, `WishlistItems`, `ProductReviews`, `MerchantAdProducts`) while the changelog called constraints "hardened"; the seeder was rewritten around the missing one | Restored — the live DB still had all four |
-| F11 | VAT silently became 0 on every order when `TaxationService` left the checkout path | 12% restored — then **retired 2026-08-20**: no VAT is charged at all, by decision. See *Confirmed business rules* |
-| F12 | Commission charged on subtotal − discount + shipping + tax; settlement credited the seller the VAT | Commission on subtotal; tax term since removed entirely |
-| F13 | Public `POST /merchant-ads/:id/events` accepted a client-supplied `revenueAmount` feeding `attributedRevenue` and ROAS | Derived server-side from a `COMPLETED` order on the ad's own store |
-| F14 | Socket CORS reflected every origin with `credentials: true` | Allowlist via `CORS_ORIGIN`, open only when unset |
-| F15 | `server.listen` lost its explicit `'0.0.0.0'` in a containerised service | Restored |
-| F16 | `DELETE /merchant-ads/:id` silently deactivated while answering "deleted successfully", leaving its test failing | 409 restored |
-| F17 | `storeSlug` on nearby deals was always `""`, plus a dead `ad.store?.storeName` fallback | Slug selected in the ads query |
-| F26 | The API's `.dockerignore` did not exclude docs, so `COPY . .` pulled `docs/` and every README into the build context and invalidated the layer cache on any doc edit. The web project already excluded them | `*.md` and `docs` excluded; the two projects now match |
-| F27 | `Dockerfile` declared `EXPOSE 3002` while the app listens on `PORT=4002`, and the README plus three onboarding guides told developers to curl `localhost:3002` — every one of those commands fails | 14 occurrences corrected to 4002 across the Dockerfile, README and guides |
-| F25 | `SellerLayout` (in the `shared/` kernel) imported `StoreSelectorDropdown` from `features/`, breaking the repo's own enforced boundary rule — a lint error that would fail CI | Taken as a `storeSelector` slot prop, composed in `SellerAuthGate`, matching the pattern the file already documents for `stores` |
-| F29 | `SHARED` payer policy charged the buyer half the gateway cost and left `sellerPaymentDeduction` unassigned, so the **platform** absorbed the other half — "buyer half / platform half" | Seller's half assigned; between them the two halves cover the gateway and the platform nets exactly its commission |
-| F30 | The gateway fee was computed on the order amount, but PayMongo bills on the **captured** total — order + fee. Every pass-through order left the platform short by `fee × rate` (₱0.50 per ₱1,000 GCash) | Grossed up by `(amount × rate + fixed) / (1 - rate × buyerShare)`; the share term keeps `SELLER`/`PLATFORM` ungrossed, since nothing is added to what the buyer pays |
-| F31 | Cash was zero-rated by comparing `paymentMethodCode` to `'CASH'`, but the seeded cash **method** code is `COD` (`'CASH'` is the *provider*). The check never fired, so every pay-at-the-stall buyer was charged ~2.23% for a gateway that never ran | Matched on `PAYMENTMETHODTYPE.CASH`, with the legacy `COD` / `CASH_ON_DELIVERY` spellings as fallback |
-| F32 | `DEFAULT_BUYER_PLATFORM_RATE` of 0.23% was booked as platform margin, but 2.00% + 0.23% is exactly GCash's 2.23% — the single rate had been split into a fictional cost-plus-margin, so the platform counted revenue it had already remitted | Set to 0. Platform revenue is the commission alone |
+| #   | Was                                                                                                                                                                                                                                                 | Now                                                                                                                                                                  |
+| :-- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F6  | `prisma validate` failed outright: `FEECALCULATIONTYPE` referenced but never defined, plus 3 relations on `PricingComponents` with no opposite field                                                                                                | Valid                                                                                                                                                                |
+| F7  | `tsc` passed only against a **stale generated client** still holding `CommissionRules` and no `OrderCharges` — a meaningless green                                                                                                                  | Client regenerated; genuinely clean                                                                                                                                  |
+| F8  | `CommissionRules` deleted from the schema while `taxation.repository.ts` and two seeders still called it                                                                                                                                            | Restored                                                                                                                                                             |
+| F9  | `beneficiary: 'BUYER'` written to `OrderCharges` — the enum had no such value, so **every discounted order would throw**                                                                                                                            | `BUYER` added to `CHARGEBENEFICIARY`                                                                                                                                 |
+| F10 | Four `@@unique` constraints dropped (`CartItems`, `WishlistItems`, `ProductReviews`, `MerchantAdProducts`) while the changelog called constraints "hardened"; the seeder was rewritten around the missing one                                       | Restored — the live DB still had all four                                                                                                                            |
+| F11 | VAT silently became 0 on every order when `TaxationService` left the checkout path                                                                                                                                                                  | 12% restored — then **retired 2026-08-20**: no VAT is charged at all, by decision. See _Confirmed business rules_                                                    |
+| F12 | Commission charged on subtotal − discount + shipping + tax; settlement credited the seller the VAT                                                                                                                                                  | Commission on subtotal; tax term since removed entirely                                                                                                              |
+| F13 | Public `POST /merchant-ads/:id/events` accepted a client-supplied `revenueAmount` feeding `attributedRevenue` and ROAS                                                                                                                              | Derived server-side from a `COMPLETED` order on the ad's own store                                                                                                   |
+| F14 | Socket CORS reflected every origin with `credentials: true`                                                                                                                                                                                         | Allowlist via `CORS_ORIGIN`, open only when unset                                                                                                                    |
+| F15 | `server.listen` lost its explicit `'0.0.0.0'` in a containerised service                                                                                                                                                                            | Restored                                                                                                                                                             |
+| F16 | `DELETE /merchant-ads/:id` silently deactivated while answering "deleted successfully", leaving its test failing                                                                                                                                    | 409 restored                                                                                                                                                         |
+| F17 | `storeSlug` on nearby deals was always `""`, plus a dead `ad.store?.storeName` fallback                                                                                                                                                             | Slug selected in the ads query                                                                                                                                       |
+| F26 | The API's `.dockerignore` did not exclude docs, so `COPY . .` pulled `docs/` and every README into the build context and invalidated the layer cache on any doc edit. The web project already excluded them                                         | `*.md` and `docs` excluded; the two projects now match                                                                                                               |
+| F27 | `Dockerfile` declared `EXPOSE 3002` while the app listens on `PORT=4002`, and the README plus three onboarding guides told developers to curl `localhost:3002` — every one of those commands fails                                                  | 14 occurrences corrected to 4002 across the Dockerfile, README and guides                                                                                            |
+| F25 | `SellerLayout` (in the `shared/` kernel) imported `StoreSelectorDropdown` from `features/`, breaking the repo's own enforced boundary rule — a lint error that would fail CI                                                                        | Taken as a `storeSelector` slot prop, composed in `SellerAuthGate`, matching the pattern the file already documents for `stores`                                     |
+| F29 | `SHARED` payer policy charged the buyer half the gateway cost and left `sellerPaymentDeduction` unassigned, so the **platform** absorbed the other half — "buyer half / platform half"                                                              | Seller's half assigned; between them the two halves cover the gateway and the platform nets exactly its commission                                                   |
+| F30 | The gateway fee was computed on the order amount, but PayMongo bills on the **captured** total — order + fee. Every pass-through order left the platform short by `fee × rate` (₱0.50 per ₱1,000 GCash)                                             | Grossed up by `(amount × rate + fixed) / (1 - rate × buyerShare)`; the share term keeps `SELLER`/`PLATFORM` ungrossed, since nothing is added to what the buyer pays |
+| F31 | Cash was zero-rated by comparing `paymentMethodCode` to `'CASH'`, but the seeded cash **method** code is `COD` (`'CASH'` is the _provider_). The check never fired, so every pay-at-the-stall buyer was charged ~2.23% for a gateway that never ran | Matched on `PAYMENTMETHODTYPE.CASH`, with the legacy `COD` / `CASH_ON_DELIVERY` spellings as fallback                                                                |
+| F32 | `DEFAULT_BUYER_PLATFORM_RATE` of 0.23% was booked as platform margin, but 2.00% + 0.23% is exactly GCash's 2.23% — the single rate had been split into a fictional cost-plus-margin, so the platform counted revenue it had already remitted        | Set to 0. Platform revenue is the commission alone                                                                                                                   |
 
 ---
 
@@ -148,7 +146,6 @@ here would hit localhost.
 ### ~~F18. Buyer deals carousel shows invented data on a live page~~ — RESOLVED 2026-08-20
 
 **STALE — not reproducible. `PromotionsNearYouCarousel`, `FloatingMapDealCard` and "Baguio Craft Coffee" do not exist anywhere in `-web`. Closed after a full-repo search.**
-
 
 `PromotionsNearYouCarousel` and `FloatingMapDealCard` each declare an optional
 `deals` prop with a hardcoded fallback (invented stores such as "Baguio Craft
@@ -164,7 +161,6 @@ endpoint and the UI were both built; the wire between them never was.
 
 **Built: `-web` gained `features/cart`, `features/checkout`, a `/checkout` page and an `AddToCartButton` on the store page. `PriceBreakdown` shows the goods total until a method is picked, then that method's fee and the real charge.**
 
-
 Only `src/app/seller/checkout` exists. With VAT retired the transparency stake
 is lower, but the buyer still has no web screen itemising the ₱22.30
 transaction fee that takes a ₱1,000 basket to ₱1,022.30. The Flutter app's
@@ -173,7 +169,6 @@ transaction fee that takes a ₱1,000 basket to ₱1,022.30. The Flutter app's
 ### ~~F20. Payer policy is not configurable~~ — RESOLVED 2026-08-20
 
 **Built: `PricingConfigurations.paymentFeePayerPolicy` column, read by the engine and settable through the admin endpoints. Migration `20260820130000_pricing_payer_policy`.**
-
 
 `paymentFeePayerPolicy` is an engine input, but nothing in checkout passes it, so
 every real order prices as `BUYER`. Making it configurable needs a column on
@@ -184,7 +179,6 @@ until F1 lands.
 
 **Built: create / update / component CRUD / validate / activate / archive, all admin-gated. Activation refuses an invalid configuration and archives the incumbent in one transaction.**
 
-
 `POST /pricing/configurations` exists; no update endpoint does. "Save & Sync"
 and "Add Component" are deliberately disabled rather than faked. Needs
 create / update / validate / activate, and must refuse to activate an invalid
@@ -193,7 +187,6 @@ configuration.
 ### ~~F22. HTTP CORS still reflects every origin~~ — RESOLVED 2026-08-20
 
 **Fixed: HTTP now uses the same `CORS_ORIGIN` allowlist the socket got in F14, and the API refuses to boot in production with it unset.**
-
 
 `src/app.ts` carries the same flaw fixed on the socket. Pre-existing, and to be
 handled as a separate security cleanup rather than mixed into the financial work.
@@ -233,14 +226,13 @@ is no point building a buyer checkout screen on a number that is wrong.
 
 **Fixed on both layers: filtered out of `getActivePaymentMethods` in production, and seeded inactive there too.**
 
-
 `payments.seeder.ts` creates the Mock provider with `isActive: true`, so
 `GET /payments/methods` returns "Sandbox Simulator" as a selectable option
 alongside GCash and Maya. `MockProvider` accepts any webhook signature, so in
 production this is a payment method that marks orders paid for free.
 
-The mock *webhook route* is correctly gated behind `NODE_ENV !== 'production'`
-(F-note in `payment.route.ts`), but the *method* is not. Gate the seeder on
+The mock _webhook route_ is correctly gated behind `NODE_ENV !== 'production'`
+(F-note in `payment.route.ts`), but the _method_ is not. Gate the seeder on
 environment, or set `isActive: false` for it outside development.
 
 ### F34. The mobile app has no payment path at all — PARTLY ADDRESSED 2026-08-20
@@ -280,7 +272,6 @@ The pickup pass QR is not a payment QR: it encodes the literal string
 
 **Fixed: reservations now expire at `pickupAt` + 2 hours grace, floored at the old 15 minutes. See `resolveReservationExpiry` in `order.service.ts`.**
 
-
 `InventoryReservations.expiresAt` is set 15 minutes out, which fits "reserve and
 pay immediately". The confirmed model is reserve online, pay at the stall — where
 pickup may be hours or days later, so every reservation expires long before the
@@ -292,7 +283,6 @@ pickup window closes.
 ### ~~F36. A delivery business is modelled but not run~~ — RESOLVED 2026-08-20
 
 **Cut: `Shipments` model and module, `SHIPMENTSTATUS`, `FULLFILLMENTTYPE.DELIVERY`, `ORDERCHARGETYPE.SHIPPING`, `CHARGEBENEFICIARY.COURIER`, `ADDRESSTYPE.SHIPPING` and `shippingAmount` are gone. Migration `20260820150000_cut_delivery`.**
-
 
 Fulfillment is pickup-only, yet the codebase carries: the `Shipments` model
 (courier, tracking number, label URL, shipped/delivered timestamps), the whole
@@ -308,7 +298,6 @@ future change has to keep compiling.
 
 **Fixed: the engine reads its configuration and all components in one query and matches them in memory. `calculateManyOrderPricing` prices every method off a single read (~15 queries → 2).**
 
-
 Introduced 2026-08-20 with the per-method quoting. `describeMethod` calls
 `PricingEngineService.calculateOrderPricing` once per method, and each call
 re-reads `PricingConfigurations` and `PricingComponents` — so a seven-method
@@ -320,7 +309,6 @@ and its components once, then price each method against the in-memory set.
 ### ~~F38. Jest reports a worker that will not exit~~ — RESOLVED 2026-08-20
 
 **Fixed: the RabbitMQ reconnect `setTimeout` is now held, `unref`'d and cleared on shutdown. It was keeping the event loop alive for up to 30s after a reconnect was scheduled.**
-
 
 `A worker process has failed to exit gracefully` appears on full runs. It began
 after `a8a9c9c` (store banner uploads / nearby-deals discount fields), so
@@ -369,7 +357,7 @@ SELLER NET                        ₱980.00
 PLATFORM NET                       ₱22.30   <- 20.00 + 22.30 - 20.00
 ```
 
-Note the fee is a *rate on the order amount*, so retiring VAT shrank it too:
+Note the fee is a _rate on the order amount_, so retiring VAT shrank it too:
 the buyer fee fell from ₱24.98 to ₱22.30 because its base fell from ₱1,120 to
 ₱1,000.
 
@@ -409,6 +397,7 @@ enum PROMOTION_FUNDING {
 ```
 
 ### Discount Execution Pipeline
+
 1. Base product price
 2. Product / Variant discount
 3. Merchant store promotion
@@ -448,12 +437,13 @@ model OrderCharges {
 ```
 
 ### Typical Ledger Entry for ₱1,000 Order
-| Charge Type | Amount | Payer | Beneficiary | Source |
-| :--- | :--- | :--- | :--- | :--- |
-| `PRODUCT` | $\text{₱}1,000.00$ | `BUYER` | `SELLER` | Cart Items Subtotal |
-| `BUYER_TRANSACTION_FEE` | $\text{₱}22.30$ | `BUYER` | `PLATFORM` | Buyer Handling Fee ($2.23\%$) |
-| `SELLER_MARKETPLACE_FEE`| $\text{₱}20.00$ | `SELLER` | `PLATFORM` | Marketplace Commission ($2.00\%$) |
-| `PAYMENT_PROCESSING_FEE`| $\text{₱}20.00$ | `PLATFORM` | `PAYMENT_PROVIDER` | PayMongo Gateway Cost |
+
+| Charge Type              | Amount             | Payer      | Beneficiary        | Source                            |
+| :----------------------- | :----------------- | :--------- | :----------------- | :-------------------------------- |
+| `PRODUCT`                | $\text{₱}1,000.00$ | `BUYER`    | `SELLER`           | Cart Items Subtotal               |
+| `BUYER_TRANSACTION_FEE`  | $\text{₱}22.30$    | `BUYER`    | `PLATFORM`         | Buyer Handling Fee ($2.23\%$)     |
+| `SELLER_MARKETPLACE_FEE` | $\text{₱}20.00$    | `SELLER`   | `PLATFORM`         | Marketplace Commission ($2.00\%$) |
+| `PAYMENT_PROCESSING_FEE` | $\text{₱}20.00$    | `PLATFORM` | `PAYMENT_PROVIDER` | PayMongo Gateway Cost             |
 
 A `DISCOUNT` row (`payer: SELLER`, `beneficiary: BUYER`) is written whenever the
 order carries one, and a `SHIPPING` row when non-zero. No `TAX` row is ever
@@ -463,6 +453,7 @@ only so historical orders stay readable.
 ### A4. Schema reference
 
 #### Versioned pricing configurations & components
+
 ```prisma
 enum PRICINGSTATUS {
   DRAFT
@@ -540,6 +531,7 @@ model PricingComponents {
 ```
 
 #### Immutable fee snapshots on `Orders`
+
 ```prisma
 model Orders {
   sellerMarketplaceFeeRate   Decimal          @default(0.0200) @db.Decimal(8, 5)

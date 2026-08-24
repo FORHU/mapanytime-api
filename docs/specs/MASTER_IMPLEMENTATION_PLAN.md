@@ -1,4 +1,5 @@
 # MAPANYTIME — MASTER IMPLEMENTATION PLAN
+
 # Complete Codebase Implementation, Hardening & Feature Roadmap
 
 DATE: 2026-08-24
@@ -6,8 +7,9 @@ LOCATION: `mapanytime-api/docs/specs/MASTER_IMPLEMENTATION_PLAN.md`
 STATUS: ACTIVE MASTER INSTRUCTION
 
 ============================================================
+
 1. PURPOSE
-============================================================
+   \============================================================
 
 This document is the master implementation instruction for the MapAnytime
 codebase.
@@ -54,8 +56,7 @@ owns the responsibility.
 Do not create a second pricing engine, tax engine, settlement engine,
 payment engine, reward engine, or commission engine.
 
-============================================================
-2. CURRENT CODEBASE VERDICT
+============================================================ 2. CURRENT CODEBASE VERDICT
 ============================================================
 
 MapAnytime does NOT need a rewrite.
@@ -87,13 +88,13 @@ The existing codebase already has a strong foundation:
 The architecture should continue to follow:
 
 Route
-  ↓
+↓
 Controller
-  ↓
+↓
 Service
-  ↓
+↓
 Repository
-  ↓
+↓
 Database
 
 Routes must not contain business logic.
@@ -114,8 +115,7 @@ Clients must never calculate authoritative:
 
 The server is always authoritative.
 
-============================================================
-3. NON-NEGOTIABLE ARCHITECTURAL RULES
+============================================================ 3. NON-NEGOTIABLE ARCHITECTURAL RULES
 ============================================================
 
 RULE 1 — ONE PRICING ENGINE
@@ -138,7 +138,7 @@ All of the following must resolve through the same pricing architecture:
 
 Every calculated financial component must be represented consistently.
 
-------------------------------------------------------------
+---
 
 RULE 2 — IMMUTABLE FINANCIAL RECORDS
 
@@ -162,7 +162,7 @@ Corrections must be represented as new ledger transactions.
 
 Never silently overwrite historical financial values.
 
-------------------------------------------------------------
+---
 
 RULE 3 — IDEMPOTENCY
 
@@ -180,7 +180,7 @@ Repeated:
 
 must never duplicate money or points.
 
-------------------------------------------------------------
+---
 
 RULE 4 — ATOMIC FINANCIAL TRANSACTIONS
 
@@ -192,13 +192,14 @@ Example:
 Order completion:
 
 Order completion
-+ Seller settlement
-+ Buyer rewards
-+ Agent commission
+
+- Seller settlement
+- Buyer rewards
+- Agent commission
 
 must either all succeed or all fail.
 
-------------------------------------------------------------
+---
 
 RULE 5 — PROVIDER ABSTRACTION
 
@@ -219,7 +220,7 @@ The PaymentService selects the provider.
 
 Provider-specific implementation stays inside the provider adapter.
 
-------------------------------------------------------------
+---
 
 RULE 6 — NO CLIENT-SIDE AUTHORITY
 
@@ -237,7 +238,7 @@ They must never be trusted for:
 
 The API recalculates and validates everything.
 
-------------------------------------------------------------
+---
 
 RULE 7 — NO VAT ENGINE
 
@@ -263,15 +264,15 @@ Do not reintroduce:
 
 BIR certificate/document handling remains part of seller onboarding/KYC.
 
-============================================================
-4. PHASE 1 — FINANCIAL FOUNDATION
+============================================================ 4. PHASE 1 — FINANCIAL FOUNDATION
 ============================================================
 
 This is the highest priority phase.
 
 Do this before implementing Rewards, Seller Campaigns, or Agent Commissions.
 
-------------------------------------------------------------
+---
+
 4.1 PAYMENT PROVIDER RATES
 ------------------------------------------------------------
 
@@ -298,7 +299,8 @@ The fallback should only be used where intentionally permitted.
 
 It must never silently undercharge.
 
-------------------------------------------------------------
+---
+
 4.2 COMMISSIONRULES CLEANUP
 ------------------------------------------------------------
 
@@ -324,7 +326,8 @@ Before deleting it:
 
 Never drop the table before verifying that no production data is needed.
 
-------------------------------------------------------------
+---
+
 4.3 REMOVE Orders.taxAmount
 ------------------------------------------------------------
 
@@ -349,7 +352,8 @@ Then:
 6. Run prisma validate.
 7. Run full test suite.
 
-------------------------------------------------------------
+---
+
 4.4 HTTP CORS HARDENING
 ------------------------------------------------------------
 
@@ -370,13 +374,16 @@ with explicit environments.
 Example concept:
 
 Development:
+
 - localhost web
 - localhost mobile tooling where needed
 
 Staging:
+
 - staging domains only
 
 Production:
+
 - production domains only
 
 Verify:
@@ -390,7 +397,8 @@ Verify:
 
 Add automated tests.
 
-------------------------------------------------------------
+---
+
 4.5 PAYMENT RECONCILIATION
 ------------------------------------------------------------
 
@@ -435,8 +443,7 @@ Record:
 
 Provide admin visibility.
 
-============================================================
-5. PHASE 2 — COMPLETE REFUND SYSTEM
+============================================================ 5. PHASE 2 — COMPLETE REFUND SYSTEM
 ============================================================
 
 Refunds are a financial priority and must be completed BEFORE Rewards and
@@ -447,7 +454,8 @@ provider refund.
 
 Implement the complete refund lifecycle.
 
-------------------------------------------------------------
+---
+
 5.1 REFUND REQUEST
 ------------------------------------------------------------
 
@@ -465,7 +473,8 @@ The server determines the maximum refundable amount.
 
 Never trust buyer-provided refund amount.
 
-------------------------------------------------------------
+---
+
 5.2 REFUND ELIGIBILITY
 ------------------------------------------------------------
 
@@ -482,29 +491,31 @@ Validate:
 
 The exact return window must be configurable.
 
-------------------------------------------------------------
+---
+
 5.3 REFUND APPROVAL
 ------------------------------------------------------------
 
 Depending on business rules:
 
 Buyer
-  ↓
+↓
 Refund request
-  ↓
+↓
 Seller review / Admin review
-  ↓
+↓
 Approved
-  ↓
+↓
 Provider refund
-  ↓
+↓
 Provider confirmation
-  ↓
+↓
 Local refund completion
 
 Do not mark a refund as completed merely because the buyer requested it.
 
-------------------------------------------------------------
+---
+
 5.4 REFUND STATES
 ------------------------------------------------------------
 
@@ -522,7 +533,8 @@ Use the existing payment state architecture where appropriate.
 
 Do not introduce conflicting payment/refund state machines.
 
-------------------------------------------------------------
+---
+
 5.5 PROVIDER REFUND ADAPTER
 ------------------------------------------------------------
 
@@ -540,7 +552,8 @@ MockProvider implements it for tests.
 
 Do NOT place provider-specific refund HTTP calls inside RefundService.
 
-------------------------------------------------------------
+---
+
 5.6 REFUND IDEMPOTENCY
 ------------------------------------------------------------
 
@@ -552,7 +565,8 @@ refund:{orderId}:{refundId}
 
 Repeated attempts must not create duplicate provider refunds.
 
-------------------------------------------------------------
+---
+
 5.7 PROVIDER WEBHOOK CONFIRMATION
 ------------------------------------------------------------
 
@@ -568,7 +582,8 @@ Provider confirmation updates the local refund state.
 Never assume a provider refund succeeded simply because an API request
 returned successfully.
 
-------------------------------------------------------------
+---
+
 5.8 REFUND LEDGER
 ------------------------------------------------------------
 
@@ -605,7 +620,8 @@ The ledger must clearly identify:
 - provider reference
 - timestamp
 
-------------------------------------------------------------
+---
+
 5.9 SETTLEMENT IMPACT
 ------------------------------------------------------------
 
@@ -621,7 +637,8 @@ create the appropriate negative adjustment/receivable.
 
 Never silently modify an already-paid settlement.
 
-------------------------------------------------------------
+---
+
 5.10 REWARD / COMMISSION IMPACT
 ------------------------------------------------------------
 
@@ -650,8 +667,7 @@ Reward reversal:
 
 Agent commission must be reversed proportionally.
 
-============================================================
-6. PHASE 3 — PAYMENT PROVIDER EXPANSION
+============================================================ 6. PHASE 3 — PAYMENT PROVIDER EXPANSION
 ============================================================
 
 After the existing PayMongo flow is financially stable:
@@ -661,11 +677,11 @@ Implement additional providers only when commercially required.
 The architecture should support:
 
 PaymentService
-  ↓
+↓
 PaymentProviderAdapter
-  ├── PayMongoProvider
-  ├── XenditProvider
-  └── MockProvider
+├── PayMongoProvider
+├── XenditProvider
+└── MockProvider
 
 Adding a provider must NOT require changes to:
 
@@ -686,25 +702,25 @@ Each provider must support:
 
 Provider-specific data stays provider-specific.
 
-============================================================
-7. PHASE 4 — SELLER SETTLEMENT & PAYOUT
+============================================================ 7. PHASE 4 — SELLER SETTLEMENT & PAYOUT
 ============================================================
 
 Complete the financial chain:
 
 ORDER
- ↓
+↓
 PAYMENT
- ↓
+↓
 ORDER CHARGES
- ↓
+↓
 SETTLEMENT
- ↓
+↓
 RELEASE
- ↓
+↓
 PAYOUT
 
-------------------------------------------------------------
+---
+
 7.1 SETTLEMENT CREATION
 ------------------------------------------------------------
 
@@ -724,7 +740,8 @@ Settlement must contain:
 - release eligible date
 - status
 
-------------------------------------------------------------
+---
+
 7.2 HOLD PERIOD
 ------------------------------------------------------------
 
@@ -738,7 +755,8 @@ Make it configurable.
 
 Do not hardcode it throughout the codebase.
 
-------------------------------------------------------------
+---
+
 7.3 CASH COMMISSION NETTING
 ------------------------------------------------------------
 
@@ -758,8 +776,7 @@ admin collection.
 
 Do not silently lose the platform's commission.
 
-============================================================
-8. PHASE 5 — BUYER REWARDS
+============================================================ 8. PHASE 5 — BUYER REWARDS
 ============================================================
 
 Implement the Buyer Reward ledger.
@@ -770,7 +787,8 @@ RewardWallet
 RewardTransactions
 RewardConfigurations
 
-------------------------------------------------------------
+---
+
 8.1 EARNING
 ------------------------------------------------------------
 
@@ -793,7 +811,8 @@ Reward = 10 points.
 
 Make earn rate configurable.
 
-------------------------------------------------------------
+---
+
 8.2 REDEMPTION
 ------------------------------------------------------------
 
@@ -811,7 +830,8 @@ Maximum redemption:
 
 Server validates all redemption calculations.
 
-------------------------------------------------------------
+---
+
 8.3 EXPIRATION
 ------------------------------------------------------------
 
@@ -823,7 +843,8 @@ Expiration must create an explicit ledger transaction:
 
 Never simply delete expired points.
 
-------------------------------------------------------------
+---
+
 8.4 SPENDING SAFETY
 ------------------------------------------------------------
 
@@ -837,7 +858,8 @@ Use transactional locking or atomic conditional updates.
 
 Two simultaneous checkouts must not spend the same points.
 
-------------------------------------------------------------
+---
+
 8.5 REWARD REVERSAL
 ------------------------------------------------------------
 
@@ -851,8 +873,7 @@ entries.
 
 Do not delete the original earning transaction.
 
-============================================================
-9. PHASE 6 — SELLER CAMPAIGNS
+============================================================ 9. PHASE 6 — SELLER CAMPAIGNS
 ============================================================
 
 Implement:
@@ -885,8 +906,7 @@ Every campaign must specify:
 Seller-funded campaigns must be distinguishable from platform-funded
 promotions.
 
-============================================================
-10. PHASE 7 — AGENT COMMISSIONS
+============================================================ 10. PHASE 7 — AGENT COMMISSIONS
 ============================================================
 
 Implement:
@@ -896,7 +916,8 @@ AgentCommissionTransactions
 AgentPayouts
 AgentCommissionConfigurations
 
-------------------------------------------------------------
+---
+
 10.1 COMMISSION
 ------------------------------------------------------------
 
@@ -908,7 +929,8 @@ This must be configurable.
 
 Do not hardcode the percentage.
 
-------------------------------------------------------------
+---
+
 10.2 HOLDING PERIOD
 ------------------------------------------------------------
 
@@ -928,7 +950,8 @@ MATURED
 REVERSED
 PAID
 
-------------------------------------------------------------
+---
+
 10.3 AGENT PAYOUT
 ------------------------------------------------------------
 
@@ -945,8 +968,7 @@ where operationally available.
 
 Admin approval may be required.
 
-============================================================
-11. PHASE 8 — ATOMIC TRI-DOMAIN ECONOMIC TRANSACTION
+============================================================ 11. PHASE 8 — ATOMIC TRI-DOMAIN ECONOMIC TRANSACTION
 ============================================================
 
 OrderService.completeOrder() becomes the atomic financial boundary.
@@ -978,15 +1000,15 @@ transaction without an outbox/event strategy.
 
 Use the existing RabbitMQ/event architecture where necessary.
 
-============================================================
-12. PHASE 9 — ANALYTICS FOUNDATION
+============================================================ 12. PHASE 9 — ANALYTICS FOUNDATION
 ============================================================
 
 Implement Phase 2 analytics only.
 
 Do NOT prematurely build complex AI recommendations.
 
-------------------------------------------------------------
+---
+
 12.1 SESSION ID
 ------------------------------------------------------------
 
@@ -997,7 +1019,8 @@ The client sends it with analytics events.
 Do not use user ID as the only identity because anonymous buyers must also
 be measurable.
 
-------------------------------------------------------------
+---
+
 12.2 VIEW DEDUPLICATION
 ------------------------------------------------------------
 
@@ -1019,7 +1042,8 @@ not:
 
 20 views.
 
-------------------------------------------------------------
+---
+
 12.3 BATCH INGESTION
 ------------------------------------------------------------
 
@@ -1027,7 +1051,8 @@ Continue using asynchronous analytics ingestion.
 
 Do not make analytics processing block checkout or core transactions.
 
-------------------------------------------------------------
+---
+
 12.4 FUTURE ANALYTICS
 ------------------------------------------------------------
 
@@ -1039,8 +1064,7 @@ Deferred until real traffic exists:
 - recommendation ranking
 - advanced personalization
 
-============================================================
-13. PHASE 10 — RECOMMENDATION SYSTEM
+============================================================ 13. PHASE 10 — RECOMMENDATION SYSTEM
 ============================================================
 
 Recommendations should start RULE-BASED.
@@ -1057,7 +1081,8 @@ Most Engaged
 Best Selling
 Best Converting
 
-------------------------------------------------------------
+---
+
 13.1 MOST VIEWED
 ------------------------------------------------------------
 
@@ -1069,7 +1094,8 @@ Signals:
 - unique sessions
 - time window
 
-------------------------------------------------------------
+---
+
 13.2 TRENDING
 ------------------------------------------------------------
 
@@ -1087,7 +1113,8 @@ Product B:
 
 Product B should trend higher.
 
-------------------------------------------------------------
+---
+
 13.3 MOST ENGAGED
 ------------------------------------------------------------
 
@@ -1101,7 +1128,8 @@ Signals:
 
 Use weighted scoring.
 
-------------------------------------------------------------
+---
+
 13.4 BEST SELLING
 ------------------------------------------------------------
 
@@ -1113,7 +1141,8 @@ Signals:
 
 Do not count cancelled/refunded orders as successful sales.
 
-------------------------------------------------------------
+---
+
 13.5 BEST CONVERTING
 ------------------------------------------------------------
 
@@ -1125,7 +1154,8 @@ Protect against small-sample distortion.
 
 Require minimum observations.
 
-------------------------------------------------------------
+---
+
 13.6 PERSONALIZED RECOMMENDATIONS
 ------------------------------------------------------------
 
@@ -1145,8 +1175,7 @@ Start rule-based.
 
 Machine learning is optional later.
 
-============================================================
-14. PHASE 11 — MAP DISCOVERY COMPLETION
+============================================================ 14. PHASE 11 — MAP DISCOVERY COMPLETION
 ============================================================
 
 Complete:
@@ -1174,8 +1203,7 @@ Sponsored pins must:
 
 Do not disguise advertising as organic discovery.
 
-============================================================
-15. PHASE 12 — REVIEWS & WISHLISTS
+============================================================ 15. PHASE 12 — REVIEWS & WISHLISTS
 ============================================================
 
 Implement missing APIs for:
@@ -1195,8 +1223,7 @@ Reviews must be tied to actual purchase history.
 
 Wishlist operations must be authenticated.
 
-============================================================
-16. PHASE 13 — NOTIFICATIONS
+============================================================ 16. PHASE 13 — NOTIFICATIONS
 ============================================================
 
 Complete notification feed API.
@@ -1214,8 +1241,7 @@ Implement push notifications after the core financial system is stable.
 
 Do not make push delivery a prerequisite for completing a payment.
 
-============================================================
-17. PHASE 14 — ADMIN COMPLETION
+============================================================ 17. PHASE 14 — ADMIN COMPLETION
 ============================================================
 
 Complete:
@@ -1249,13 +1275,12 @@ Do not maintain two competing admin applications indefinitely.
 Choose:
 
 - web admin as the primary admin
-OR
+  OR
 - dedicated admin application
 
 Then deprecate the unused one.
 
-============================================================
-18. PHASE 15 — PRODUCTION HARDENING
+============================================================ 18. PHASE 15 — PRODUCTION HARDENING
 ============================================================
 
 Complete:
@@ -1286,8 +1311,7 @@ Ensure:
 - secure image URLs
 - correct caching
 
-============================================================
-19. AUDIT & SECURITY
+============================================================ 19. AUDIT & SECURITY
 ============================================================
 
 Review:
@@ -1311,8 +1335,7 @@ Audit logging
 
 Every privileged financial action must be auditable.
 
-============================================================
-20. TESTING REQUIREMENTS
+============================================================ 20. TESTING REQUIREMENTS
 ============================================================
 
 Every implementation must add or update tests.
@@ -1354,26 +1377,26 @@ Verify:
 
 order total
 =
+
 goods
-+ fees
-- discounts
+
+- fees
+
+* discounts
 
 And:
 
-seller settlement
-+
-platform fees
-+
-provider costs
-+
+seller settlement +
+platform fees +
+provider costs +
 refund adjustments
 =
+
 financially explainable order result
 
 No unexplained money may appear or disappear.
 
-============================================================
-21. FINANCIAL INVARIANTS
+============================================================ 21. FINANCIAL INVARIANTS
 ============================================================
 
 These must always hold.
@@ -1404,8 +1427,7 @@ These must always hold.
 
 12. Tax/VAT must not reappear as a platform charge.
 
-============================================================
-22. DOCUMENTATION CLEANUP
+============================================================ 22. DOCUMENTATION CLEANUP
 ============================================================
 
 Fix stale documentation.
@@ -1433,8 +1455,7 @@ WHAT IS CURRENTLY WRONG.
 
 Do not mix those responsibilities.
 
-============================================================
-23. DATABASE MIGRATION RULES
+============================================================ 23. DATABASE MIGRATION RULES
 ============================================================
 
 Never make destructive migrations casually.
@@ -1458,8 +1479,7 @@ perform:
 8. Validate.
 9. Only then production.
 
-============================================================
-24. CLIENT SYNCHRONIZATION
+============================================================ 24. CLIENT SYNCHRONIZATION
 ============================================================
 
 Whenever an API contract changes:
@@ -1479,8 +1499,7 @@ Do not leave dead client APIs.
 
 Remove dead code when the corresponding backend capability is removed.
 
-============================================================
-25. IMPLEMENTATION ORDER
+============================================================ 25. IMPLEMENTATION ORDER
 ============================================================
 
 FOLLOW THIS ORDER.
@@ -1580,8 +1599,7 @@ P0/P1 — PRODUCTION HARDENING
 67. Financial reconciliation dashboard.
 68. Final end-to-end tests.
 
-============================================================
-26. DEFINITION OF DONE
+============================================================ 26. DEFINITION OF DONE
 ============================================================
 
 A feature is NOT DONE merely because:
@@ -1634,8 +1652,7 @@ DOCUMENTATION
 ✓ Flags updated
 ✓ Obsolete documentation removed
 
-============================================================
-27. IMPORTANT IMPLEMENTATION BEHAVIOR
+============================================================ 27. IMPORTANT IMPLEMENTATION BEHAVIOR
 ============================================================
 
 When implementing any task:
@@ -1677,8 +1694,7 @@ Only after everything passes, update documentation.
 
 Do not rewrite functioning systems simply to make them look different.
 
-============================================================
-28. FINAL ARCHITECTURAL TARGET
+============================================================ 28. FINAL ARCHITECTURAL TARGET
 ============================================================
 
 The final MapAnytime architecture should conceptually be:
@@ -1695,49 +1711,50 @@ The final MapAnytime architecture should conceptually be:
      Orders        Payments       Catalog
        |              |              |
        v              v              v
-   PricingEngine  ProviderAdapter  Inventory
-       |              |
-       |       +------+------+
-       |       |             |
-       |    PayMongo       Xendit
+
+PricingEngine ProviderAdapter Inventory
+| |
+| +------+------+
+| | |
+| PayMongo Xendit
+|
+v
+Financial Transaction
+|
++-----------------------------+
+| | |
+v v v
+Settlement Rewards Agent Commission
+| | |
+v v v
+Payout Reward Wallet Agent Wallet
+
        |
        v
- Financial Transaction
-       |
-       +-----------------------------+
-       |             |               |
-       v             v               v
-  Settlement      Rewards       Agent Commission
-       |             |               |
-       v             v               v
-     Payout       Reward Wallet   Agent Wallet
-       
-       |
-       v
- Immutable Financial Records
+
+Immutable Financial Records
 
 And asynchronously:
 
 RabbitMQ
-   |
-   +--> Notifications
-   +--> Email
-   +--> Analytics
-   +--> Reconciliation
-   +--> Background Jobs
+|
++--> Notifications
++--> Email
++--> Analytics
++--> Reconciliation
++--> Background Jobs
 
 Discovery:
 
 Map
- |
- +--> Nearby Stores
- +--> Sponsored Ads
- +--> Products
- +--> Analytics Signals
- +--> Recommendations
+|
++--> Nearby Stores
++--> Sponsored Ads
++--> Products
++--> Analytics Signals
++--> Recommendations
 
-============================================================
-29. FINAL RECOMMENDATION
+============================================================ 29. FINAL RECOMMENDATION
 ============================================================
 
 Do NOT rewrite MapAnytime.
@@ -1762,21 +1779,21 @@ Do NOT delete financial tables until their production data has been reviewed.
 The priority is:
 
 FINANCIAL CORRECTNESS
-        ↓
+↓
 PAYMENT + REFUND RELIABILITY
-        ↓
+↓
 SETTLEMENT + RECONCILIATION
-        ↓
+↓
 BUYER REWARDS
-        ↓
+↓
 SELLER CAMPAIGNS
-        ↓
+↓
 AGENT COMMISSIONS
-        ↓
+↓
 ANALYTICS
-        ↓
+↓
 RULE-BASED RECOMMENDATIONS
-        ↓
+↓
 ADVANCED FEATURES
 
 The existing MapAnytime foundation is strong enough to continue development.
@@ -1786,8 +1803,7 @@ The goal now is not more architecture.
 The goal is COMPLETION, FINANCIAL CORRECTNESS, RECONCILIATION,
 SECURITY, AND PRODUCTION READINESS.
 
-============================================================
-30. MASTER SUCCESS CRITERIA
+============================================================ 30. MASTER SUCCESS CRITERIA
 ============================================================
 
 MapAnytime should ultimately be able to explain every peso.

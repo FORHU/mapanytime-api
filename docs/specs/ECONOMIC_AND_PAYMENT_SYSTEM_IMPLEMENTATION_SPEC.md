@@ -1,9 +1,11 @@
 # MAPANYTIME — ECONOMIC SYSTEM & DYNAMIC PAYMENTS
+
 ## MASTER IMPLEMENTATION BLUEPRINT & SPECIFICATION
 
 **Location:** `mapanytime-api/docs/specs/ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md`  
 **Status:** READY FOR IMPLEMENTATION  
 **Target Systems:**
+
 1. **Buyer Rewards (MapAnytime Rewards)** — Loyalty discount ledger
 2. **Seller Incentives (Seller Campaigns)** — Merchant marketing promotions & ROI
 3. **Agent Commissions (Recruiter Commission)** — Real PHP commissions & payouts
@@ -42,6 +44,7 @@
 ## 2. PHASE 1: DATABASE SCHEMA & MIGRATIONS (`prisma/schema.prisma`)
 
 ### A. Buyer Reward Models
+
 ```prisma
 model RewardWallet {
   id             String               @id @default(cuid())
@@ -127,6 +130,7 @@ enum REWARDTRANSACTIONTYPE {
 ```
 
 ### B. Seller Campaign & Incentive Models
+
 ```prisma
 model SellerCampaigns {
   id              String                @id @default(cuid())
@@ -187,6 +191,7 @@ enum CAMPAIGNSTATUS {
 ```
 
 ### C. Agent Commission Models
+
 ```prisma
 model AgentCommissionAccount {
   id               String                        @id @default(cuid())
@@ -336,6 +341,7 @@ return await prisma.$transaction(async (tx) => {
 ## 4. PHASE 3: DYNAMIC MULTI-GATEWAY PAYMENTS (PAYMONGO + XENDIT)
 
 ### A. New Provider: `XenditProvider` (`src/modules/payments/providers/xendit.provider.ts`)
+
 ```typescript
 import axios from 'axios';
 import {
@@ -390,7 +396,8 @@ export class XenditProvider implements PaymentProvider {
 
   parseWebhookEvent(body: any): any {
     return {
-      eventType: body.status === 'PAID' || body.status === 'SETTLED' ? 'payment.paid' : 'payment.failed',
+      eventType:
+        body.status === 'PAID' || body.status === 'SETTLED' ? 'payment.paid' : 'payment.failed',
       orderId: body.external_id,
       amountInCentavos: Math.round(Number(body.amount) * 100),
       raw: body,
@@ -400,6 +407,7 @@ export class XenditProvider implements PaymentProvider {
 ```
 
 ### B. Updated Provider Factory (`PaymentService.getProviderAdapter`)
+
 ```typescript
 static getProviderAdapter(providerCode: string): PaymentProvider {
   switch (providerCode.toUpperCase()) {
@@ -437,9 +445,9 @@ static getProviderAdapter(providerCode: string): PaymentProvider {
 
 ## 6. PHASE 5: TEST SUITE EXECUTION PLAN
 
-| Test Suite | File Location | Coverage Scope |
-| :--- | :--- | :--- |
-| `rewards.service.spec.ts` | `src/modules/rewards/rewards.service.spec.ts` | Earning calculations, 20% cap validation, spending locks, 12m expiry. |
-| `agent-commission.service.spec.ts` | `src/modules/agents/agent-commission.service.spec.ts` | GMV commission calculations, holding maturation, payout requests. |
-| `order-economic-settlement.spec.ts` | `src/modules/orders/order-economic-settlement.spec.ts` | Atomic 4-way transaction on `completeOrder` (rollback on failure). |
-| `xendit.provider.spec.ts` | `src/modules/payments/providers/xendit.provider.spec.ts` | Invoice generation, callback token verification, webhook payload parsing. |
+| Test Suite                          | File Location                                            | Coverage Scope                                                            |
+| :---------------------------------- | :------------------------------------------------------- | :------------------------------------------------------------------------ |
+| `rewards.service.spec.ts`           | `src/modules/rewards/rewards.service.spec.ts`            | Earning calculations, 20% cap validation, spending locks, 12m expiry.     |
+| `agent-commission.service.spec.ts`  | `src/modules/agents/agent-commission.service.spec.ts`    | GMV commission calculations, holding maturation, payout requests.         |
+| `order-economic-settlement.spec.ts` | `src/modules/orders/order-economic-settlement.spec.ts`   | Atomic 4-way transaction on `completeOrder` (rollback on failure).        |
+| `xendit.provider.spec.ts`           | `src/modules/payments/providers/xendit.provider.spec.ts` | Invoice generation, callback token verification, webhook payload parsing. |

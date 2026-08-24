@@ -4,7 +4,7 @@
 **Project:** MapAnytime  
 **Date:** 2026-08-24  
 **Location:** `mapanytime-api/docs/specs/MASTER_EXECUTION_PLAN.md`  
-**Status:** ACTIVE PRIMARY EXECUTION REFERENCE  
+**Status:** ACTIVE PRIMARY EXECUTION REFERENCE
 
 ---
 
@@ -101,25 +101,25 @@ An administrator can:
 The following chain must remain consistent:
 
 Buyer
-  ↓
+↓
 Cart
-  ↓
+↓
 Pricing Preview
-  ↓
+↓
 Order
-  ↓
+↓
 Payment
-  ↓
+↓
 Order Completion
-  ↓
+↓
 Seller Settlement
-  ↓
+↓
 Buyer Rewards
-  ↓
+↓
 Agent Commission
-  ↓
+↓
 Payout
-  ↓
+↓
 Reconciliation
 
 No separate subsystem should independently calculate the financial result of an order.
@@ -1354,11 +1354,12 @@ Eligible subtotal:
 Then:
 
 Marketplace commission
-+ Payment provider fee
-+ Buyer transaction fee
-+ Seller settlement
-+ Any applicable reward
-+ Any applicable agent commission
+
+- Payment provider fee
+- Buyer transaction fee
+- Seller settlement
+- Any applicable reward
+- Any applicable agent commission
 
 must all be explainable.
 
@@ -1366,28 +1367,33 @@ At the end:
 
 Buyer paid amount
 =
-Goods
-+
+
+Goods +
 Buyer charges
 
 Provider captured amount
 =
+
 MapAnytime payment amount
 
 Seller settlement
 =
+
 Seller's entitled amount
 
 Platform ledger
 =
+
 Platform's entitled amount
 
 Agent ledger
 =
+
 Agent's entitled amount
 
 Reward ledger
 =
+
 Buyer reward entitlement
 
 Everything must reconcile.

@@ -24,19 +24,20 @@ MapAnytime is a map-first local commerce and property marketplace for the Philip
 
 ### User Personas & Roles
 
-| Persona | Role Key | Primary Responsibilities & Capabilities |
-| :--- | :--- | :--- |
-| **Buyer** | `BUYER` / `USER` | Geolocation discovery, storefront browsing, cart management, checkout & digital payments, pickup pass redemption, order & shipment tracking. |
-| **Seller / Merchant** | `SELLER` | Onboarding & verification, managing multiple stores/branches, product catalog & variant configuration, inventory management, merchant promotions & ads, order queue processing. |
-| **Real Estate Seller** | `SELLER` | Listing properties (house-and-lot, raw land) with legal title docs, pricing structures, terrain metadata, and viewing dedicated property dashboards. |
-| **Agent / Recruiter** | `AGENT` | Onboarding and recruiting merchants/sellers, tracking onboarding progress and recruit pipelines. |
-| **Administrator** | `ADMIN` / `SUPER_ADMIN` | Store and property KYC approval queues, dynamic RBAC permission management, category tree administration, pricing engine fee rule configuration, platform analytics, mobile app release & force-update governance. |
+| Persona                | Role Key                | Primary Responsibilities & Capabilities                                                                                                                                                                            |
+| :--------------------- | :---------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Buyer**              | `BUYER` / `USER`        | Geolocation discovery, storefront browsing, cart management, checkout & digital payments, pickup pass redemption, order & shipment tracking.                                                                       |
+| **Seller / Merchant**  | `SELLER`                | Onboarding & verification, managing multiple stores/branches, product catalog & variant configuration, inventory management, merchant promotions & ads, order queue processing.                                    |
+| **Real Estate Seller** | `SELLER`                | Listing properties (house-and-lot, raw land) with legal title docs, pricing structures, terrain metadata, and viewing dedicated property dashboards.                                                               |
+| **Agent / Recruiter**  | `AGENT`                 | Onboarding and recruiting merchants/sellers, tracking onboarding progress and recruit pipelines.                                                                                                                   |
+| **Administrator**      | `ADMIN` / `SUPER_ADMIN` | Store and property KYC approval queues, dynamic RBAC permission management, category tree administration, pricing engine fee rule configuration, platform analytics, mobile app release & force-update governance. |
 
 ---
 
 ## 2. Feature Matrix by Domain
 
 ### 2.1 Identity, Access & Governance (ID & ADM)
+
 - **Multi-Method Auth**: Email/password registration and Google OAuth 2.0 integration.
 - **Session & Token Management**: JWT-based access tokens with refresh token rotation and server-side invalidation on logout.
 - **Dynamic RBAC**: Runtime role-to-permission resolution where administrators can configure fine-grained endpoint grants without redeploying code.
@@ -45,6 +46,7 @@ MapAnytime is a map-first local commerce and property marketplace for the Philip
 - **Audit Logging**: Structured event logging for sensitive administrative actions.
 
 ### 2.2 Store & Merchant Management (STO)
+
 - **Seller Capacity Declaration**: Support for `OWNER`, `BROKER`, and `PROXY` operating models.
 - **KYC & Document Verification**: Submission of BIR registration certificates, government IDs, and operational permits.
 - **Store Approval Workflow**: Multi-state approval pipeline (`PENDING`, `APPROVED`, `REJECTED`) with rejection reason tracking.
@@ -52,12 +54,14 @@ MapAnytime is a map-first local commerce and property marketplace for the Philip
 - **Store Profiles**: Configurable daily operating hours, GPS coordinates (latitude/longitude), contact numbers, branding banners, and logos.
 
 ### 2.3 Map & Discovery Engine (MAP & ADS)
+
 - **Radius-Based Store Search**: Geolocation spatial querying (`GET /stores/nearby`) allowing buyers to discover active stores within configurable distance radiuses (1–50 km).
 - **Interactive Storefront Pins**: Map pins displaying store distance, operating status (open/closed), and fast navigation into store catalogs.
 - **Sponsored Proximity Ads**: Proximity-targeted merchant advertising pins highlighting deals and featured sellers within the buyer's vicinity.
 - **Storefront Landing Pages**: Store-specific web and mobile landing pages featuring curated collections, operating hours, and verified badges.
 
 ### 2.4 Catalog & Inventory Management (CAT & INV)
+
 - **Rich Product Catalog**: Multi-image galleries, hierarchical category mapping, tags, pricing, and stock visibility (`PUBLISHED`, `DRAFT`, `ARCHIVED`).
 - **Options & Variants**: Matrix generation for product options (e.g., Size, Color) with distinct SKUs, prices, and variant-specific inventory.
 - **AI-Assisted Listing Ingestion**: Background image-to-listing parsing queue (`/seller/ai-upload`) to extract listing metadata automatically.
@@ -66,12 +70,14 @@ MapAnytime is a map-first local commerce and property marketplace for the Philip
 - **Time-Bound Reservations**: Automatic 15-minute stock hold upon order placement, with background scheduled sweep releasing expired holds.
 
 ### 2.5 Real Estate & Property Listings (PROP)
+
 - **Structured Real Estate Schema**: Specialized metadata fields for house-and-lot and raw-land properties (terrain type, furnishing, title classification, negotiability, tax declaration responsibilities).
 - **Property Document Attachment**: Uploading and association of land titles, blueprints, and tax certifications.
 - **Property Verification Lifecycle**: Two-stage approval (`DRAFT` → `PENDING_REVIEW` → `ACTIVE` / `REJECTED`).
 - **Property Seller Dashboard**: Dedicated property-specific view tracking buyer inquiries, listing engagement, and status.
 
 ### 2.6 Cart & Pricing Engine (CART & FEE)
+
 - **Single-Store Cart Isolation**: Guardrails ensuring items in a single cart session belong to one unique store.
 - **Multi-Tiered Pricing Engine**:
   - Versioned and effective-dated pricing rules.
@@ -84,6 +90,7 @@ MapAnytime is a map-first local commerce and property marketplace for the Philip
 - **Discount & Promotion Pipeline**: Item-level percentage discounts, BOGO (Buy One Get One), flash sales, and platform voucher calculations.
 
 ### 2.7 Checkout, Payments & Settlements (PAY & LED)
+
 - **Dynamic Payment Provider Architecture**: Data-driven payment provider model supporting multiple gateways (PayMongo for GCash, Maya, Cards, and local banks).
 - **Idempotent Webhook Processing**: Cryptographic signature validation, event deduplication, and transactional state transition on `payment.paid` webhooks.
 - **Immutable Charge Ledger (`OrderCharges`)**: Detailed double-entry style charge lines capturing exact payer and beneficiary pairs (`BUYER` → `PLATFORM`, `BUYER` → `MERCHANT`, `MERCHANT` → `PLATFORM`).
@@ -91,17 +98,20 @@ MapAnytime is a map-first local commerce and property marketplace for the Philip
 - **Settlement & Payout Batching**: Aggregation of cleared order funds into merchant settlement batches with release eligibility dates.
 
 ### 2.8 Order Lifecycle & Fulfillment (ORD)
+
 - **Fulfillment Modes**: Dual support for **Store Pickup** (with scheduled pickup windows) and **Delivery** (with shipping address snapshotting).
 - **Order State Machine**: Strict status transitions (`PENDING_PAYMENT` → `PAID` → `CONFIRMED` → `PREPARING` → `READY_FOR_PICKUP` / `SHIPPED` → `COMPLETED` / `CANCELLED`).
 - **Digital Pickup Pass**: Mobile/web QR and code-based verification pass shown by the buyer at the physical store counter.
 - **Shipment Tracking**: Multi-stage shipment tracking with carrier names, tracking numbers, and delivery confirmation.
 
 ### 2.9 Real-Time Communications & Async Workers (NTF & PLT)
+
 - **WebSocket Gateway**: Real-time push updates for instant payment confirmations, order status changes, and notifications.
 - **Background Event Consumers**: RabbitMQ-backed asynchronous worker processing for email delivery, notifications, and analytics ingestion.
 - **Scheduled Workers**: Cron engines for releasing expired inventory reservations, evaluating matured seller payouts, and auto-cancelling stale unpaid checkouts.
 
 ### 2.10 Tri-Domain Economic Architecture — Rewards, Incentives & Commissions (ECO)
+
 - **Three Separate Economic Ledgers**:
   1. **Buyer Loyalty (`RewardWallet` + `RewardTransactions`)**: Customer reward points earned on purchases (₱100 = 1 pt), reviews, referrals, and store visits. Redeemable for checkout discounts (100 pts = ₱10, max 20% cap). 12-month rolling expiration. Not cash.
   2. **Seller Incentives (`SellerCampaigns` + `SellerCampaignTransactions`)**: Merchant-funded marketing budgets to distribute Reward Points to buyers (e.g. "Spend ₱500 get 50 pts") with ROI analytics (GMV generated, new vs repeat customers).
@@ -160,7 +170,7 @@ sequenceDiagram
     API->>S3: Persist Uploaded Document Files
     API->>DB: Insert Store (status: PENDING) & Documents records
     API-->>Web: Store Created (Pending Approval state)
-    
+
     Admin->>API: GET /v1/admin/approvals (Review queue)
     API->>DB: Fetch pending stores and attached KYC documents
     Admin->>API: PATCH /v1/admin/approvals/stores/:id (Approve / Reject)
@@ -244,7 +254,7 @@ sequenceDiagram
     API->>DB: Verify Store isolation (Ensure items belong to single store)
     API->>DB: Check on-hand inventory availability
     API-->>Client: Updated Cart
-    
+
     Buyer->>Client: Proceed to Checkout Preview
     Client->>API: POST /v1/cart/preview-pricing
     API->>Engine: Run PricingEngine
@@ -277,7 +287,7 @@ sequenceDiagram
 
     Buyer->>App: Click "Place Order & Pay"
     App->>API: POST /v1/orders (Cart, FulfillmentType, DeliveryAddress/PickupTime)
-    
+
     rect rgb(240, 248, 255)
         note over API,DB: Transactional Order Creation & Inventory Lock
         API->>DB: Create Order (status: PENDING_PAYMENT)
@@ -286,11 +296,11 @@ sequenceDiagram
         API->>Gateway: Create Hosted Checkout Session / Payment Intent
         Gateway-->>API: Return Checkout URL & Payment Intent ID
     end
-    
+
     API-->>App: Return Payment URL
     App-->>Buyer: Redirect to PayMongo Hosted Page (GCash / Maya / Card)
     Buyer->>Gateway: Authorizes & Completes Payment
-    
+
     rect rgb(245, 255, 245)
         note over Gateway,API: Webhook Processing (Off Request Path)
         Gateway->>API: POST /v1/payments/webhook (Signature Header, event: payment.paid)
@@ -302,7 +312,7 @@ sequenceDiagram
         API->>DB: Insert immutable OrderCharges rows (Buyer, Merchant, Platform, Gateway)
         API-->>Gateway: HTTP 200 OK
     end
-    
+
     API-->>App: Push Realtime WebSocket event: 'order.paid'
     API-->>Seller: Push Realtime notification: 'New Order Received'
 ```
@@ -359,16 +369,16 @@ sequenceDiagram
     Seller->>Portal: Create Ad Campaign (Budget, Proximity Radius, Schedule, Featured Products)
     Portal->>API: POST /v1/merchant-ads
     API->>DB: Persist Ad record & assign target coordinates
-    
+
     Buyer->>App: Browses Map / Search in target area
     App->>API: GET /v1/merchant-ads/nearby
     API-->>App: Return Promoted Merchant Pin
     App->>API: POST /v1/analytics/events (event: AD_IMPRESSION, adId: XYZ)
-    
+
     Buyer->>App: Clicks Promoted Pin & Store Banner
     App->>API: POST /v1/analytics/events (event: AD_CLICK, adId: XYZ)
     Buyer->>App: Purchases Featured Product from Ad
-    
+
     API->>Analytics: Attribute Order revenue & conversion to Ad ID XYZ
     Analytics->>DB: Increment Ad stats (Impressions, Clicks, Attributed Revenue, ROAS)
     Seller->>Portal: View Realtime Campaign Analytics (ROAS, CPC, Conversions)
@@ -392,7 +402,7 @@ sequenceDiagram
     AgentApp->>API: POST /v1/agent/register-seller
     API->>DB: Create Merchant User & link agent recruiter ID
     API-->>Merchant: Send SMS / Email Invitation with Onboarding Link
-    
+
     Merchant->>Merchant: Complete KYC & Store Setup
     Agent->>AgentApp: GET /v1/agent/recruits
     API->>DB: Query recruiter's merchant list and onboarding progress
@@ -414,10 +424,10 @@ sequenceDiagram
 
     Order->>Ledger: Split Order Total into Immutable Charge Rows
     Note over Ledger: 1. PRODUCT (Buyer -> Merchant)<br/>2. BUYER_TRANSACTION_FEE (Buyer -> Platform, 2.23%)<br/>3. SELLER_MARKETPLACE_FEE (Merchant -> Platform, 2.00%)<br/>4. PAYMENT_PROCESSING_FEE (Platform -> Gateway)<br/>No TAX row — the platform collects no VAT
-    
+
     Settlement->>Ledger: Aggregate Net Merchant Earnings (Goods - Commission - Fees)
     Settlement->>Settlement: Generate Settlement record (Eligible for release after holding period)
-    
+
     Note over Settlement,Bank: Batch Release Schedule
     Settlement->>Bank: Dispatch Batch Payout for all RELEASED settlements
     Bank-->>Settlement: Payout Reference Number & Confirmation
@@ -477,29 +487,29 @@ erDiagram
     Users ||--o{ Documents : submits
     Users ||--o| Buyers : registers
     Users ||--o| Sellers : registers
-    
+
     Buyers ||--o| RewardWallet : owns
     RewardWallet ||--o{ RewardTransactions : logs
-    
+
     Sellers ||--o{ SellerCampaigns : launches
     SellerCampaigns ||--o{ SellerCampaignTransactions : logs
-    
+
     Users ||--o| AgentCommissionAccount : holds
     AgentCommissionAccount ||--o{ AgentCommissionTransactions : logs
     AgentCommissionAccount ||--o{ AgentPayouts : requests
-    
+
     Stores ||--o{ StoreHours : configures
     Stores ||--o{ Products : offers
     Stores ||--o{ ProductProperties : lists
     Stores ||--o{ Orders : receives
     Stores ||--o{ MerchantAds : runs
     Stores ||--o{ Inventory : stocks
-    
+
     Products ||--o{ ProductImages : contains
     Products ||--o{ ProductOptions : has
     Products ||--o{ ProductVariants : produces
     ProductVariants ||--o{ Inventory : tracks
-    
+
     Orders ||--|{ OrderItems : contains
     Orders ||--o{ OrderCharges : ledgers
     Orders ||--o{ InventoryReservations : locks
@@ -507,36 +517,37 @@ erDiagram
     Orders ||--o{ Payments : pays
     Orders ||--o{ RewardTransactions : references
     Orders ||--o{ AgentCommissionTransactions : references
-    
+
     RewardConfigurations ||--o{ RewardWallet : configures
     AgentCommissionConfigurations ||--o{ AgentCommissionAccount : configures
     PricingConfigurations ||--o{ PricingComponents : defines
     MerchantAds ||--o{ MerchantAdProducts : targets
     MerchantAds ||--o{ AdEvents : records
 ```
-    
+
     Stores ||--o{ StoreHours : configures
     Stores ||--o{ Products : offers
     Stores ||--o{ ProductProperties : lists
     Stores ||--o{ Orders : receives
     Stores ||--o{ MerchantAds : runs
     Stores ||--o{ Inventory : stocks
-    
+
     Products ||--o{ ProductImages : contains
     Products ||--o{ ProductOptions : has
     Products ||--o{ ProductVariants : produces
     ProductVariants ||--o{ Inventory : tracks
-    
+
     Orders ||--|{ OrderItems : contains
     Orders ||--o{ OrderCharges : ledgers
     Orders ||--o{ InventoryReservations : locks
     Orders ||--o{ Shipments : fulfills
     Orders ||--o{ Payments : pays
     Orders ||--o{ RewardTransactions : references
-    
+
     PricingConfigurations ||--o{ PricingComponents : defines
     MerchantAds ||--o{ MerchantAdProducts : targets
     MerchantAds ||--o{ AdEvents : records
+
 ```
 
 ---
@@ -553,3 +564,4 @@ erDiagram
 
 ---
 *Generated: 2026-08-20 — Source of truth for MapAnytime Marketplace Features and System Flows.*
+```

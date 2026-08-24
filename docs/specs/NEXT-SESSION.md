@@ -2,24 +2,24 @@
 
 **Updated:** 2026-08-24  
 **Primary Reference:** [`MASTER_EXECUTION_PLAN.md`](./MASTER_EXECUTION_PLAN.md)  
-**Historical Context:** [`FLAGS.md`](./FLAGS.md)  
+**Historical Context:** [`FLAGS.md`](./FLAGS.md)
 
 ---
 
 ## 0. Current Baseline State
 
-| Module | Branch | Verified Status |
-| :--- | :--- | :--- |
-| `mapanytime-api` | `feat/wishlist-refund-and-role-cleanup` | 358 tests / 43 suites passing · `tsc` · ESLint · Working tree clean |
-| `mapanytime-market-web` | `feat/seller-finance-and-catalog-cleanup` | `tsc` · ESLint · `next build` · Working tree clean |
-| `mapanytime-market-app` | `feat/wishlist-and-notifications` | `flutter analyze` · 26 tests · Working tree clean |
-| `mapanytime-market-admin` | `main` | Working tree clean |
+| Module                    | Branch                                    | Verified Status                                                     |
+| :------------------------ | :---------------------------------------- | :------------------------------------------------------------------ |
+| `mapanytime-api`          | `feat/wishlist-refund-and-role-cleanup`   | 358 tests / 43 suites passing · `tsc` · ESLint · Working tree clean |
+| `mapanytime-market-web`   | `feat/seller-finance-and-catalog-cleanup` | `tsc` · ESLint · `next build` · Working tree clean                  |
+| `mapanytime-market-app`   | `feat/wishlist-and-notifications`         | `flutter analyze` · 26 tests · Working tree clean                   |
+| `mapanytime-market-admin` | `main`                                    | Working tree clean                                                  |
 
 ---
 
 ## 1. PHASE 1 (P0): FINANCIAL CORRECTNESS (DO THESE FIRST)
 
-*The platform must prove that a single ₱1,000 transaction reconciles end-to-end before implementing new features.*
+_The platform must prove that a single ₱1,000 transaction reconciles end-to-end before implementing new features._
 
 - [ ] **P0-1. Confirm Real Contracted Payment Rates (QRPH & GrabPay)**
   - Obtain the real commercial rates for `QRPH` and `GRAB_PAY`.
@@ -77,7 +77,7 @@
 
 ## 4. PHASE 4 (P3): TRI-DOMAIN ECONOMIC ECOSYSTEM
 
-*Spec: [`ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md`](./ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md) and [`MAP_POINTS_FEATURE_SPEC.md`](./MAP_POINTS_FEATURE_SPEC.md)*
+_Spec: [`ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md`](./ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md) and [`MAP_POINTS_FEATURE_SPEC.md`](./MAP_POINTS_FEATURE_SPEC.md)_
 
 - [ ] **P3-1. Buyer Loyalty Rewards (`RewardWallet` + `RewardTransactions` + `RewardConfigurations`)**
   - ₱100 eligible subtotal = 1 Reward Point (~1%).
