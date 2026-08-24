@@ -1,110 +1,94 @@
-# Next session — consolidated tasks
+# MapAnytime — Immediate Execution Checklist (Next Session)
 
-**Updated 2026-08-24.** This is the immediate developer to-do list derived from `MASTER_EXECUTION_PLAN.md`.
-
-Full detail lives in [`MASTER_EXECUTION_PLAN.md`](./MASTER_EXECUTION_PLAN.md) (decisions and sequencing) and [`FLAGS.md`](./FLAGS.md) (findings). This file is the short version — the to-do, not the record.
+**Updated:** 2026-08-24  
+**Primary Reference:** [`MASTER_EXECUTION_PLAN.md`](./MASTER_EXECUTION_PLAN.md)  
+**Historical Context:** [`FLAGS.md`](./FLAGS.md)  
 
 ---
 
-## State at the pause
+## 0. Current Baseline State
 
-| Repo | Branch | Verified |
+| Module | Branch | Verified Status |
 | :--- | :--- | :--- |
-| `mapanytime-api` | `feat/retire-vat` | 325 tests / 39 suites · tsc · ESLint |
-| `mapanytime-market-web` | `feat/buyer-checkout-admin-wiring` | tsc · ESLint · `next build` |
-| `mapanytime-market-app` | `feat/retire-vat` | `flutter analyze` · 26 tests |
-
-**Nothing is committed.** You commit manually.
-
----
-
-## 0. Before anything else
-
-- [x] **Run the migrations.** Five written and applied via `prisma migrate dev`.
-- [x] **Commit the work.** All three repos cleanly committed by feature.
+| `mapanytime-api` | `feat/wishlist-refund-and-role-cleanup` | 358 tests / 43 suites passing · `tsc` · ESLint · Working tree clean |
+| `mapanytime-market-web` | `feat/seller-finance-and-catalog-cleanup` | `tsc` · ESLint · `next build` · Working tree clean |
+| `mapanytime-market-app` | `feat/wishlist-and-notifications` | `flutter analyze` · 26 tests · Working tree clean |
+| `mapanytime-market-admin` | `main` | Working tree clean |
 
 ---
 
-## 1. Two migration bugs found and fixed (2026-08-20, late)
+## 1. PHASE 1 (P0): FINANCIAL CORRECTNESS (DO THESE FIRST)
+
+*The platform must prove that a single ₱1,000 transaction reconciles end-to-end before implementing new features.*
+
+- [ ] **P0-1. Confirm Real Contracted Payment Rates (QRPH & GrabPay)**
+  - Obtain the real commercial rates for `QRPH` and `GRAB_PAY`.
+  - Insert them into `PricingComponents` so they do not fall back to the generic 2.00% rate.
+- [ ] **P0-2. Inspect & Migrate Orphaned `CommissionRules`**
+  - Check if `CommissionRules` contains any live category-specific commission rates.
+  - Migrate active rows to `PricingComponents` (`SELLER_MARKETPLACE_FEE` scoped by `categoryId`).
+  - Verify migration and safely drop the obsolete `CommissionRules` table.
+- [ ] **P0-3. Remove Obsolete `Orders.taxAmount`**
+  - Verify zero code reads/writes `Orders.taxAmount`.
+  - Create a migration to drop the column, regenerate Prisma client, and verify tests.
+- [ ] **P0-4. Confirm Settlement Hold Policy (`SETTLEMENT_HOLD_DAYS`)**
+  - Confirm the default **7-day hold period** with the business owner (protects platform during return window).
+- [ ] **P0-5. Verify Vertical Financial Transaction Lifecycle**
+  - Trace and test:
+    $$\text{Cart} \rightarrow \text{Pricing Engine} \rightarrow \text{Order Creation} \rightarrow \text{Payment Gateway} \rightarrow \text{Webhook Confirmation} \rightarrow \text{Order Completion} \rightarrow \text{Seller Settlement} \rightarrow \text{Payout Batch}$$
+- [ ] **P0-6. Provider-Backed Refunds & Payment Reconciliation**
+  - Connect provider refund execution (`PayMongoProvider.refundPayment`).
+  - Verify refund adjustments update payment status (`REFUNDED` / `PARTIALLY_REFUNDED`) and reverse unearned settlements.
+  - Build automated payment-provider reconciliation job (`capturedAmount` vs `MapAnytime payments`).
 
 ---
 
-## 2. Item 14 — the app cannot take a payment · ✅ **DONE 2026-08-20**
+## 2. PHASE 2 (P1): SECURITY, OPERATIONS & CORE PRODUCT GAPS
 
-- [x] Datasource + Riverpod provider for `GET /payments/methods?amount=<goodsTotal>`
-- [x] Replace the hardcoded list at `checkout_page.dart` with the live one —
-      showing each method's `feeAmount` / `buyerTotalAmount`, and rendering
-      `unavailableReason` on disabled methods instead of hiding them
-- [x] **Make `OrderRemoteDataSource.createOrder` return the `checkoutUrl`.**
-- [x] Present that URL via `url_launcher` (in-app browser view / external browser)
-- [x] Leave cash on its existing pay-on-pickup path — no gateway, no URL
-- [x] Leave the pickup pass QR alone (`MAPANYTIME-ORDER-{orderId}`)
-
-The web `features/checkout` built for item 6 is the working reference. The API
-side needs nothing further.
-
----
-
-## 3. Item 13 — analytics · **phase 2 only**
-
-Settled: dedup now, rollups and ranking deferred. Without deduplication every
-view count is inflated and rollups built on top inherit the error; rollups and
-ranking need real traffic to shape them, and there is none yet.
-
-- [ ] Issue a client-side `sessionId` — **the web sends none today**
-- [ ] Send it on every analytics event
-- [ ] Collapse repeat views of the same product by the same session within a window
-- [ ] ~~Phase 3 rollups, ranking, recommendations~~ — deferred by decision
-
-`recommendations_page.dart` stays a screen with nothing behind it until ranking
-exists.
+- [ ] **P1-1. HTTP CORS Hardening**
+  - Remove wildcard origin reflection on credentialed HTTP endpoints.
+  - Restrict `Access-Control-Allow-Origin` to explicit allowlisted origins (matching the WebSocket gateway).
+- [ ] **P1-2. Environment & Staging Isolation**
+  - Separate staging and production container names, ports, env files, and databases.
+- [ ] **P1-3. Admin Invitation Endpoint (ID-5)**
+  - Implement `POST /v1/admin/invites` (token generation, expiration, email dispatch, and activation flow).
+- [ ] **P1-4. Analytics Session ID & View Deduplication**
+  - Generate client `sessionId` on web and mobile.
+  - Deduplicate repeat views by `sessionId + productId + time window` before rollups.
+- [ ] **P1-5. In-App Notification Feed Routes (NTF-1 to NTF-3)**
+  - Wire `GET /v1/notifications`, `PATCH /v1/notifications/:id/read`, `POST /v1/notifications/read-all`, and unread badge count.
+- [ ] **P1-6. Map Pin $\rightarrow$ Storefront Experience**
+  - Complete the client flow: Pin tap $\rightarrow$ store summary preview $\rightarrow$ storefront $\rightarrow$ products $\rightarrow$ cart.
+- [ ] **P1-7. Scheduled Cron Hygiene**
+  - Verify reservation expiration job; remove or implement empty cron shells.
+- [ ] **P1-8. Add `.gitattributes` to `-web`**
+  - Ensure consistent line endings across environments.
 
 ---
 
-## 4. Smaller open threads
+## 3. PHASE 3 (P2): GROWTH ANALYTICS & ADVERTISING
 
-Carried over from `FIX-PLAN.md`; none are blocking.
-
-- [ ] **Contracted rates for `QRPH` and `GRAB_PAY`** (item 1). Both price off the
-      2.00% fallback today and will undercharge if their real rate is higher.
-      This is a commercial input, not a code change — get the numbers, then seed
-      them as `PricingComponents`.
-- [ ] **`CommissionRules` is orphaned** (item 2). `TaxationService` was its only
-      reader and is deleted. Migrate any live per-category rates into
-      `PricingComponents` (`SELLER_MARKETPLACE_FEE` scoped by `categoryId`), then
-      drop the table. Left in place because dropping is destructive and the table
-      may hold real rates.
-- [ ] **`Orders.taxAmount` is a leftover.** VAT was retired; nothing writes this
-      column any more. Drop it, or it will confuse someone in six months.
-- [ ] **Admin invite endpoint (ID-5).** `AdminInvites` is a model with no
-      endpoint — the same shape of gap as the four just closed in item 11.
-- [ ] **Push notifications (NTF-4).** Still nothing at either end. Explicitly out
-      of scope for item 11, which built the in-app feed only.
-- [ ] **Reconciliation (F24).** Seller settlement is now built and covered.
-      Payment reconciliation against PayMongo's own statement, and admin
-      financial reporting, remain unverified — and are now meaningful, since
-      orders price off real rates.
-- [ ] **Tri-Domain Economic Architecture (ECO-1 to ECO-11, AGT-3/4).**
-      Spec: `mapanytime-api/docs/specs/ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md`.
-      1. Buyer Rewards: `RewardWallet`, `RewardTransactions`, `RewardConfigurations` (100 pts = ₱10, 20% cap, 12m rolling expiry).
-      2. Seller Incentives: `SellerCampaigns`, `SellerCampaignTransactions` (merchant-funded buyer point campaigns).
-      3. Agent Commissions: `AgentCommissionAccount`, `AgentCommissionTransactions`, `AgentPayouts` (real PHP commissions, 0.05% GMV configurable).
-      Atomic multi-ledger settlement inside `OrderService.completeOrder()` $transaction alongside seller settlement.
-- [ ] **Dynamic Multi-Gateway Payment System with Xendit Integration (F13/F14).**
-      Add `XenditProvider` implementing `PaymentProvider` (`src/modules/payments/providers/xendit.provider.ts`).
-      Configure dynamic gateway selection and failover across PayMongo and Xendit in `PaymentService.getProviderAdapter`.
-- [ ] **`-web` has no `.gitattributes`.** See §0.
+- [ ] **P2-1. Analytics Daily Rollups & Rule-Based Ranking**
+  - Implement daily aggregation cron, most-viewed, trending, and proximity-based sorting.
+- [ ] **P2-2. Merchant Advertising Marketing Wallet**
+  - Build merchant marketing deposit wallet to fund sponsored map pin ad spend.
 
 ---
 
-## 5. Worth a look when convenient
+## 4. PHASE 4 (P3): TRI-DOMAIN ECONOMIC ECOSYSTEM
 
-Not on the plan, noticed in passing:
+*Spec: [`ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md`](./ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md) and [`MAP_POINTS_FEATURE_SPEC.md`](./MAP_POINTS_FEATURE_SPEC.md)*
 
-- The **cash-commission netting** built this session (a negative settlement that
-  nets off the seller's next gateway-funded payout) has no way to collect from a
-  seller who takes **only** cash — their balance just goes further negative and
-  no payout ever runs. Fine while most sales are online; revisit if that stops
-  being true.
-- `SETTLEMENT_HOLD_DAYS` defaults to **7**. That was my choice as a sensible
-  default covering the return window, not a decision you made. Confirm it.
+- [ ] **P3-1. Buyer Loyalty Rewards (`RewardWallet` + `RewardTransactions` + `RewardConfigurations`)**
+  - ₱100 eligible subtotal = 1 Reward Point (~1%).
+  - 100 Reward Points = ₱10 discount (max 20% order subtotal cap).
+  - 12-month rolling expiration with explicit `-EXPIRATION` ledger entries.
+- [ ] **P3-2. Seller Incentives (`SellerCampaigns` + `SellerCampaignTransactions`)**
+  - Merchant-funded buyer point campaigns with budget tracking and ROI metrics.
+- [ ] **P3-3. Agent Recruiter Commissions (`AgentCommissionAccount` + `AgentCommissionTransactions` + `AgentPayouts`)**
+  - Real PHP commissions (0.05% GMV configurable).
+  - 7-day holding window (`PENDING` $\rightarrow$ `MATURED`) and payout requests (Min ₱500).
+- [ ] **P3-4. Atomic Multi-Ledger Hook in `OrderService.completeOrder`**
+  - Atomically commit order completion + seller settlement + buyer reward + agent commission.
+- [ ] **P3-5. Dynamic Multi-Gateway Payments (`XenditProvider`)**
+  - Add `XenditProvider` and dynamic gateway switching/failover in `PaymentService.getProviderAdapter`.
