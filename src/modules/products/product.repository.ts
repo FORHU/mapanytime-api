@@ -74,7 +74,7 @@ export default class ProductRepository {
         where,
         include: {
           category: true,
-          tags: true,
+          tags: { include: { tag: true } },
           inventory: true,
           store: { select: { storeName: true } },
           productImages: {

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import MerchantAdsService from './merchantAds.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
+import { money, MAX_MONEY } from '../../helpers/money.helper';
 
 const productLinkSchema = Joi.object({
   productId: Joi.string().required(),
@@ -23,8 +24,8 @@ const adFieldsSchema = {
   radiusKm: Joi.number().integer().min(1).max(50).optional(),
   targetLat: Joi.number().optional(),
   targetLng: Joi.number().optional(),
-  dailyBudget: Joi.number().min(0).optional(),
-  totalBudget: Joi.number().min(0).optional(),
+  dailyBudget: money().optional(),
+  totalBudget: money().optional(),
   discountType: Joi.string().valid('BOGO', 'PERCENTAGE', 'FIXED_AMOUNT').optional(),
   buyQuantity: Joi.number()
     .integer()
@@ -39,7 +40,7 @@ const adFieldsSchema = {
     .when('discountType', {
       switch: [
         { is: 'PERCENTAGE', then: Joi.number().positive().max(100).required() },
-        { is: 'FIXED_AMOUNT', then: Joi.number().positive().required() },
+        { is: 'FIXED_AMOUNT', then: Joi.number().positive().max(MAX_MONEY).required() },
       ],
       otherwise: Joi.forbidden(),
     }),

@@ -2,14 +2,15 @@ import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import PricingService from './pricing.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
+import { money } from '../../helpers/money.helper';
 
 export default class PricingController {
   static async calculate(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
-      subtotalAmount: Joi.number().positive().required(),
-      discountAmount: Joi.number().min(0).default(0),
-      shippingAmount: Joi.number().min(0).default(0),
-      taxAmount: Joi.number().min(0).default(0),
+      subtotalAmount: money().positive().required(),
+      discountAmount: money().default(0),
+      shippingAmount: money().default(0),
+      taxAmount: money().default(0),
       storeId: Joi.string().optional(),
       sellerId: Joi.string().optional(),
       sellerPlan: Joi.string().optional(),

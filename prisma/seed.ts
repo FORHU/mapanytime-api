@@ -6,6 +6,7 @@ import { seedPaymentProviders } from './seeders/payments.seeder';
 import { seedStoresAndProducts } from './seeders/stores_and_products.seeder';
 import { seedMarketplaceData } from './seeders/marketplace_data.seeder';
 import { seedMultiStoreSeller } from './seeders/multi_store_seller.seeder';
+import { seedTags } from './seeders/tags.seeder';
 
 const prisma = new PrismaClient();
 
@@ -17,6 +18,7 @@ async function main() {
     await seedRoles(prisma);
     await seedUsers(prisma);
     await seedCategories(prisma);
+    await seedTags(prisma);
     await seedPaymentProviders(prisma);
     await seedStoresAndProducts(prisma);
     await seedMarketplaceData(prisma);

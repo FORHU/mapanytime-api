@@ -50,23 +50,21 @@ export default class ProductService {
 
     const { tags, initialStock = 0, imageIds, categoryId, ...productFields } = payload;
 
+    const tagsInput = tags && tags.length > 0
+      ? {
+          // Only connect to existing tags — they must be seeded beforehand.
+          // The controller validates `tags` against ALLOWED_PRODUCT_TAGS.
+          create: tags.map((name: string) => ({
+            tag: { connect: { name: name as unknown as any } },
+          })),
+        }
+      : undefined;
+
     const newProduct = await ProductRepository.createProduct({
       ...productFields,
       store: { connect: { id: storeId } },
       category: { connect: { id: categoryId } },
-      tags:
-        tags && tags.length > 0
-          ? {
-              create: tags.map((name) => ({
-                tag: {
-                  connectOrCreate: {
-                    where: { name },
-                    create: { name },
-                  },
-                },
-              })),
-            }
-          : undefined,
+      tags: tagsInput,
     });
 
     await prisma.inventory.create({
