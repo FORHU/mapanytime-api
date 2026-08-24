@@ -8,6 +8,7 @@ import { seedStoresAndProducts } from './seeders/stores_and_products.seeder';
 import { seedMarketplaceData } from './seeders/marketplace_data.seeder';
 import { seedMultiStoreSeller } from './seeders/multi_store_seller.seeder';
 import { seedTags } from './seeders/tags.seeder';
+import { seedBulkMapStores } from './seeders/bulk_map_stores.seeder';
 
 const prisma = new PrismaClient();
 
@@ -25,6 +26,7 @@ async function main() {
     await seedStoresAndProducts(prisma);
     await seedMarketplaceData(prisma);
     await seedMultiStoreSeller(prisma);
+    await seedBulkMapStores(prisma);
 
     console.log('All seeder modules executed successfully!');
   } catch (error) {

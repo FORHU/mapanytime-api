@@ -11,8 +11,10 @@ const formatPeso = (amount: number) => `₱${amount.toLocaleString('en-PH')}`;
 
 /**
  * Values of the removed PAYMENTMETHOD enum that name a channel rather than a
- * type, mapped onto the seeded PaymentMethods.code they now mean. The Flutter
- * app still sends `CASH_ON_DELIVERY` from its checkout page.
+ * type, mapped onto the seeded PaymentMethods.code they now mean. Kept for
+ * app builds already installed before the checkout flow moved to sending
+ * `code: 'COD'` directly — current source no longer emits `CASH_ON_DELIVERY`,
+ * but old clients in the field still can until they update.
  */
 const LEGACY_METHOD_CODE_ALIASES: Record<string, string> = {
   CASH_ON_DELIVERY: 'COD',
