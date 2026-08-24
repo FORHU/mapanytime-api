@@ -3,17 +3,21 @@ import Joi from 'joi';
 import ProductService from './product.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
 import { parsePagination } from '../../helpers/pagination.helper';
+import { money } from '../../helpers/money.helper';
+import { ALLOWED_PRODUCT_TAGS } from '../../helpers/product-tags';
 
 export default class ProductController {
   static async create(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
       storeId: Joi.string().required(),
       name: Joi.string().required(),
-      price: Joi.number().min(0).required(),
+      price: money().required(),
       brand: Joi.string().optional(),
       description: Joi.string().optional(),
       categoryId: Joi.string().required(),
-      tags: Joi.array().items(Joi.string()).optional(),
+      tags: Joi.array()
+        .items(Joi.string().valid(...ALLOWED_PRODUCT_TAGS))
+        .optional(),
       isActive: Joi.boolean().default(false),
       initialStock: Joi.number().integer().min(0).default(0),
       imageIds: Joi.array().items(Joi.string()).optional(),
@@ -128,7 +132,7 @@ export default class ProductController {
   static async update(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
       name: Joi.string().optional(),
-      price: Joi.number().min(0).optional(),
+      price: money().optional(),
       brand: Joi.string().optional(),
       description: Joi.string().optional(),
       categoryId: Joi.string().optional(),

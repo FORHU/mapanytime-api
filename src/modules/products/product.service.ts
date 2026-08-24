@@ -2,6 +2,7 @@ import ProductRepository from './product.repository';
 import CategoryService from '../categories/category.service';
 import { prisma } from '../../utils/prisma';
 import { buildPage } from '../../helpers/pagination.helper';
+import { AllowedProductTag } from '../../helpers/product-tags';
 
 export interface CategoryTreeNode {
   id: string;
@@ -24,7 +25,7 @@ export default class ProductService {
       brand?: string;
       description?: string;
       categoryId: string;
-      tags?: string[];
+      tags?: AllowedProductTag[];
       isActive?: boolean;
       initialStock?: number;
       imageIds?: string[];
@@ -50,23 +51,22 @@ export default class ProductService {
 
     const { tags, initialStock = 0, imageIds, categoryId, ...productFields } = payload;
 
+    const tagsInput =
+      tags && tags.length > 0
+        ? {
+            // Only connect to existing tags — they must be seeded beforehand.
+            // The controller validates `tags` against ALLOWED_PRODUCT_TAGS.
+            create: tags.map((name) => ({
+              tag: { connect: { name } },
+            })),
+          }
+        : undefined;
+
     const newProduct = await ProductRepository.createProduct({
       ...productFields,
       store: { connect: { id: storeId } },
       category: { connect: { id: categoryId } },
-      tags:
-        tags && tags.length > 0
-          ? {
-              create: tags.map((name) => ({
-                tag: {
-                  connectOrCreate: {
-                    where: { name },
-                    create: { name },
-                  },
-                },
-              })),
-            }
-          : undefined,
+      tags: tagsInput,
     });
 
     await prisma.inventory.create({
