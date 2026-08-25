@@ -4,6 +4,8 @@ import StoreService, { filterLiveAds, type MerchantAdWithProducts } from '../sto
 import type { NearbyStore } from '../stores/store.repository';
 import { S3_CDN_URL } from '../../config';
 import S3Util from '../../utils/s3.util';
+import { deriveAdState, windowsOverlap, START_GRACE_MS, type AdWindowState } from './adWindow';
+import { publish } from '../../infrastructure/rabbitmq/publisher';
 
 async function resolveImageUrl(file: { path: string; bucket?: string | null }): Promise<string> {
   if (S3_CDN_URL) return `${S3_CDN_URL}/${file.path}`;
@@ -29,12 +31,44 @@ interface AdFields {
   targetLng?: number;
   dailyBudget?: number;
   totalBudget?: number;
-  expiresAt?: Date;
+  startAt?: Date | null;
+  expiresAt?: Date | null;
   products?: { productId: string; variantId?: string }[];
 }
 
 interface CreateAdPayload extends AdFields {
   storeId: string;
+}
+
+type ProductLink = { productId: string; variantId: string | null };
+
+/**
+ * Two ads collide on stock if they share a product and their variant scopes
+ * intersect. A link with variantId NULL covers the whole product, so it
+ * collides with every variant of it.
+ */
+function productScopesIntersect(a: ProductLink[], b: ProductLink[]): ProductLink[] {
+  return a.filter((x) =>
+    b.some(
+      (y) =>
+        x.productId === y.productId &&
+        (x.variantId === null || y.variantId === null || x.variantId === y.variantId),
+    ),
+  );
+}
+
+function formatWindow(startAt: Date | null, expiresAt: Date | null, timeZone: string): string {
+  const fmt = (d: Date) =>
+    new Intl.DateTimeFormat('en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone,
+    }).format(d);
+
+  if (startAt && expiresAt) return `from ${fmt(startAt)} to ${fmt(expiresAt)}`;
+  if (expiresAt) return `until ${fmt(expiresAt)}`;
+  if (startAt) return `from ${fmt(startAt)} onwards`;
+  return 'with no end date';
 }
 
 export default class MerchantAdsService {
@@ -55,9 +89,135 @@ export default class MerchantAdsService {
     return seller;
   }
 
+  /**
+   * Rejects a start time already in the past, allowing START_GRACE_MS of slack
+   * for clock skew between the seller's device and this server.
+   *
+   * On update the stored value is passed as `storedStartAt`: a running ad's
+   * start is in the past by definition, and editing its title must not fail
+   * validation on a field the seller never touched.
+   */
+  private static assertStartNotPast(startAt: Date | null | undefined, storedStartAt?: Date | null) {
+    if (!startAt) return;
+    if (storedStartAt && startAt.getTime() === storedStartAt.getTime()) return;
+
+    if (startAt.getTime() < Date.now() - START_GRACE_MS) {
+      throw {
+        status: 400,
+        code: 'AD_START_IN_PAST',
+        message: 'That start time has already passed. Pick a future time, or start it now.',
+      };
+    }
+  }
+
+  /**
+   * A promotion that is already running cannot have its start rewritten:
+   * impressions, clicks and spend were attributed against the original start,
+   * so moving it would make the analytics describe a window that never existed.
+   */
+  private static assertStartNotLocked(
+    ad: { startAt: Date | null; expiresAt: Date | null; isActive: boolean },
+    nextStartAt: Date | null | undefined,
+    hasStartAtKey: boolean,
+  ) {
+    if (!hasStartAtKey) return;
+
+    const state = deriveAdState(ad);
+    if (state === 'SCHEDULED') return;
+
+    const unchanged =
+      (ad.startAt === null && nextStartAt == null) ||
+      (ad.startAt !== null &&
+        nextStartAt != null &&
+        ad.startAt.getTime() === nextStartAt.getTime());
+
+    if (!unchanged) {
+      throw {
+        status: 409,
+        code: 'AD_START_LOCKED',
+        message:
+          'This promotion has already started, so its start time is locked. ' +
+          'You can still change when it ends.',
+      };
+    }
+  }
+
+  /**
+   * Blocks only the case that actually breaks pricing: two discount promotions
+   * applying competing prices to the same product at the same instant. Ads with
+   * no discount, or touching different products, are free to overlap.
+   */
+  private static async assertNoWindowConflict(
+    storeId: string,
+    candidate: {
+      kind?: string;
+      discountType?: MERCHANTDISCOUNTTYPE | null;
+      startAt: Date | null;
+      expiresAt: Date | null;
+      products: ProductLink[];
+    },
+    excludeAdId?: string,
+  ) {
+    if (candidate.kind !== 'PROMO' || !candidate.discountType) return;
+    if (candidate.products.length === 0) return;
+
+    const conflicts = await MerchantAdsRepository.findWindowConflicts(
+      storeId,
+      { startAt: candidate.startAt, expiresAt: candidate.expiresAt },
+      candidate.products.map((p) => p.productId),
+      excludeAdId,
+    );
+
+    for (const other of conflicts) {
+      // The SQL filter is a coarse pre-selection; confirm with the exact
+      // half-open test so a window merely touching another isn't rejected.
+      if (!windowsOverlap(candidate, other)) continue;
+
+      const shared = productScopesIntersect(candidate.products, other.products);
+      if (shared.length === 0) continue;
+
+      const timezone = await MerchantAdsRepository.getStoreTimezone(storeId);
+      throw {
+        status: 409,
+        code: 'PROMO_WINDOW_CONFLICT',
+        message:
+          `"${other.title}" already discounts one of these products ` +
+          `${formatWindow(other.startAt, other.expiresAt, timezone)}. ` +
+          'End that promotion first, or pick a window outside it.',
+        details: {
+          adId: other.id,
+          title: other.title,
+          startAt: other.startAt,
+          expiresAt: other.expiresAt,
+          productIds: [...new Set(shared.map((p) => p.productId))],
+          timezone,
+        },
+      };
+    }
+  }
+
+  /** Attaches the derived window state and the store's zone to an ad row. */
+  private static decorate<
+    T extends { startAt: Date | null; expiresAt: Date | null; isActive: boolean },
+  >(ad: T, timezone: string, now: Date): T & { state: AdWindowState; storeTimezone: string } {
+    return { ...ad, state: deriveAdState(ad, now), storeTimezone: timezone };
+  }
+
   static async listMyAds(userId: string, storeId: string) {
     await this.assertOwnership(userId, storeId);
-    return MerchantAdsRepository.getAdsByStoreId(storeId);
+
+    const now = new Date();
+    const [ads, timezone] = await Promise.all([
+      MerchantAdsRepository.getAdsByStoreId(storeId),
+      MerchantAdsRepository.getStoreTimezone(storeId),
+    ]);
+
+    return {
+      // Lets the seller UI measure its own clock drift instead of trusting the
+      // browser for countdowns and past-time checks.
+      serverTime: now.toISOString(),
+      items: ads.map((ad) => this.decorate(ad, timezone, now)),
+    };
   }
 
   static async listAllMyAds(userId: string) {
@@ -65,13 +225,38 @@ export default class MerchantAdsService {
     if (!seller) {
       throw { status: 403, message: 'Only sellers can access merchant ads.' };
     }
-    return MerchantAdsRepository.getAdsBySellerId(seller.id);
+
+    const now = new Date();
+    const ads = await MerchantAdsRepository.getAdsBySellerId(seller.id);
+
+    // One seller can own stores in different zones, so the listing resolves a
+    // zone per row rather than assuming a single one for the whole page.
+    const timezones = await MerchantAdsRepository.getStoreTimezones([
+      ...new Set(ads.map((ad) => ad.storeId)),
+    ]);
+
+    return {
+      serverTime: now.toISOString(),
+      items: ads.map((ad) => this.decorate(ad, timezones.get(ad.storeId) ?? 'Asia/Manila', now)),
+    };
   }
 
   static async createAd(userId: string, payload: CreateAdPayload) {
     await this.assertOwnership(userId, payload.storeId);
 
     const { storeId, products, ...adFields } = payload;
+
+    this.assertStartNotPast(adFields.startAt);
+    await this.assertNoWindowConflict(storeId, {
+      kind: adFields.kind ?? 'PROMO',
+      discountType: adFields.discountType,
+      startAt: adFields.startAt ?? null,
+      expiresAt: adFields.expiresAt ?? null,
+      products: (products ?? []).map((p) => ({
+        productId: p.productId,
+        variantId: p.variantId ?? null,
+      })),
+    });
 
     return MerchantAdsRepository.createAd({
       ...adFields,
@@ -96,7 +281,24 @@ export default class MerchantAdsService {
     }
 
     await this.assertOwnership(userId, ad.storeId);
-    return MerchantAdsRepository.setActive(adId, isActive);
+
+    const timezone = await MerchantAdsRepository.getStoreTimezone(ad.storeId);
+
+    // Resuming an ad whose window has closed can't bring it back — say so
+    // rather than accepting the toggle and leaving the seller wondering why
+    // nothing happened. Pausing one is harmless, so it's allowed through.
+    if (isActive && deriveAdState(ad) === 'ENDED') {
+      throw {
+        status: 409,
+        code: 'AD_ALREADY_ENDED',
+        message:
+          'This promotion has already ended, so resuming it has no effect. ' +
+          'Change its end time to run it again.',
+      };
+    }
+
+    const updated = await MerchantAdsRepository.setActive(adId, isActive);
+    return this.decorate(updated, timezone, new Date());
   }
 
   static async updateAd(userId: string, adId: string, payload: AdFields) {
@@ -108,13 +310,51 @@ export default class MerchantAdsService {
     await this.assertOwnership(userId, ad.storeId);
 
     const { products, ...adFields } = payload;
+
+    const hasStartAtKey = Object.prototype.hasOwnProperty.call(payload, 'startAt');
+    const nextStartAt = hasStartAtKey ? (adFields.startAt ?? null) : ad.startAt;
+    const nextExpiresAt = Object.prototype.hasOwnProperty.call(payload, 'expiresAt')
+      ? (adFields.expiresAt ?? null)
+      : ad.expiresAt;
+
+    this.assertStartNotLocked(ad, adFields.startAt, hasStartAtKey);
+    this.assertStartNotPast(hasStartAtKey ? adFields.startAt : undefined, ad.startAt);
+
+    // Pulling the end date into the past is how a seller says "stop this now",
+    // not a mistake to reject — but it must still land after the start.
+    if (nextExpiresAt && nextStartAt && nextExpiresAt <= nextStartAt) {
+      throw {
+        status: 400,
+        code: 'AD_WINDOW_INVERTED',
+        message: 'End time must be after the start time.',
+      };
+    }
+
+    const nextProducts = (products ?? ad.products).map((p) => ({
+      productId: p.productId,
+      variantId: p.variantId ?? null,
+    }));
+
+    await this.assertNoWindowConflict(
+      ad.storeId,
+      {
+        kind: adFields.kind ?? ad.kind,
+        discountType: adFields.discountType !== undefined ? adFields.discountType : ad.discountType,
+        startAt: nextStartAt,
+        expiresAt: nextExpiresAt,
+        products: nextProducts,
+      },
+      adId,
+    );
+
     const updated = await MerchantAdsRepository.updateAd(adId, adFields);
 
     if (products) {
       await MerchantAdsRepository.replaceAdProducts(adId, products);
     }
 
-    return updated;
+    const timezone = await MerchantAdsRepository.getStoreTimezone(ad.storeId);
+    return this.decorate(updated, timezone, new Date());
   }
 
   static async deleteAd(userId: string, adId: string) {
@@ -139,6 +379,52 @@ export default class MerchantAdsService {
 
     await MerchantAdsRepository.deleteAd(adId);
     return { deleted: true as const };
+  }
+
+  /**
+   * Emits side effects for ads whose window has opened or closed since the last
+   * sweep, then records the state it acted on.
+   *
+   * This job does NOT decide whether an ad is live — that is derived at read
+   * time and is already exact. It exists only for the things that must *happen*
+   * at a boundary and which no read can trigger: notifying the seller and
+   * telling open buyer maps to refresh.
+   *
+   * Level-triggered and idempotent: it compares derived state against
+   * lastNotifiedState rather than asking what changed in the last minute, so a
+   * worker that was down simply catches up on its next tick.
+   *
+   * Returns the number of transitions acted on.
+   */
+  static async processWindowTransitions(): Promise<number> {
+    const now = new Date();
+    const candidates = await MerchantAdsRepository.findAdsNeedingTransition();
+
+    let processed = 0;
+
+    for (const ad of candidates) {
+      const state = deriveAdState(ad, now);
+      if (state === ad.lastNotifiedState) continue;
+
+      // Published rather than emitted directly: the scheduler runs in the
+      // worker process, where the Socket.IO instance is null. The API process
+      // consumes this and does the actual broadcast.
+      await publish('ad.window.transitioned', {
+        adId: ad.id,
+        storeId: ad.storeId,
+        title: ad.title,
+        from: ad.lastNotifiedState,
+        to: state,
+        startAt: ad.startAt,
+        expiresAt: ad.expiresAt,
+        occurredAt: now.toISOString(),
+      });
+
+      await MerchantAdsRepository.markNotifiedState(ad.id, state);
+      processed += 1;
+    }
+
+    return processed;
   }
 
   static async trackEvent(
@@ -241,6 +527,7 @@ export default class MerchantAdsService {
           buyQuantity: ad.buyQuantity,
           freeQuantity: ad.freeQuantity,
           imageUrl: ad.imageUrl ?? productImageUrl,
+          startAt: ad.startAt,
           expiresAt: ad.expiresAt,
           isPromoted: ad.dailyBudget ? Number(ad.dailyBudget) > 0 : false,
         };

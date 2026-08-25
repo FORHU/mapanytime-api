@@ -2,6 +2,31 @@ import cron from 'node-cron';
 import logger from '../../utils/logger';
 import InventoryReservationService from '../../modules/inventory/inventoryReservation.service';
 import SettlementService from '../../modules/settlements/settlement.service';
+import MerchantAdsService from '../../modules/merchantAds/merchantAds.service';
+import RedisUtil from '../../utils/redis.util';
+
+/**
+ * node-cron fires per process. There is one worker today, so nothing here is
+ * currently duplicated — but the first time the worker is scaled to two
+ * replicas, every job below runs twice and sellers get two of every
+ * notification. Jobs with outward-facing side effects take this lock.
+ *
+ * The TTL is deliberately shorter than the interval it guards so a worker that
+ * dies mid-job cannot wedge the lock permanently.
+ */
+async function withJobLock(name: string, ttlSeconds: number, run: () => Promise<void>) {
+  const acquired = await RedisUtil.client.set(`scheduler:lock:${name}`, '1', {
+    NX: true,
+    expiration: { type: 'EX', value: ttlSeconds },
+  });
+
+  if (!acquired) {
+    logger.debug(`[Scheduler] ${name} skipped — another worker holds the lock.`);
+    return;
+  }
+
+  await run();
+}
 
 /**
  * Scheduled Jobs Registry
@@ -24,6 +49,23 @@ export const startScheduler = () => {
       }
     } catch (err) {
       logger.error('[Scheduler] Failed to process expired reservations:', err);
+    }
+  });
+
+  // ── Ad schedule window transitions — runs every 1 minute ────────────────
+  // Side effects only. Whether an ad is live is derived at read time and is
+  // exact to the millisecond; this job never gates that. It notifies sellers
+  // and nudges open buyer maps when a window opens or closes.
+  cron.schedule('* * * * *', async () => {
+    try {
+      await withJobLock('ad-window-transitions', 50, async () => {
+        const processed = await MerchantAdsService.processWindowTransitions();
+        if (processed > 0) {
+          logger.info(`[Scheduler] Processed ${processed} ad window transition(s).`);
+        }
+      });
+    } catch (err) {
+      logger.error('[Scheduler] Failed to process ad window transitions:', err);
     }
   });
 

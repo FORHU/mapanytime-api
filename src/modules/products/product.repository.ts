@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import { S3_CDN_URL } from '../../config';
 import S3Util from '../../utils/s3.util';
+import { liveWindowFilter } from '../merchantAds/adWindow';
 
 async function resolveImageUrl(file: { path: string; bucket?: string | null }): Promise<string> {
   if (S3_CDN_URL) return `${S3_CDN_URL}/${file.path}`;
@@ -215,9 +216,10 @@ export default class ProductRepository {
           merchantAdLinks: {
             where: {
               ad: {
-                isActive: true,
                 discountType: { not: null },
-                OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+                // A scheduled promotion must not badge a product as discounted
+                // before it starts — same window test as checkout pricing.
+                ...liveWindowFilter(),
               },
             },
             include: { ad: true },
