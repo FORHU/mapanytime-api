@@ -62,6 +62,16 @@ export class XenditProvider implements PaymentProvider {
 
     const allowedChannels = resolveXenditChannels(input.paymentMethodCode);
 
+    // Xendit requires HTTPS for both redirect URLs. Local dev's FRONTEND_URL
+    // is plain HTTP (and there's no real page there anyway — the webhook,
+    // not this redirect, is what actually confirms payment; this is only
+    // where the browser lands after). RFC 2606 reserves example.com exactly
+    // for this kind of placeholder use.
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const httpsFrontendUrl = frontendUrl.startsWith('https://')
+      ? frontendUrl
+      : 'https://example.com';
+
     const payload = {
       session_type: 'PAY',
       mode: 'PAYMENT_LINK',
@@ -72,20 +82,39 @@ export class XenditProvider implements PaymentProvider {
       country: 'PH',
       customer,
       success_return_url:
-        input.successUrl ||
-        `${process.env.FRONTEND_URL || 'http://localhost:3000'}/orders/${input.orderId}?status=success`,
+        input.successUrl || `${httpsFrontendUrl}/orders/${input.orderId}?status=success`,
       cancel_return_url:
-        input.cancelUrl ||
-        `${process.env.FRONTEND_URL || 'http://localhost:3000'}/orders/${input.orderId}?status=cancelled`,
+        input.cancelUrl || `${httpsFrontendUrl}/orders/${input.orderId}?status=cancelled`,
       ...(allowedChannels ? { allowed_payment_channels: allowedChannels } : {}),
     };
 
-    const response = await axios.post(`${this.apiUrl}/sessions`, payload, {
-      headers: {
-        Authorization: this.authHeader,
-        'Content-Type': 'application/json',
-      },
-    });
+    let response;
+    try {
+      response = await axios.post(`${this.apiUrl}/sessions`, payload, {
+        headers: {
+          Authorization: this.authHeader,
+          'Content-Type': 'application/json',
+        },
+      });
+    } catch (err) {
+      // Bare axios errors surface as a useless "Request failed with status
+      // code 400" — Xendit's actual rejection reason lives in the response
+      // body (e.g. { error_code, message }). Unwrap it so both the buyer-
+      // facing error and the server log say what Xendit actually objected to.
+      if (axios.isAxiosError(err)) {
+        const data = err.response?.data as
+          | { message?: string; error_code?: string }
+          | undefined;
+        throw {
+          status: err.response?.status || 502,
+          message:
+            data?.message ||
+            data?.error_code ||
+            'Xendit checkout session request failed.',
+        };
+      }
+      throw err;
+    }
 
     const data = response.data;
 
