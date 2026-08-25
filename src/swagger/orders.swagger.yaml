@@ -20,11 +20,17 @@ paths:
               properties:
                 type:
                   type: string
-                  enum: [DELIVERY, PICKUP]
+                  # PICKUP is the only member of FULLFILLMENTTYPE. This
+                  # previously advertised DELIVERY as well, which Joi rejects —
+                  # delivery was cut and the platform is pickup-only.
+                  enum: [PICKUP]
                   example: PICKUP
                 paymentMethod:
                   type: string
-                  enum: [BANK, GCASH, CASH_ON_DELIVERY]
+                  # `PaymentMethods.code` values as seeded. CASH_ON_DELIVERY
+                  # and CASH are accepted as legacy spellings of COD, which is
+                  # cash paid at the counter on pickup — there is no delivery.
+                  enum: [GCASH, MAYA, QRPH, CARD, GRAB_PAY, COD]
                   example: GCASH
                 pickupAt:
                   type: string
