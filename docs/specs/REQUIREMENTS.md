@@ -16,7 +16,7 @@ to do; `FLAGS.md` says what is currently wrong with it.**
 
 **Status key** — ✅ built · ◐ partial · ⚠ built but wrong · ⬚ not built · ⊘ withdrawn
 
-**Coverage:** 102 requirements — 63 ✅ · 14 ◐ · 19 ⬚ · 6 ⊘ (recounted 2026-08-25)
+**Coverage:** 102 requirements — 62 ✅ · 15 ◐ · 19 ⬚ · 6 ⊘ (recounted 2026-08-25)
 
 **No ⚠ rows remain.** The last two — CART-2 (preview disagreed with checkout) and
 FEE-8 (two pricing engines) — closed on 2026-08-20. Everything still outstanding
@@ -24,10 +24,10 @@ is unbuilt or partial, not built-and-wrong.
 
 _This line has now drifted twice. It claimed 100 across one split, was corrected
 to 108 across another on 2026-08-20 and called "a mechanical recount", and was
-still wrong by six rows on 2026-08-25 — before that day's two status changes,
-the real figures were 63 / 15 / 19 / 5, not 70 / 17 / 16 / 5. A hand-maintained
-tally beside a hand-maintained table will keep drifting; if the number matters,
-count it in CI rather than in prose._
+still wrong by six rows on 2026-08-25 — before that day's single status change
+(ORD-5, ✅ → ⊘) the real figures were 63 / 15 / 19 / 5, not 70 / 17 / 16 / 5. A
+hand-maintained tally beside a hand-maintained table will keep drifting; if the
+number matters, count it in CI rather than in prose._
 
 ---
 
@@ -35,7 +35,8 @@ count it in CI rather than in prose._
 
 A map-first local marketplace for the Philippines. Buyers open a map, see nearby
 stores and sponsored deals as pins, buy for collection at the store, and pay
-through a gateway. Pickup is the only fulfilment mode — delivery was cut (F36). Sellers onboard with verification documents, are approved by an admin,
+through a gateway. Pickup is the only fulfilment mode — delivery was cut (F36).
+Sellers onboard with verification documents, are approved by an admin,
 run one or more stores, list products (or house-and-lot property listings),
 advertise, and are settled net of commission. Agents recruit sellers. A platform
 pricing engine decides every fee on every order and writes an immutable charge
@@ -67,12 +68,12 @@ ledger.
 
 ## MAP — Map discovery
 
-| #     | Requirement                                                                  | Status | Evidence                                                                                                           |
-| :---- | :--------------------------------------------------------------------------- | :----- | :----------------------------------------------------------------------------------------------------------------- |
-| MAP-1 | Buyers browse stores as pins on a map around their location, within a radius | ✅     | `GET /stores/nearby`, `world_map_page.dart`                                                                        |
-| MAP-2 | Tapping a pin opens store name, distance and a way into the storefront       | ✅     | `store_bottom_sheet.dart`, `world_map_controller.dart`, `store_repository.dart` — shipped on `mapbox_maps_flutter` |
-| MAP-3 | Sponsored deals appear as promoted pins within 1–50 km                       | ◐      | `GET /merchant-ads/nearby` works; no web client calls it (F18)                                                     |
-| MAP-4 | A storefront page lists a store's products                                   | ✅     | `storefront_page.dart`, `/store/[id]`                                                                              |
+| #     | Requirement                                                                  | Status | Evidence                                                                                                                                                                                                                                                                                                          |
+| :---- | :--------------------------------------------------------------------------- | :----- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MAP-1 | Buyers browse stores as pins on a map around their location, within a radius | ✅     | `GET /stores/nearby`, `world_map_page.dart`                                                                                                                                                                                                                                                                       |
+| MAP-2 | Tapping a pin opens store name, distance and a way into the storefront       | ◐      | Two of three. A pin tap runs `_selectStore` (`world_map_page.dart:216`) → camera `flyTo` + `StoreFloatingCard`, which shows the **name** and pushes `RouteNames.storefront`, but **no distance**. Distance is on `StoreBottomSheet`, which only opens from the list (`store_list_view.dart:88`), never from a pin |
+| MAP-3 | Sponsored deals appear as promoted pins within 1–50 km                       | ◐      | `GET /merchant-ads/nearby` works; no web client calls it (F18)                                                                                                                                                                                                                                                    |
+| MAP-4 | A storefront page lists a store's products                                   | ✅     | `storefront_page.dart`, `/store/[id]`                                                                                                                                                                                                                                                                             |
 
 ## CAT — Catalog
 

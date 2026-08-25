@@ -97,26 +97,24 @@ item is still true — see the correction under F42.
 
 ## 🔴 Decisions blocking MapPoints implementation
 
-### F39. The redemption discount has no funding owner
+### ~~F39. The redemption discount has no funding owner~~ — DECIDED 2026-08-25
 
-[`MAP_POINTS_FEATURE_SPEC.md`](MAP_POINTS_FEATURE_SPEC.md) never mentions
-`OrderCharges` — zero occurrences — and never says whether a points discount
-comes out of the seller's payout or the platform's margin.
+**Sellers fund discounts; MapAnytime funds vouchers.** A seller promotion is a
+`DISCOUNT` row (payer `SELLER`); a MapPoints redemption is a `PLATFORM_SUBSIDY`
+row (payer `PLATFORM`, beneficiary `BUYER`). The platform absorbs the full cost
+with no seller contribution, so `SellerCampaign` is not needed for phase 1.
 
-The schema already has `CHARGEBENEFICIARY { BUYER, SELLER, PLATFORM, PAYMENT_PROVIDER, GOVERNMENT }`
-and a live settlement engine that computes what the seller is owed. A redemption
-has to be booked as a charge row against one of those parties. Until that is
-decided, the ledger cannot be written.
+Recorded in `FLAGS.md` under _Confirmed business rules_ and _Who funds a
+discount, and what commission follows_.
 
-### F40. The commission base under redemption is undefined
+### ~~F40. The commission base under redemption is undefined~~ — FOLLOWS FROM F39
 
-The confirmed rule is marketplace commission = 2.00% of **subtotal**. If points
-reduce the subtotal, platform revenue falls on every redemption, silently.
+**Commission stays on the pre-voucher subtotal.** Not a separate decision: F4
+settled that commission follows what the seller actually received, and under a
+platform-funded voucher the seller receives the full amount. The seller's ₱20 on
+a ₱1,000 order is unchanged whether or not points were spent.
 
-The spec defines the _earn_ base carefully (net goods subtotal, excluding fees)
-but says nothing about the _spend_ base. Decide whether commission is charged on
-the pre-discount or post-discount subtotal, and record it beside the other
-confirmed business rules in `FLAGS.md`.
+Recorded in `FLAGS.md` with a worked example.
 
 ### F41. `Agents` does not exist in the schema
 
@@ -131,26 +129,32 @@ Confirmed missing: `Agents`, `RewardWallet`, `SellerCampaign`, `Promotions`.
 This is the largest scope item in the document and it currently reads as
 incremental. Decide explicitly whether agents are in or out of phase 1.
 
-### F42. Reward rules are undefined for multi-store carts
+### F42. Reward rules for multi-store carts — **not blocking; a precondition for item 17**
 
-Phase 1 of item 17 shipped, so a cart can hold items from several stores and one
-checkout produces several store-orders. Both "₱100 eligible subtotal = 1 point"
-and "maximum 20% of the eligible order subtotal" need a definition at the
-store-order level. Neither the spec nor the recommendation mentions multi-store.
+**Downgraded 2026-08-25.** The flag originally read "Phase 1 of item 17 shipped,
+so a cart can hold items from several stores". That is false, and it was the
+only reason F42 blocked anything.
 
-> **Correction, 2026-08-25 — the premise above is false.** The cart is still
-> single-store. `CartService` holds one `storeId: string | null`
-> (`cart.service.ts:14`) and refuses a product from a second store while the
-> cart is non-empty (`:62`); `order.controller.ts:65,82` reads that one id and
-> creates one order from it. Phase 1 of item 17 did **not** ship.
->
-> So F42 is not blocking: there is no multi-store cart for the reward rules to
-> be ambiguous about. It becomes a real question the moment item 17 lands, and
-> the earn/redeem rules should be defined per store-order before it does —
-> which is the cheap moment to decide it, not after.
->
-> Verified by reading the code rather than the status board, which is what
-> F60 warns the board cannot be trusted for.
+The cart is single-store, verified in code:
+
+- `cart.service.ts:14` — the cart holds one `storeId: string | null`, not a list
+- `cart.service.ts:62` — adding a product from a second store is refused while
+  the cart is non-empty
+- `order.controller.ts:65,82` — checkout reads that one id and creates one order
+
+So there is no multi-store cart for the reward rules to be ambiguous about, and
+MapPoints can be built without answering this.
+
+**What to carry forward:** when item 17 does land, "₱100 eligible subtotal =
+1 point" and "maximum 20% of the eligible order subtotal" both need a
+definition at the **store-order** level, because one checkout will then produce
+several of them. Deciding that while the rules are still on paper costs
+nothing; deciding it after points are in circulation means a migration. Treat
+it as a precondition on item 17 rather than an open question now.
+
+_Verified by reading the code rather than the status board — which is exactly
+what F60 says the board cannot be trusted for. This flag was itself an instance
+of that._
 
 ---
 

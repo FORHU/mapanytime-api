@@ -34,6 +34,48 @@ enforce them — treat a failure there as a business-rule breach, not a broken t
 | Buyer transaction fee       | **Varies by payment method** — the contracted rate for the method the buyer chose, passed through to the gateway in full. GCash 2.23%, Maya 1.79%, domestic card 3.125% + ₱13.39, cash 0%. The 0.23% "platform handling" slice was retired 2026-08-20 (F32), so the platform keeps none of it: this fee is cost recovery, never revenue |
 | Payment fees                | Must come from configured provider rates, not a universal fallback                                                                                                                                                                                                                                                                      |
 | Payer policy                | `BUYER` / `SELLER` / `PLATFORM`, resolved server-side; checkout must never override it                                                                                                                                                                                                                                                  |
+| Discounts vs vouchers       | **Sellers fund discounts; MapAnytime funds vouchers.** A seller promotion is a `DISCOUNT` row (payer `SELLER`) and reduces the commission base. A MapPoints redemption is a `PLATFORM_SUBSIDY` row (payer `PLATFORM`) and does **not** — decided 2026-08-25                                                                             |
+| MapPoints earn rate         | **₱100 spent = 1 point, a point is worth ₱0.10** — 0.1%, costing 5% of commission. Admin-editable at runtime; raising it is a config change (F63)                                                                                                                                                                                       |
+
+### Who funds a discount, and what commission follows
+
+Two things reduce what a buyer pays, and they are not the same event.
+
+A **seller discount** is the seller's own promotion. F4 settled that commission
+follows the discounted subtotal, and gave the reason: _"a seller funding a
+promotion no longer pays commission on money nobody handed them."_
+
+A **MapPoints voucher** is funded by the platform. The seller is handed the full
+amount — MapAnytime makes up the difference — so that same reason points the
+other way: **commission stays on the pre-voucher subtotal.** This is not an
+exception to F4, it is F4's principle applied. The rule underneath both is
+_commission on what the seller actually received._
+
+Worked example — ₱1,000 order, buyer redeems a ₱50 voucher, GCash:
+
+```
+Goods                      ₱1,000.00
+MapAnytime voucher           -₱50.00   PLATFORM_SUBSIDY, payer PLATFORM
+Buyer transaction fee         ₱21.19   2.23% of ₱950
+BUYER PAYS                   ₱971.19
+
+Marketplace commission        ₱20.00   2.00% of ₱1,000, unreduced
+SELLER RECEIVES              ₱980.00   full, as if no voucher existed
+
+Platform: +₱20.00 commission −₱50.00 voucher
+PLATFORM NET                 -₱30.00
+```
+
+Per order that looks alarming; it is the wrong frame. The buyer had to earn the
+₱50 first, which at 0.1% took ₱50,000 of spend and generated ₱1,000 of
+commission. **Lifetime cost = earn rate ÷ commission rate**, so 5% of margin at
+0.1% and 50% at 1%. That ratio, not the single-order view, is what makes the
+rate the decision that matters.
+
+`ORDERCHARGETYPE` already carries `PLATFORM_SUBSIDY`, `SELLER_SUBSIDY`,
+`PROMOTION` and `CAMPAIGN`, and `PROMOTION_FUNDING { SELLER, PLATFORM, SHARED }`
+exists. None are read by `src/` yet — the vocabulary is there, the wiring is
+not, so no migration is needed to book a redemption correctly.
 
 ### Why no tax
 
