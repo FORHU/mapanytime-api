@@ -41,7 +41,7 @@ MapAnytime separates marketplace economics into three distinct, dedicated system
 
 - **User-Facing Name:** Reward Points (e.g. "1,250 Reward Points $\approx$ ₱125 in discount value").
 - **Default Earning Rate:** **₱100 eligible purchase = 1 Reward Point** (~1% reward rate).
-- **Calculation Base:** Calculated strictly on eligible net goods subtotal (`subtotal - merchant discounts`), excluding buyer fees (2.23%), payment gateway fees, platform commissions, shipping, and taxes.
+- **Calculation Base:** Calculated strictly on eligible net goods subtotal (`subtotal - merchant discounts`), excluding the buyer transaction fee (which varies by payment method), payment gateway fees, platform commissions, shipping, and taxes. Excluding the buyer fee is what keeps the earn amount identical whether the buyer pays by GCash, Maya or card.
 - **Default Redemption Value:** **100 Reward Points = ₱10 discount** (₱0.10 per point).
 - **Maximum Redemption Cap:** Reward points can cover a maximum of **20% of the eligible order subtotal** (enforced server-side).
 - **Expiration Policy:** **12-month rolling expiration** (`expiresAt` timestamp per earning lot).

@@ -423,7 +423,7 @@ sequenceDiagram
     actor Merchant as Merchant
 
     Order->>Ledger: Split Order Total into Immutable Charge Rows
-    Note over Ledger: 1. PRODUCT (Buyer -> Merchant)<br/>2. BUYER_TRANSACTION_FEE (Buyer -> Platform, 2.23%)<br/>3. SELLER_MARKETPLACE_FEE (Merchant -> Platform, 2.00%)<br/>4. PAYMENT_PROCESSING_FEE (Platform -> Gateway)<br/>No TAX row — the platform collects no VAT
+    Note over Ledger: 1. PRODUCT (Buyer -> Merchant)<br/>2. BUYER_TRANSACTION_FEE (Buyer -> Platform, rate varies by payment method)<br/>3. SELLER_MARKETPLACE_FEE (Merchant -> Platform, 2.00% — the platform's only revenue)<br/>4. PAYMENT_PROCESSING_FEE (Platform -> Gateway, cancels row 2)<br/>No TAX row — the platform collects no VAT
 
     Settlement->>Ledger: Aggregate Net Merchant Earnings (Goods - Commission - Fees)
     Settlement->>Settlement: Generate Settlement record (Eligible for release after holding period)
