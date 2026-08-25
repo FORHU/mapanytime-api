@@ -5,7 +5,71 @@ import {
   CheckoutResult,
   PaymentProvider,
   RefundResult,
+  WebhookEvent,
 } from './payment-provider.interface';
+
+interface PayMongoEventData {
+  id?: string;
+  attributes?: {
+    reference_number?: string;
+    remarks?: string;
+    failure_reason?: string;
+    metadata?: Record<string, string>;
+  };
+}
+
+/**
+ * PayMongo's webhook envelope — deeply nested, unlike Xendit's flat shape.
+ * The inner event's payload data can show up nested under `attributes.data`
+ * or directly as a sibling `data` depending on event type, hence both.
+ */
+interface PayMongoWebhookPayload {
+  data?: {
+    id?: string;
+    type?: string;
+    attributes?: {
+      type?: string;
+      data?: PayMongoEventData;
+    };
+    data?: PayMongoEventData;
+  };
+}
+
+/**
+ * Standalone so `MockProvider` can reuse it — its `/mock-webhook` route
+ * fabricates PayMongo-shaped payloads rather than a shape of its own.
+ */
+export function parsePayMongoShapedWebhookEvent(payload: unknown): WebhookEvent {
+  const p = payload as PayMongoWebhookPayload;
+  const event = p?.data;
+  const eventId = event?.id || `evt_${Date.now()}`;
+  const eventType = event?.attributes?.type || event?.type || 'unknown';
+
+  const eventData = event?.attributes?.data || event?.data;
+  const attributes = eventData?.attributes || {};
+  const orderId =
+    attributes.reference_number ||
+    attributes.remarks?.replace('Order ID: ', '') ||
+    attributes.metadata?.orderId ||
+    null;
+
+  const isSuccess =
+    eventType === 'checkout_session.payment.paid' ||
+    eventType === 'link.payment.paid' ||
+    eventType === 'payment.paid';
+  const isFailure =
+    eventType === 'payment.failed' || eventType === 'checkout_session.payment.failed';
+
+  return {
+    eventId,
+    eventType,
+    orderId,
+    isSuccess,
+    isFailure,
+    providerReference: eventData?.id || eventId,
+    failureReason: attributes.failure_reason || null,
+  };
+}
 
 /** Our `PaymentMethods.code` to PayMongo's `payment_method_types` values. */
 const PAYMONGO_METHOD_TYPES: Record<string, string> = {
@@ -130,6 +194,10 @@ export class PayMongoProvider implements PaymentProvider {
       .digest('hex');
 
     return expectedSignature === signatureToMatch;
+  }
+
+  parseWebhookEvent(payload: unknown): WebhookEvent {
+    return parsePayMongoShapedWebhookEvent(payload);
   }
 
   async refundPayment(

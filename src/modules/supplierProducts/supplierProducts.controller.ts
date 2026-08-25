@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import SupplierProductsService from './supplierProducts.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
+import { money } from '../../helpers/money.helper';
 
 export class SupplierProductsController {
   static async create(req: Request, res: Response, next: NextFunction) {
@@ -9,7 +10,7 @@ export class SupplierProductsController {
       sellerId: Joi.string().required(),
       productId: Joi.string().required(),
       supplierSku: Joi.string().optional(),
-      costPrice: Joi.number().min(0).optional(),
+      costPrice: money().optional(),
       minimumOrderQty: Joi.number().integer().min(1).default(1),
       supplyLeadDays: Joi.number().integer().min(0).default(1),
     });
@@ -49,7 +50,7 @@ export class SupplierProductsController {
     const { id } = req.params;
     const schema = Joi.object({
       supplierSku: Joi.string().optional(),
-      costPrice: Joi.number().min(0).optional(),
+      costPrice: money().optional(),
       minimumOrderQty: Joi.number().integer().min(1).optional(),
       supplyLeadDays: Joi.number().integer().min(0).optional(),
       isAvailable: Joi.boolean().optional(),

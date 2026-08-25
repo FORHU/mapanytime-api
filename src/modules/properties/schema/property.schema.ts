@@ -1,5 +1,6 @@
 import Joi from 'joi';
 import { HOUSE_ONLY_FIELDS } from '../constant/property.constant';
+import { money } from '../../../helpers/money.helper';
 
 export const propertySchema = Joi.object({
   sellerCapacity: Joi.string().valid('owner', 'broker', 'proxy').required(),
@@ -26,10 +27,10 @@ export const propertySchema = Joi.object({
   latestTaxReceiptFile: Joi.string().trim().optional(),
   lotPlanFile: Joi.string().trim().optional(),
   authorityToSellFile: Joi.string().trim().optional(),
-  sellingPrice: Joi.number().min(0).optional(),
+  sellingPrice: money().optional(),
   negotiability: Joi.string().valid('fixed', 'negotiable').optional(),
   taxResponsibilities: Joi.string().valid('seller', 'buyer', 'standard-sharing').optional(),
-  hoaDues: Joi.number().min(0).optional(),
+  hoaDues: money().optional(),
 }).custom((value, helpers) => {
   if (value.propertyType === 'raw-land') {
     const present = HOUSE_ONLY_FIELDS.filter((field) => value[field] !== undefined);
@@ -57,8 +58,8 @@ export const updateMetadataSchema = Joi.object({
   latestTaxReceiptFile: Joi.string().trim().optional(),
   lotPlanFile: Joi.string().trim().optional(),
   authorityToSellFile: Joi.string().trim().optional(),
-  sellingPrice: Joi.number().min(0).optional(),
+  sellingPrice: money().optional(),
   negotiability: Joi.string().valid('fixed', 'negotiable').optional(),
   taxResponsibilities: Joi.string().valid('seller', 'buyer', 'standard-sharing').optional(),
-  hoaDues: Joi.number().min(0).optional(),
+  hoaDues: money().optional(),
 }).min(1);

@@ -17,6 +17,7 @@
     "db:target": "ts-node scripts/check-db-target.ts",
     "db:setup": "ts-node scripts/check-db-target.ts --require-local && npx prisma generate && npx prisma migrate dev",
     "db:seed": "ts-node scripts/check-db-target.ts --require-local && ts-node prisma/seed.ts",
+    "tunnel": "ngrok http 4002",
     "test": "jest",
     "test:unit": "jest tests/unit --passWithNoTests",
     "test:integration": "jest tests/integration --passWithNoTests",

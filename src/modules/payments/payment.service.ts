@@ -4,6 +4,7 @@ import { emitNotificationToUser } from '../../infrastructure/socket';
 import { PaymentProvider } from './providers/payment-provider.interface';
 import { PayMongoProvider } from './providers/paymongo.provider';
 import { MockProvider } from './providers/mock.provider';
+import { XenditProvider } from './providers/xendit.provider';
 import PricingEngineService, { OrderPricingResult } from '../pricing/pricing-engine.service';
 
 /** Peso amount for buyer-facing copy: `1500` -> `₱1,500`. */
@@ -23,42 +24,6 @@ const LEGACY_METHOD_CODE_ALIASES: Record<string, string> = {
 
 /** Legacy values that name a PAYMENTMETHODTYPE rather than a single channel. */
 const LEGACY_METHOD_TYPES = ['E_WALLET', 'BANK', 'CARD', 'QR', 'OTHER'] as const;
-
-export interface WebhookEventPayload {
-  data?: {
-    id?: string;
-    type?: string;
-    attributes?: {
-      type?: string;
-      reference_number?: string;
-      remarks?: string;
-      failure_reason?: string;
-      metadata?: Record<string, string>;
-      data?: {
-        id?: string;
-        type?: string;
-        attributes?: {
-          status?: string;
-          reference_number?: string;
-          remarks?: string;
-          failure_reason?: string;
-          metadata?: Record<string, string>;
-        };
-      };
-    };
-    data?: {
-      id?: string;
-      attributes?: {
-        status?: string;
-        reference_number?: string;
-        remarks?: string;
-        failure_reason?: string;
-        metadata?: Record<string, string>;
-      };
-    };
-  };
-  [key: string]: unknown;
-}
 
 export default class PaymentService {
   /**
@@ -85,6 +50,15 @@ export default class PaymentService {
           return new MockProvider();
         }
         return new PayMongoProvider();
+      case 'XENDIT':
+        if (!process.env.XENDIT_SECRET_KEY) {
+          console.warn(
+            '[payments] XENDIT_SECRET_KEY is not set — falling back to MockProvider. ' +
+              'Real checkout sessions will not be created.',
+          );
+          return new MockProvider();
+        }
+        return new XenditProvider();
       case 'MOCK':
       default:
         return new MockProvider();
@@ -461,7 +435,7 @@ export default class PaymentService {
     providerCode: string,
     rawBody: string | Buffer,
     signatureHeader: string,
-    payload: WebhookEventPayload,
+    payload: unknown,
   ) {
     const providerRecord = await prisma.paymentProviders.findUnique({
       where: { code: providerCode.toUpperCase() },
@@ -489,10 +463,12 @@ export default class PaymentService {
       throw { status: 400, message: 'Invalid webhook signature.' };
     }
 
-    // 2. Extract event metadata
-    const event = payload?.data;
-    const eventId = event?.id || `evt_${Date.now()}`;
-    const eventType = event?.attributes?.type || event?.type || 'unknown';
+    // 2. Normalize the provider's own payload shape into the generic event
+    // shape — each gateway's webhook JSON is structurally different
+    // (PayMongo's nested envelope vs. Xendit's flat {event, data}), so
+    // that difference is contained in the adapter, not hardcoded here.
+    const { eventId, eventType, orderId, isSuccess, isFailure, providerReference, failureReason } =
+      adapter.parseWebhookEvent(payload);
 
     // 3. Webhook Idempotency: Check if already registered/processed
     const existingEvent = await prisma.paymentWebhookEvents.findUnique({
@@ -507,14 +483,6 @@ export default class PaymentService {
     if (existingEvent && existingEvent.processed) {
       return { status: 'already_processed', eventId };
     }
-
-    // 4. Resolve Order ID and attributes
-    const eventData = event?.attributes?.data || event?.data;
-    const attributes = eventData?.attributes || {};
-    const orderId =
-      attributes?.reference_number ||
-      attributes?.remarks?.replace('Order ID: ', '') ||
-      attributes?.metadata?.orderId;
 
     if (!orderId) {
       // Record unrecognized or irrelevant event
@@ -541,15 +509,7 @@ export default class PaymentService {
       return { status: 'ignored_no_order_id', eventId };
     }
 
-    // 5. Execute state transition transactionally
-    const isPaymentSuccess =
-      eventType === 'checkout_session.payment.paid' ||
-      eventType === 'link.payment.paid' ||
-      eventType === 'payment.paid';
-
-    const isPaymentFailed =
-      eventType === 'payment.failed' || eventType === 'checkout_session.payment.failed';
-
+    // 4. Execute state transition transactionally
     const { payment, justCompleted } = await prisma.$transaction(async (tx) => {
       // Upsert webhook event idempotency record
       await tx.paymentWebhookEvents.upsert({
@@ -591,12 +551,12 @@ export default class PaymentService {
         return { payment: existingPayment, justCompleted: false };
       }
 
-      if (isPaymentSuccess) {
+      if (isSuccess) {
         const updatedPayment = await tx.payments.update({
           where: { id: existingPayment.id },
           data: {
             status: PAYMENTSTATUS.COMPLETED,
-            providerReference: eventData?.id || eventId,
+            providerReference: providerReference || eventId,
             paidAt: new Date(),
             rawResponse: payload as Prisma.InputJsonValue,
           },
@@ -615,12 +575,12 @@ export default class PaymentService {
         });
 
         return { payment: updatedPayment, justCompleted: true };
-      } else if (isPaymentFailed) {
+      } else if (isFailure) {
         const updatedPayment = await tx.payments.update({
           where: { id: existingPayment.id },
           data: {
             status: PAYMENTSTATUS.FAILED,
-            failureReason: attributes?.failure_reason || 'Payment failed at gateway',
+            failureReason: failureReason || 'Payment failed at gateway',
             rawResponse: payload as Prisma.InputJsonValue,
           },
         });
@@ -655,7 +615,7 @@ export default class PaymentService {
       return { payment: existingPayment, justCompleted: false };
     });
 
-    // 6. Asynchronous Notification Delivery
+    // 5. Asynchronous Notification Delivery
     if (justCompleted) {
       try {
         const order = await prisma.orders.findUnique({

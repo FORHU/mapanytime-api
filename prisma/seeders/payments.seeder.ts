@@ -44,7 +44,52 @@ export async function seedPaymentProviders(prisma: PrismaClient) {
     });
   }
 
-  // 2. Mock Provider (for dev / test)
+  // 2. Xendit Provider — coexists with PayMongo (not a replacement); both
+  // active so GCash/Maya can be checked out via either gateway. Only the
+  // two channels confirmed against Xendit's Payment Sessions docs are
+  // seeded (Cards/QRPH/GrabPay channel codes weren't confirmed — see the
+  // Xendit provider plan). Names are suffixed "(Xendit)" so the checkout
+  // picker never shows two identically-named, unexplained "GCash" rows —
+  // the web picker already shows provider name as a subtitle, but the
+  // Flutter picker doesn't, so the name itself has to carry it.
+  const xendit = await prisma.paymentProviders.upsert({
+    where: { code: 'XENDIT' },
+    update: { isActive: true, priority: 2 },
+    create: {
+      code: 'XENDIT',
+      name: 'Xendit',
+      description: 'Southeast Asia Payment Gateway (GCash, Maya, and more)',
+      isActive: true,
+      priority: 2,
+    },
+  });
+
+  const xenditMethods = [
+    { code: 'GCASH', name: 'GCash (Xendit)', type: PAYMENTMETHODTYPE.E_WALLET, priority: 1 },
+    { code: 'MAYA', name: 'Maya (Xendit)', type: PAYMENTMETHODTYPE.E_WALLET, priority: 2 },
+  ];
+
+  for (const m of xenditMethods) {
+    await prisma.paymentMethods.upsert({
+      where: {
+        providerId_code: {
+          providerId: xendit.id,
+          code: m.code,
+        },
+      },
+      update: { name: m.name, type: m.type, isActive: true, priority: m.priority },
+      create: {
+        providerId: xendit.id,
+        code: m.code,
+        name: m.name,
+        type: m.type,
+        isActive: true,
+        priority: m.priority,
+      },
+    });
+  }
+
+  // 3. Mock Provider (for dev / test)
   //
   // Seeded INACTIVE in production. The mock provider accepts any webhook
   // signature and marks any order paid; the webhook is gated at the processor,
@@ -83,7 +128,7 @@ export async function seedPaymentProviders(prisma: PrismaClient) {
     },
   });
 
-  // 3. Cash on Pickup Provider — the platform is pickup-only, no delivery.
+  // 4. Cash on Pickup Provider — the platform is pickup-only, no delivery.
   const cashProvider = await prisma.paymentProviders.upsert({
     where: { code: 'CASH' },
     update: { isActive: true, priority: 10, description: 'Physical cash paid on pickup' },

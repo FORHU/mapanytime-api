@@ -1,7 +1,10 @@
+import { Prisma } from '@prisma/client';
 import ProductRepository from './product.repository';
+import InventoryRepository from '../inventory/inventory.repository';
 import CategoryService from '../categories/category.service';
 import { prisma } from '../../utils/prisma';
 import { buildPage } from '../../helpers/pagination.helper';
+import { AllowedProductTag } from '../../helpers/product-tags';
 
 export interface CategoryTreeNode {
   id: string;
@@ -24,14 +27,14 @@ export default class ProductService {
       brand?: string;
       description?: string;
       categoryId: string;
-      tags?: string[];
+      tags?: AllowedProductTag[];
       isActive?: boolean;
       initialStock?: number;
       imageIds?: string[];
     },
   ) {
     const seller = await ProductRepository.getSellerByUserId(userId);
-    if (!seller) {
+    if (!seller || seller.applicationStatus !== 'APPROVED') {
       throw { status: 403, message: 'Only approved sellers can create products.' };
     }
 
@@ -50,23 +53,22 @@ export default class ProductService {
 
     const { tags, initialStock = 0, imageIds, categoryId, ...productFields } = payload;
 
+    const tagsInput =
+      tags && tags.length > 0
+        ? {
+            // Only connect to existing tags — they must be seeded beforehand.
+            // The controller validates `tags` against ALLOWED_PRODUCT_TAGS.
+            create: tags.map((name) => ({
+              tag: { connect: { name } },
+            })),
+          }
+        : undefined;
+
     const newProduct = await ProductRepository.createProduct({
       ...productFields,
       store: { connect: { id: storeId } },
       category: { connect: { id: categoryId } },
-      tags:
-        tags && tags.length > 0
-          ? {
-              create: tags.map((name) => ({
-                tag: {
-                  connectOrCreate: {
-                    where: { name },
-                    create: { name },
-                  },
-                },
-              })),
-            }
-          : undefined,
+      tags: tagsInput,
     });
 
     await prisma.inventory.create({
@@ -238,37 +240,85 @@ export default class ProductService {
     payload: {
       name?: string;
       price?: number;
-      brand?: string;
-      description?: string;
+      brand?: string | null;
+      description?: string | null;
       categoryId?: string;
       isActive?: boolean;
+      tags?: AllowedProductTag[];
+      stock?: number;
     },
   ) {
+    const seller = await ProductRepository.getSellerByUserId(userId);
+    if (!seller || seller.applicationStatus !== 'APPROVED') {
+      throw { status: 403, message: 'User is not an approved seller profile.' };
+    }
+
     const product = await ProductRepository.getProductById(productId);
     if (!product) {
       throw { status: 404, message: 'Product not found.' };
     }
 
     const store = await ProductRepository.getStoreById(product.storeId);
-    const seller = await ProductRepository.getSellerByUserId(userId);
-
-    if (!seller || !store || store.sellerId !== seller.id) {
+    if (!store || store.sellerId !== seller.id) {
       throw { status: 403, message: 'Unauthorized to update this product.' };
     }
 
-    return ProductRepository.updateProduct(productId, payload);
+    const { tags, categoryId, brand, description, stock, ...fields } = payload;
+
+    // `brand` and `description` are nullable columns, so an empty string from a
+    // form means "cleared" and is stored as NULL rather than ''.
+    const blankToNull = (v: string | null | undefined) =>
+      v === null || v?.trim() === '' ? null : v;
+
+    const data: Prisma.ProductsUpdateInput = {
+      ...fields,
+      ...(brand !== undefined ? { brand: blankToNull(brand) } : {}),
+      ...(description !== undefined ? { description: blankToNull(description) } : {}),
+      // Relation form rather than the raw `categoryId` scalar: that scalar only
+      // exists on ProductsUncheckedUpdateInput, and mixing it with the nested
+      // `tags` write below makes Prisma resolve the whole payload as unchecked,
+      // where `tag: { connect }` is not a valid nested create.
+      ...(categoryId !== undefined ? { category: { connect: { id: categoryId } } } : {}),
+      // Replace-all semantics: a provided array swaps out every join row in the
+      // same update; omitting `tags` leaves existing tags untouched.
+      ...(tags !== undefined
+        ? {
+            tags: {
+              deleteMany: {},
+              create: tags.map((name) => ({
+                tag: { connect: { name } },
+              })),
+            },
+          }
+        : {}),
+    };
+
+    // Fields and stock are one user intent, so they commit together. Sending
+    // them as two sequential requests meant a failed stock adjustment left the
+    // field changes already saved, with no rollback and no way to tell.
+    return prisma.$transaction(async (tx) => {
+      if (stock !== undefined) {
+        await InventoryRepository.adjustWithin(tx, productId, stock, userId);
+      }
+
+      // Updated after the adjustment so the returned `inventory` is current.
+      return ProductRepository.updateProduct(productId, data, tx);
+    });
   }
 
   static async deleteProduct(userId: string, productId: string) {
+    const seller = await ProductRepository.getSellerByUserId(userId);
+    if (!seller || seller.applicationStatus !== 'APPROVED') {
+      throw { status: 403, message: 'User is not an approved seller profile.' };
+    }
+
     const product = await ProductRepository.getProductById(productId);
     if (!product) {
       throw { status: 404, message: 'Product not found.' };
     }
 
     const store = await ProductRepository.getStoreById(product.storeId);
-    const seller = await ProductRepository.getSellerByUserId(userId);
-
-    if (!seller || !store || store.sellerId !== seller.id) {
+    if (!store || store.sellerId !== seller.id) {
       throw { status: 403, message: 'Unauthorized to delete this product.' };
     }
 
