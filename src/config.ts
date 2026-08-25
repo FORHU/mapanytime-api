@@ -60,3 +60,79 @@ export const AWS_S3_BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME || process.env.
 export const S3_CDN_URL = process.env.S3_CDN_URL || '';
 
 export const isDev = NODE_ENV === 'development';
+
+/**
+ * Base URL of the buyer-facing web app. Both PayMongo and Xendit build their
+ * success/cancel redirect URLs from it — it is the address the buyer's browser
+ * is sent to after paying, not the API and not the mobile app.
+ *
+ * `FRONTEND_URL` is the older spelling, still accepted so an environment that
+ * sets either one works — the same both-spellings treatment `MAILER_*` /
+ * `SMTP_*` get above.
+ */
+export const MAPANYTIME_WEB_APP_URL =
+  process.env.MAPANYTIME_WEB_APP_URL || process.env.FRONTEND_URL || '';
+
+/**
+ * Bridge until the providers import the constant above. `PayMongoProvider` and
+ * `XenditProvider` both read `process.env.FRONTEND_URL` directly, so writing
+ * the resolved value back is what lets the new name reach them without editing
+ * two files that are mid-merge. Remove this once they take the value from
+ * config instead of the environment.
+ */
+if (MAPANYTIME_WEB_APP_URL) {
+  process.env.FRONTEND_URL = MAPANYTIME_WEB_APP_URL;
+}
+
+/**
+ * Xendit validates the return URL before it will create a payment session, and
+ * rejects far more than "not HTTPS" — verified against the live sandbox on
+ * 2026-08-25:
+ *
+ *   https://app.example.test      201    domain, no port
+ *   https://127.0.0.1             201    bare IPv4 is fine
+ *   https://localhost             400    the hostname itself is denied
+ *   https://app.example.test:443  400    ANY explicit port, even the default
+ *   http://app.example.test       400    scheme must be https
+ *
+ * Every rejection is the same opaque `400 INVALID_URL / "Please provide a
+ * valid HTTPS URL"`, which names only the scheme and so sends you looking in
+ * the wrong place when the real problem is a port.
+ *
+ * `.env.example` ships `FRONTEND_URL="http://localhost:3000"` — wrong on two
+ * of the three counts — so configuring from it produces a checkout that fails
+ * on every single Xendit order while looking perfectly sensible. This check
+ * moves that failure to startup, where it is one line in the log, instead of
+ * to the buyer pressing Pay.
+ */
+export function assertCheckoutReturnUrl(): void {
+  const problems: string[] = [];
+
+  if (!MAPANYTIME_WEB_APP_URL) {
+    problems.push('it is not set');
+  } else {
+    let parsed: URL | undefined;
+    try {
+      parsed = new URL(MAPANYTIME_WEB_APP_URL);
+    } catch {
+      problems.push(`"${MAPANYTIME_WEB_APP_URL}" is not a valid URL`);
+    }
+
+    if (parsed) {
+      if (parsed.protocol !== 'https:') problems.push('the scheme must be https');
+      if (parsed.port) problems.push(`it must not carry a port (found :${parsed.port})`);
+      if (parsed.hostname === 'localhost') problems.push('the hostname "localhost" is rejected');
+    }
+  }
+
+  if (problems.length === 0) return;
+
+  const message =
+    `[config] MAPANYTIME_WEB_APP_URL is unusable as a checkout return URL — ` +
+    `${problems.join('; ')}. Xendit will reject every payment session with 400 INVALID_URL. ` +
+    'Use an https origin with no port, e.g. https://<your-tailscale-ipv4> for local device ' +
+    'testing. (The legacy name FRONTEND_URL is still read if the new one is unset.)';
+
+  if (NODE_ENV === 'production') throw new Error(message);
+  console.warn(message);
+}
