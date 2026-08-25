@@ -487,6 +487,28 @@ seeded **active at priority 2 with both gateways live**, and the picker offers
 Half fixed: the fallback no longer happens silently. Closing it needs the real
 rate card seeded.
 
+**Accepted for now — decided 2026-08-25.** Xendit is sandbox-only, so no real
+money is moving and a wrong rate costs nothing today. The warning stays; the
+2.00% fallback stays.
+
+**The condition on that decision:** this must be closed _before_ Xendit goes
+live, not after. On the first real order the gap becomes silent margin loss on
+every transaction — and because PayMongo is not a configured account either
+(F83), Xendit is the only gateway that can take money, so it would be **100%**
+of real payments, not a subset.
+
+Two ways to close it, in preference order:
+
+1. **Seed the real rates.** Get the contracted GCash/Maya rate card from the
+   Xendit account and add the `PricingComponents` rows. This is the only
+   actual fix; the rates are commercial terms specific to the account, so
+   nobody can derive them from documentation.
+2. **Refuse to offer an unrated gateway** — the same shape as F83's fix. A
+   method with no `PAYMENT_PROCESSING_FEE` component gets hidden rather than
+   quietly billed at 2.00%. Safe by construction, but it hides Xendit entirely
+   until (1) is done, leaving only Pay on Pickup, which is why it is not the
+   default today.
+
 ### F66. `FLAGS.md` understates the unpriced methods
 
 Its text names `QRPH` and `GRAB_PAY` as the exceptions. With Xendit there are
