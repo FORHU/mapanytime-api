@@ -354,7 +354,8 @@ landed and orders price off real rates.
 ## Verified green (2026-08-20)
 
 API `tsc` · API ESLint (`src` + `prisma`) · `flutter analyze lib` (no issues) ·
-**234/234 tests across 31 suites** (~41s)
+**366/366 tests across 44 suites** (~34s, re-counted 2026-08-25 after merging
+`origin/main` — the Xendit adapter brought 8 of them)
 
 Re-verified after the VAT retirement. Web `tsc` / ESLint / `next build` and
 `prisma validate` were last confirmed 2026-08-19 and are untouched by that

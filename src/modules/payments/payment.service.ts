@@ -451,11 +451,18 @@ export default class PaymentService {
     // processor, and payments.seeder.ts activates the MOCK provider row
     // unconditionally. Enforced here so every route in is covered.
     // See FLAGS.md.
-    if (providerRecord.code === 'MOCK' && process.env.NODE_ENV === 'production') {
+    const adapter = this.getProviderAdapter(providerRecord.code);
+
+    // Test the adapter actually in use, not the row's code. `getProviderAdapter`
+    // falls back to MockProvider whenever a provider's secret key is missing, so
+    // an unset XENDIT_SECRET_KEY in production left `providerRecord.code` as
+    // 'XENDIT' — the old check passed — while the adapter verifying the webhook
+    // was the mock, which returns true for any signature. A missing environment
+    // variable was one step from an open "mark any order paid" endpoint on
+    // /webhook/xendit and /webhook/paymongo alike.
+    if (adapter instanceof MockProvider && process.env.NODE_ENV === 'production') {
       throw { status: 403, message: 'Mock payment webhooks are disabled in production.' };
     }
-
-    const adapter = this.getProviderAdapter(providerRecord.code);
 
     // 1. Signature validation
     const isValid = adapter.verifyWebhook(rawBody, signatureHeader);
