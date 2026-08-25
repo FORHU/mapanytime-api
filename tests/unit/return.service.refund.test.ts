@@ -1,4 +1,4 @@
-import ReturnService from '../../src/modules/returns/return.service';
+import ReturnService, { RETURN_WINDOW_DAYS } from '../../src/modules/returns/return.service';
 import ReturnRepository from '../../src/modules/returns/return.repository';
 import PaymentService from '../../src/modules/payments/payment.service';
 import SettlementService from '../../src/modules/settlements/settlement.service';
@@ -27,6 +27,7 @@ jest.mock('../../src/utils/prisma', () => ({
     payments: { findFirst: jest.fn(), update: jest.fn() },
     settlements: { updateMany: jest.fn() },
     returnRequests: { update: jest.fn() },
+    orderItems: { findMany: jest.fn() },
   },
 }));
 
@@ -34,6 +35,7 @@ const mockRepo = ReturnRepository as jest.Mocked<typeof ReturnRepository>;
 const mockPrisma = prisma as unknown as {
   $transaction: jest.Mock;
   users: { findUnique: jest.Mock };
+  buyers: { findUnique: jest.Mock };
   orders: { findUnique: jest.Mock };
   payments: { findFirst: jest.Mock; update: jest.Mock };
   settlements: { updateMany: jest.Mock };
@@ -50,6 +52,14 @@ const SELLER_ID = 'seller-1';
  */
 describe('ReturnService — refund execution', () => {
   let refundPayment: jest.Mock;
+  let tx: {
+    payments: { update: jest.Mock };
+    returnRequests: { update: jest.Mock };
+    orderItems: { findMany: jest.Mock };
+    inventory: { findFirst: jest.Mock; update: jest.Mock };
+    products: { findUnique: jest.Mock; update: jest.Mock };
+    inventoryMovements: { create: jest.Mock };
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -68,12 +78,15 @@ describe('ReturnService — refund execution', () => {
     });
     jest.spyOn(PaymentService, 'getProviderAdapter').mockReturnValue({ refundPayment } as never);
 
-    mockPrisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
-      fn({
-        payments: { update: jest.fn() },
-        returnRequests: { update: jest.fn().mockResolvedValue({ id: 'ret-1' }) },
-      }),
-    );
+    tx = {
+      payments: { update: jest.fn() },
+      returnRequests: { update: jest.fn().mockResolvedValue({ id: 'ret-1' }) },
+      orderItems: { findMany: jest.fn().mockResolvedValue([]) },
+      inventory: { findFirst: jest.fn(), update: jest.fn() },
+      products: { findUnique: jest.fn(), update: jest.fn() },
+      inventoryMovements: { create: jest.fn() },
+    };
+    mockPrisma.$transaction.mockImplementation(async (fn: (t: unknown) => unknown) => fn(tx));
     mockPrisma.orders.findUnique.mockResolvedValue(null);
   });
 
@@ -166,6 +179,81 @@ describe('ReturnService — refund execution', () => {
       ReturnService.updateReturnStatus('ret-1', 'REFUNDED', SELLER_USER),
     ).rejects.toMatchObject({ status: 400 });
   });
+
+  /**
+   * `completeOrder` decrements stock and increments `totalSold`; nothing reversed
+   * either when the sale came back, so returned goods stayed unsellable. The
+   * schema had carried `RETURN` in both inventory enums the whole time without a
+   * single writer. See OPEN-FLAGS F87.
+   */
+  describe('ReturnService — restocking a refunded return', () => {
+    function givenOrderItems(items: { productId: string; quantity: number }[]) {
+      tx.orderItems.findMany.mockResolvedValue(items);
+    }
+
+    it('puts the returned units back on the shelf and logs the movement', async () => {
+      givenReturn();
+      givenPayment({ paymentMethod: { type: 'CASH' } });
+      givenOrderItems([{ productId: 'prod-1', quantity: 3 }]);
+      tx.inventory.findFirst.mockResolvedValue({
+        id: 'inv-1',
+        storeId: 'store-1',
+        quantityOnHand: 10,
+      });
+      tx.products.findUnique.mockResolvedValue({ totalSold: 12 });
+
+      await ReturnService.updateReturnStatus('ret-1', 'REFUNDED', SELLER_USER);
+
+      expect(tx.inventory.update).toHaveBeenCalledWith({
+        where: { id: 'inv-1' },
+        data: { quantityOnHand: { increment: 3 } },
+      });
+      expect(tx.inventoryMovements.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          movementType: 'RETURN',
+          referenceType: 'RETURN',
+          quantityDelta: 3,
+          previousOnHand: 10,
+          newOnHand: 13,
+        }),
+      });
+    });
+
+    it('winds back totalSold without letting it go negative', async () => {
+      givenReturn();
+      givenPayment({ paymentMethod: { type: 'CASH' } });
+      givenOrderItems([{ productId: 'prod-1', quantity: 5 }]);
+      tx.inventory.findFirst.mockResolvedValue({
+        id: 'inv-1',
+        storeId: 'store-1',
+        quantityOnHand: 0,
+      });
+      tx.products.findUnique.mockResolvedValue({ totalSold: 2 });
+
+      await ReturnService.updateReturnStatus('ret-1', 'REFUNDED', SELLER_USER);
+
+      expect(tx.products.update).toHaveBeenCalledWith({
+        where: { id: 'prod-1' },
+        data: { totalSold: 0 },
+      });
+    });
+
+    // The money has already left the gateway by this point; a missing stock row
+    // must not turn a completed refund into a failed request.
+    it('still refunds when a product has no inventory row left', async () => {
+      givenReturn();
+      givenPayment({ paymentMethod: { type: 'CASH' } });
+      givenOrderItems([{ productId: 'prod-gone', quantity: 1 }]);
+      tx.inventory.findFirst.mockResolvedValue(null);
+
+      await expect(
+        ReturnService.updateReturnStatus('ret-1', 'REFUNDED', SELLER_USER),
+      ).resolves.toBeDefined();
+
+      expect(tx.inventory.update).not.toHaveBeenCalled();
+      expect(tx.returnRequests.update).toHaveBeenCalled();
+    });
+  });
 });
 
 describe('ReturnService — status transitions and authorization', () => {
@@ -240,6 +328,40 @@ describe('ReturnService — status transitions and authorization', () => {
     expect(SettlementService.holdForOrder).toHaveBeenCalledWith(expect.anything(), 'order-1');
   });
 
+  /**
+   * The transition check used to sit inside `if (current !== requested)`, so a
+   * second PATCH of REFUNDED skipped the terminal guard and re-entered
+   * `executeRefund`. See OPEN-FLAGS F88.
+   */
+  it('treats a repeat of the current status as a retry, not a second refund', async () => {
+    mockRepo.findById.mockResolvedValue({
+      id: 'ret-1',
+      orderId: 'order-1',
+      sellerId: SELLER_ID,
+      status: 'REFUNDED',
+    } as never);
+
+    await ReturnService.updateReturnStatus('ret-1', 'REFUNDED', SELLER_USER);
+
+    expect(mockPrisma.payments.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(SettlementService.markRefundedForOrder).not.toHaveBeenCalled();
+  });
+
+  it('does not re-run a transition side effect when the status is unchanged', async () => {
+    mockRepo.findById.mockResolvedValue({
+      id: 'ret-1',
+      orderId: 'order-1',
+      sellerId: SELLER_ID,
+      status: 'APPROVED',
+    } as never);
+
+    await ReturnService.updateReturnStatus('ret-1', 'APPROVED', SELLER_USER);
+
+    expect(SettlementService.holdForOrder).not.toHaveBeenCalled();
+    expect(mockRepo.updateStatus).not.toHaveBeenCalled();
+  });
+
   it('lets a held settlement mature again when the return is rejected', async () => {
     mockRepo.findById.mockResolvedValue({
       id: 'ret-1',
@@ -255,5 +377,74 @@ describe('ReturnService — status transitions and authorization', () => {
       where: { orderId: 'order-1', status: 'HELD' },
       data: { status: 'PENDING' },
     });
+  });
+});
+
+/**
+ * There was no window at all: any COMPLETED order was returnable forever, which
+ * made a refund landing after the settlement hold had elapsed and the payout had
+ * gone out the eventual default rather than an edge case (F84).
+ * See OPEN-FLAGS F85.
+ */
+describe('ReturnService — the return window', () => {
+  const BUYER_USER = 'user-buyer';
+  const BUYER_ID = 'buyer-1';
+
+  function givenCompletedOrder(completedAt: Date | null) {
+    mockPrisma.buyers.findUnique.mockResolvedValue({ id: BUYER_ID });
+    mockPrisma.orders.findUnique.mockResolvedValue({
+      id: 'order-1',
+      buyerId: BUYER_ID,
+      status: 'COMPLETED',
+      totalAmount: 1022.3,
+      completedAt,
+      store: { sellerId: SELLER_ID },
+      returnRequests: [],
+    });
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRepo.createReturnRequest.mockResolvedValue({ id: 'ret-1' } as never);
+  });
+
+  it('accepts a return opened inside the window', async () => {
+    givenCompletedOrder(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000));
+
+    await expect(
+      ReturnService.createReturnRequest({
+        orderId: 'order-1',
+        userId: BUYER_USER,
+        reason: 'Damaged',
+      }),
+    ).resolves.toMatchObject({ id: 'ret-1' });
+  });
+
+  it('refuses a return opened after the window has closed', async () => {
+    givenCompletedOrder(new Date(Date.now() - (RETURN_WINDOW_DAYS + 1) * 24 * 60 * 60 * 1000));
+
+    await expect(
+      ReturnService.createReturnRequest({
+        orderId: 'order-1',
+        userId: BUYER_USER,
+        reason: 'Changed my mind',
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(mockRepo.createReturnRequest).not.toHaveBeenCalled();
+  });
+
+  // Open-ended is the one answer that cannot be right, so an order with no
+  // completion date on record is refused rather than left returnable forever.
+  it('refuses an order with no completion date rather than defaulting to open', async () => {
+    givenCompletedOrder(null);
+
+    await expect(
+      ReturnService.createReturnRequest({
+        orderId: 'order-1',
+        userId: BUYER_USER,
+        reason: 'Damaged',
+      }),
+    ).rejects.toMatchObject({ status: 409 });
   });
 });

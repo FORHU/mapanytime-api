@@ -10,6 +10,9 @@ interface AppError {
   // Prisma known-request errors carry a `code` (e.g. "P2002") and `meta`.
   code?: string;
   meta?: Record<string, unknown>;
+  // Machine-readable discriminator and payload on errors our own services
+  // throw, so clients can branch on the cause rather than parse the message.
+  details?: unknown;
 }
 
 /**
@@ -47,6 +50,11 @@ export const errorHandler = (err: AppError, req: Request, res: Response, _next: 
   let status = err.status || err.statusCode;
   let message = err.message;
 
+  // Only errors we threw ourselves get their `code`/`details` forwarded. A
+  // Prisma error also carries `code`, but "P2002" is an internal detail and
+  // must not reach the client as if it were an API contract.
+  const isOwnError = Boolean(err.status || err.statusCode);
+
   // 2. Prisma known-request errors → proper HTTP code + a safe message.
   if (!status) {
     const prismaMapped = mapPrismaError(err);
@@ -75,6 +83,10 @@ export const errorHandler = (err: AppError, req: Request, res: Response, _next: 
     status: 'error',
     statusCode: status,
     message,
+    // Suppressed on 5xx along with the message, so a server fault never leaks
+    // internals through the side door.
+    ...(isOwnError && status < 500 && err.code ? { code: err.code } : {}),
+    ...(isOwnError && status < 500 && err.details !== undefined ? { details: err.details } : {}),
     ...(isDev && { stack: err.stack }),
   });
 };

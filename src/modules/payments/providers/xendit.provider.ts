@@ -6,6 +6,7 @@ import {
   PaymentProvider,
   WebhookEvent,
 } from './payment-provider.interface';
+import { strictCheckoutReturnUrlBase } from '../../../config';
 
 /**
  * Our `PaymentMethods.code` to Xendit's Payment Sessions `allowed_payment_channels`
@@ -62,15 +63,16 @@ export class XenditProvider implements PaymentProvider {
 
     const allowedChannels = resolveXenditChannels(input.paymentMethodCode);
 
-    // Xendit requires HTTPS for both redirect URLs. Local dev's FRONTEND_URL
-    // is plain HTTP (and there's no real page there anyway — the webhook,
-    // not this redirect, is what actually confirms payment; this is only
-    // where the browser lands after). RFC 2606 reserves example.com exactly
-    // for this kind of placeholder use.
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const httpsFrontendUrl = frontendUrl.startsWith('https://')
-      ? frontendUrl
-      : 'https://example.com';
+    // Xendit rejects a return URL on three counts, not one: the scheme must be
+    // https, it must carry no port at all (even :443), and the hostname must
+    // not be "localhost". A `startsWith('https://')` test catches only the
+    // first, so `https://localhost:3000` — the obvious thing to write after
+    // reading "Xendit requires HTTPS" — passed straight through to a 400 whose
+    // message blames the scheme. `strictCheckoutReturnUrlBase` applies the same
+    // predicate `assertCheckoutReturnUrl` uses at startup, so a misconfigured
+    // value has already been reported by then rather than silently swapped
+    // here. RFC 2606 reserves example.com for the fallback.
+    const httpsFrontendUrl = strictCheckoutReturnUrlBase();
 
     const payload = {
       session_type: 'PAY',

@@ -47,24 +47,69 @@ beforeEach(() => {
 
 describe('PaymentService — Dynamic Payment Architecture', () => {
   describe('getActivePaymentMethods', () => {
+    const paymongoRow = {
+      id: 'prov-1',
+      code: 'PAYMONGO',
+      name: 'PayMongo',
+      description: 'Gateway',
+      methods: [
+        { id: 'meth-1', code: 'GCASH', name: 'GCash', type: 'E_WALLET', description: null },
+      ],
+    };
+
+    const cashRow = {
+      id: 'prov-cash',
+      code: 'CASH',
+      name: 'Cash',
+      description: 'Physical cash paid on pickup',
+      methods: [
+        { id: 'meth-cod', code: 'COD', name: 'Pay on Pickup', type: 'CASH', description: null },
+      ],
+    };
+
+    const previousKey = process.env.PAYMONGO_SECRET_KEY;
+    afterEach(() => {
+      if (previousKey === undefined) delete process.env.PAYMONGO_SECRET_KEY;
+      else process.env.PAYMONGO_SECRET_KEY = previousKey;
+    });
+
     it('returns active providers and their active methods', async () => {
-      (prisma.paymentProviders.findMany as jest.Mock).mockResolvedValue([
-        {
-          id: 'prov-1',
-          code: 'PAYMONGO',
-          name: 'PayMongo',
-          description: 'Gateway',
-          methods: [
-            { id: 'meth-1', code: 'GCASH', name: 'GCash', type: 'E_WALLET', description: null },
-          ],
-        },
-      ]);
+      process.env.PAYMONGO_SECRET_KEY = 'sk_test_configured';
+      (prisma.paymentProviders.findMany as jest.Mock).mockResolvedValue([paymongoRow]);
 
       const result = await PaymentService.getActivePaymentMethods();
       expect(result).toHaveLength(1);
       expect(result[0].code).toBe('PAYMONGO');
       expect(result[0].methods).toHaveLength(1);
       expect(result[0].methods[0].code).toBe('GCASH');
+    });
+
+    /**
+     * Without a secret key `getProviderAdapter` hands back MockProvider, whose
+     * checkoutUrl is null. Offering the method anyway let a buyer pick GCash,
+     * create an order and a PENDING payment, and then have no way to pay it —
+     * worse than offering nothing, because they have already committed.
+     * See FLAGS.md F83.
+     */
+    it('hides a gateway whose secret key is not configured', async () => {
+      delete process.env.PAYMONGO_SECRET_KEY;
+      (prisma.paymentProviders.findMany as jest.Mock).mockResolvedValue([paymongoRow]);
+
+      await expect(PaymentService.getActivePaymentMethods()).resolves.toEqual([]);
+    });
+
+    /**
+     * Cash reaches no gateway, so it has no adapter to judge. `getProviderAdapter`
+     * has no CASH case and falls through to MockProvider — testing it the same
+     * way as a gateway would delete Pay on Pickup from the picker.
+     */
+    it('still offers cash on pickup, which needs no gateway at all', async () => {
+      delete process.env.PAYMONGO_SECRET_KEY;
+      (prisma.paymentProviders.findMany as jest.Mock).mockResolvedValue([paymongoRow, cashRow]);
+
+      const result = await PaymentService.getActivePaymentMethods();
+      expect(result.map((p) => p.code)).toEqual(['CASH']);
+      expect(result[0].methods[0].code).toBe('COD');
     });
   });
 

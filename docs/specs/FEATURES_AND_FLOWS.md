@@ -26,7 +26,7 @@ MapAnytime is a map-first local commerce and property marketplace for the Philip
 
 | Persona                | Role Key                | Primary Responsibilities & Capabilities                                                                                                                                                                            |
 | :--------------------- | :---------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Buyer**              | `BUYER` / `USER`        | Geolocation discovery, storefront browsing, cart management, checkout & digital payments, pickup pass redemption, order & shipment tracking.                                                                       |
+| **Buyer**              | `BUYER` / `USER`        | Geolocation discovery, storefront browsing, cart management, checkout & digital payments, pickup pass redemption, order tracking.                                                                                  |
 | **Seller / Merchant**  | `SELLER`                | Onboarding & verification, managing multiple stores/branches, product catalog & variant configuration, inventory management, merchant promotions & ads, order queue processing.                                    |
 | **Real Estate Seller** | `SELLER`                | Listing properties (house-and-lot, raw land) with legal title docs, pricing structures, terrain metadata, and viewing dedicated property dashboards.                                                               |
 | **Agent / Recruiter**  | `AGENT`                 | Onboarding and recruiting merchants/sellers, tracking onboarding progress and recruit pipelines.                                                                                                                   |
@@ -66,7 +66,7 @@ MapAnytime is a map-first local commerce and property marketplace for the Philip
 - **Options & Variants**: Matrix generation for product options (e.g., Size, Color) with distinct SKUs, prices, and variant-specific inventory.
 - **AI-Assisted Listing Ingestion**: Background image-to-listing parsing queue (`/seller/ai-upload`) to extract listing metadata automatically.
 - **Supplier Product Sourcing**: Linking supplier catalog items to merchant inventory for drop-shipping or distribution.
-- **Concurrency-Safe Inventory**: Optimistic locking (`version` column) for stock adjustments and restocks.
+- **Inventory concurrency**: ⚠️ **not currently safe.** `Inventory.version` exists in the schema as an optimistic-lock column but nothing in `src/` reads or writes it, and the stock check takes no row lock and does no conditional update — so two concurrent checkouts can both pass the check for the last unit. Tracked as F75; the column is the intended mechanism, not evidence of one.
 - **Time-Bound Reservations**: Automatic 15-minute stock hold upon order placement, with background scheduled sweep releasing expired holds.
 
 ### 2.5 Real Estate & Property Listings (PROP)
@@ -99,10 +99,9 @@ MapAnytime is a map-first local commerce and property marketplace for the Philip
 
 ### 2.8 Order Lifecycle & Fulfillment (ORD)
 
-- **Fulfillment Modes**: Dual support for **Store Pickup** (with scheduled pickup windows) and **Delivery** (with shipping address snapshotting).
-- **Order State Machine**: Strict status transitions (`PENDING_PAYMENT` → `PAID` → `CONFIRMED` → `PREPARING` → `READY_FOR_PICKUP` / `SHIPPED` → `COMPLETED` / `CANCELLED`).
+- **Fulfillment Mode**: **Store Pickup only**, with scheduled pickup windows. `FULLFILLMENTTYPE` has exactly one member, `PICKUP` — delivery was cut (F36) and the `Shipments` model, `shippingAmount`, `SHIPMENTSTATUS` and `src/modules/shipments/` were all removed with it.
+- **Order State Machine**: Strict status transitions (`PENDING_PAYMENT` → `PAID` → `CONFIRMED` → `PREPARING` → `READY_FOR_PICKUP` → `COMPLETED` / `CANCELLED`).
 - **Digital Pickup Pass**: Mobile/web QR and code-based verification pass shown by the buyer at the physical store counter.
-- **Shipment Tracking**: Multi-stage shipment tracking with carrier names, tracking numbers, and delivery confirmation.
 
 ### 2.9 Real-Time Communications & Async Workers (NTF & PLT)
 
@@ -319,7 +318,13 @@ sequenceDiagram
 
 ---
 
-### Flow 7: Order Fulfillment — Pickup Pass vs. Delivery Shipping
+### Flow 7: Order Fulfillment — Pickup Pass
+
+Pickup is the only fulfilment mode. The delivery branch that used to sit
+alongside this one described `POST /v1/shipments`, a `Shipments` record and a
+`SHIPPED` transition, none of which exist — delivery was cut (F36) and its
+model, enum and module were deleted. Removed here rather than left as an
+`alt` branch a reader would take for a feature awaiting wiring.
 
 ```mermaid
 sequenceDiagram
@@ -331,25 +336,20 @@ sequenceDiagram
     participant API as MapAnytime API
     participant DB as PostgreSQL DB
 
-    alt Store Pickup Flow
-        Seller->>Portal: Mark order as READY_FOR_PICKUP
-        API-->>App: Send "Order ready for pickup" notification
-        Buyer->>App: Open "Digital Pickup Pass" (Displays QR code & Pass code)
-        Buyer->>Seller: Shows Pickup Pass at store counter
-        Seller->>Portal: Enter/Scan Buyer Pickup Code
-        Portal->>API: POST /v1/orders/:id/verify-pickup
-        API->>DB: Update Order status to COMPLETED, record pickup timestamp
-        API-->>Buyer: Order Completed confirmation
-    else Delivery Flow
-        Seller->>Portal: Mark order as PREPARING -> Create Shipment
-        Portal->>API: POST /v1/shipments (Carrier, TrackingNumber, EstimatedArrival)
-        API->>DB: Create Shipment record, transition Order to SHIPPED
-        API-->>App: Notify Buyer with Live Tracking details
-        Seller->>Portal: Mark Shipment as DELIVERED upon carrier drop-off
-        Portal->>API: PATCH /v1/shipments/:id (status: DELIVERED)
-        API->>DB: Update Order status to COMPLETED
-    end
+    Seller->>Portal: Mark order as READY_FOR_PICKUP
+    API-->>App: Send "Order ready for pickup" notification
+    Buyer->>App: Open "Digital Pickup Pass" (Displays QR code & Pass code)
+    Buyer->>Seller: Shows Pickup Pass at store counter
+    Seller->>Portal: Enter/Scan Buyer Pickup Code
+    Portal->>API: POST /v1/orders/:id/verify-pickup
+    API->>DB: Update Order status to COMPLETED, record pickup timestamp
+    API-->>Buyer: Order Completed confirmation
 ```
+
+Cash on Pickup inverts the last two steps: the seller generates a short-lived
+code (`POST /v1/orders/cash-pickup/generate-code`) and the buyer confirms it
+(`POST /v1/orders/cash-pickup/confirm`), so the party handing over money is not
+the party marking the order complete.
 
 ---
 
@@ -423,7 +423,7 @@ sequenceDiagram
     actor Merchant as Merchant
 
     Order->>Ledger: Split Order Total into Immutable Charge Rows
-    Note over Ledger: 1. PRODUCT (Buyer -> Merchant)<br/>2. BUYER_TRANSACTION_FEE (Buyer -> Platform, 2.23%)<br/>3. SELLER_MARKETPLACE_FEE (Merchant -> Platform, 2.00%)<br/>4. PAYMENT_PROCESSING_FEE (Platform -> Gateway)<br/>No TAX row — the platform collects no VAT
+    Note over Ledger: 1. PRODUCT (Buyer -> Merchant)<br/>2. BUYER_TRANSACTION_FEE (Buyer -> Platform, rate varies by payment method)<br/>3. SELLER_MARKETPLACE_FEE (Merchant -> Platform, 2.00% — the platform's only revenue)<br/>4. PAYMENT_PROCESSING_FEE (Platform -> Gateway, cancels row 2)<br/>No TAX row — the platform collects no VAT
 
     Settlement->>Ledger: Aggregate Net Merchant Earnings (Goods - Commission - Fees)
     Settlement->>Settlement: Generate Settlement record (Eligible for release after holding period)
@@ -513,7 +513,6 @@ erDiagram
     Orders ||--|{ OrderItems : contains
     Orders ||--o{ OrderCharges : ledgers
     Orders ||--o{ InventoryReservations : locks
-    Orders ||--o{ Shipments : fulfills
     Orders ||--o{ Payments : pays
     Orders ||--o{ RewardTransactions : references
     Orders ||--o{ AgentCommissionTransactions : references
@@ -540,7 +539,6 @@ erDiagram
     Orders ||--|{ OrderItems : contains
     Orders ||--o{ OrderCharges : ledgers
     Orders ||--o{ InventoryReservations : locks
-    Orders ||--o{ Shipments : fulfills
     Orders ||--o{ Payments : pays
     Orders ||--o{ RewardTransactions : references
 

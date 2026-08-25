@@ -3,10 +3,21 @@
 Single consolidated register for the pricing/fee/ledger rework. Supersedes the
 scattered per-project findings docs.
 
-> **Findings live here; sequencing and decisions live in `FIX-PLAN.md`**, which
-> collapses these flags into 13 work items. Update both when an item closes.
+> **Findings live here.** Sequencing used to live in `FIX-PLAN.md`, which was
+> lost in the 2026-08-24 docs consolidation and is unrecoverable — it survives in
+> no git history, no editor local history and no recycle bin. Until a replacement
+> exists, sequencing lives in [`NEXT-SESSION.md`](NEXT-SESSION.md). Note that
+> The second register — `mapanytime-market-app/docs/PICKUP-NEXT.md`, S-numbered
+> — was deleted by `2e366bd`. Its still-open findings were swept and carried
+> into [`OPEN-FLAGS.md`](OPEN-FLAGS.md) as F43, F44 and F74–F81, so there is one
+> register again. See F56 there for the full S-to-F mapping.
 
-**Last verified:** 2026-08-20 · **Branches:** `mapanytime-api@main`, `mapanytime-market-web@main`
+**Last verified:** 2026-08-20. Confirmed business rules and both worked examples
+re-verified against `src/modules/pricing/pricing-engine.service.ts` on 2026-08-25.
+
+**Branches:** `mapanytime-api@feat/wishlist-refund-and-role-cleanup`,
+`mapanytime-market-web@feat/seller-finance-and-catalog-cleanup`,
+`mapanytime-market-app@feat/wishlist-and-notifications`
 
 ---
 
@@ -15,14 +26,56 @@ scattered per-project findings docs.
 These are settled. Regression tests in `tests/unit/pricing.engine.financial-rules.test.ts`
 enforce them — treat a failure there as a business-rule breach, not a broken test.
 
-| Rule                        | Value                                                                                                                           |
-| :-------------------------- | :------------------------------------------------------------------------------------------------------------------------------ |
-| **Tax**                     | **None. The platform is a marketplace intermediary and collects no VAT** — decided 2026-08-20, superseding the earlier 12% rule |
-| Marketplace commission      | 2.00% of subtotal, charged to the seller                                                                                        |
-| Marketplace commission base | **Subtotal only** — never shipping or payment fees                                                                              |
-| Buyer transaction fee       | 2.23% of order amount = 2.00% gateway pass-through + 0.23% platform handling                                                    |
-| Payment fees                | Must come from configured provider rates, not a universal fallback                                                              |
-| Payer policy                | `BUYER` / `SELLER` / `PLATFORM`, resolved server-side; checkout must never override it                                          |
+| Rule                        | Value                                                                                                                                                                                                                                                                                                                                   |
+| :-------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Tax**                     | **None. The platform is a marketplace intermediary and collects no VAT** — decided 2026-08-20, superseding the earlier 12% rule                                                                                                                                                                                                         |
+| Marketplace commission      | 2.00% of subtotal, charged to the seller                                                                                                                                                                                                                                                                                                |
+| Marketplace commission base | **Subtotal only** — never shipping or payment fees                                                                                                                                                                                                                                                                                      |
+| Buyer transaction fee       | **Varies by payment method** — the contracted rate for the method the buyer chose, passed through to the gateway in full. GCash 2.23%, Maya 1.79%, domestic card 3.125% + ₱13.39, cash 0%. The 0.23% "platform handling" slice was retired 2026-08-20 (F32), so the platform keeps none of it: this fee is cost recovery, never revenue |
+| Payment fees                | Must come from configured provider rates, not a universal fallback                                                                                                                                                                                                                                                                      |
+| Payer policy                | `BUYER` / `SELLER` / `PLATFORM`, resolved server-side; checkout must never override it                                                                                                                                                                                                                                                  |
+| Discounts vs vouchers       | **Sellers fund discounts; MapAnytime funds vouchers.** A seller promotion is a `DISCOUNT` row (payer `SELLER`) and reduces the commission base. A MapPoints redemption is a `PLATFORM_SUBSIDY` row (payer `PLATFORM`) and does **not** — decided 2026-08-25                                                                             |
+| MapPoints earn rate         | **₱100 spent = 1 point, a point is worth ₱0.10** — 0.1%, costing 5% of commission. Admin-editable at runtime; raising it is a config change (F63)                                                                                                                                                                                       |
+
+### Who funds a discount, and what commission follows
+
+Two things reduce what a buyer pays, and they are not the same event.
+
+A **seller discount** is the seller's own promotion. F4 settled that commission
+follows the discounted subtotal, and gave the reason: _"a seller funding a
+promotion no longer pays commission on money nobody handed them."_
+
+A **MapPoints voucher** is funded by the platform. The seller is handed the full
+amount — MapAnytime makes up the difference — so that same reason points the
+other way: **commission stays on the pre-voucher subtotal.** This is not an
+exception to F4, it is F4's principle applied. The rule underneath both is
+_commission on what the seller actually received._
+
+Worked example — ₱1,000 order, buyer redeems a ₱50 voucher, GCash:
+
+```
+Goods                      ₱1,000.00
+MapAnytime voucher           -₱50.00   PLATFORM_SUBSIDY, payer PLATFORM
+Buyer transaction fee         ₱21.19   2.23% of ₱950
+BUYER PAYS                   ₱971.19
+
+Marketplace commission        ₱20.00   2.00% of ₱1,000, unreduced
+SELLER RECEIVES              ₱980.00   full, as if no voucher existed
+
+Platform: +₱20.00 commission −₱50.00 voucher
+PLATFORM NET                 -₱30.00
+```
+
+Per order that looks alarming; it is the wrong frame. The buyer had to earn the
+₱50 first, which at 0.1% took ₱50,000 of spend and generated ₱1,000 of
+commission. **Lifetime cost = earn rate ÷ commission rate**, so 5% of margin at
+0.1% and 50% at 1%. That ratio, not the single-order view, is what makes the
+rate the decision that matters.
+
+`ORDERCHARGETYPE` already carries `PLATFORM_SUBSIDY`, `SELLER_SUBSIDY`,
+`PROMOTION` and `CAMPAIGN`, and `PROMOTION_FUNDING { SELLER, PLATFORM, SHARED }`
+exists. None are read by `src/` yet — the vocabulary is there, the wiring is
+not, so no migration is needed to book a redemption correctly.
 
 ### Why no tax
 
@@ -36,21 +89,35 @@ This reverses F11, which recorded VAT dropping to 0 as a _defect_. It was a
 defect then — the code had lost a rule nobody had retired. It is the rule now.
 A `TAX` charge row appearing on an order is a regression.
 
-### Worked example — ₱1,000 order
+### Worked example — ₱1,000 order, paid by GCash
 
 ```
 Goods                     ₱1,000.00
-Buyer transaction fee        ₱22.30   2.23% (₱20.00 gateway + ₱2.30 platform)
+Buyer transaction fee        ₱22.30   GCash 2.23% — the gateway's own rate
                           ─────────
 BUYER PAYS                ₱1,022.30
 
-Marketplace commission       ₱20.00   2.00% of subtotal
+Marketplace commission       ₱20.00   2.00% of subtotal, charged to the seller
 SELLER RECEIVES             ₱980.00
 
 Platform gross               ₱42.30   commission + buyer fee
-Gateway pass-through        -₱20.00
-PLATFORM NET                 ₱22.30
+Gateway pass-through        -₱22.30   all of it, to whichever provider ran it
+PLATFORM NET                 ₱20.00   the commission alone
 ```
+
+**The buyer fee depends on the payment method; the platform's margin does not.**
+Swap the method and only the buyer's line moves — Maya 1.79% → ₱17.90, domestic
+card 3.125% + ₱13.39 → ₱44.64, cash 0% → ₱0.00 — and every peso of it is
+remitted to the provider that processed it. MapAnytime's ₱20.00 comes from the
+**seller's** commission, which is the same on every method, every provider and
+every basket size.
+
+The platform is **not tied to one payment provider.** `PaymentProviders` is a
+table, not a constant: `PAYMONGO`, `MOCK` and `CASH` are seeded today, each with
+its own `PaymentMethods` and its own rates in `PricingComponents`. A cash order
+never touches PayMongo at all. Rates are seeded per method, not guessed (F2) —
+`QRPH` and `GRAB_PAY` are the exception and still price off a 2.00% fallback,
+which is the one place a new provider can silently undercharge.
 
 ---
 
@@ -331,7 +398,8 @@ landed and orders price off real rates.
 ## Verified green (2026-08-20)
 
 API `tsc` · API ESLint (`src` + `prisma`) · `flutter analyze lib` (no issues) ·
-**234/234 tests across 31 suites** (~41s)
+**392/392 tests across 45 suites** (~27s, re-counted 2026-08-25 after the
+returns sweep — F84/F85/F87/F88 brought 26 of them)
 
 Re-verified after the VAT retirement. Web `tsc` / ESLint / `next build` and
 `prisma validate` were last confirmed 2026-08-19 and are untouched by that
@@ -341,25 +409,28 @@ change.
 
 ## Worked example — ₱1,000 order, GCash, BUYER policy
 
-Engine defaults, since no configuration is stored (F2). Verified against
-`PricingEngineService.calculateOrderPricing` on 2026-08-20.
+GCash's contracted rate, read from the seeded `PricingConfigurations` row (F2).
+Verified against `PricingEngineService.calculateOrderPricing` on 2026-08-20.
 
 ```text
 Subtotal                        ₱1,000.00
 Order amount                    ₱1,000.00   <- no tax term
-  Gateway cost      2.00%          ₱20.00   -> PayMongo
-  Platform margin   0.23%           ₱2.30   -> MapAnytime
+  Gateway cost      2.23%          ₱22.30   -> the provider (here PayMongo)
+  Platform margin   0.00%           ₱0.00   -> retired by F32
 Buyer transaction fee   2.23%       ₱22.30
 BUYER PAYS                      ₱1,022.30
 
 Commission 2.00% of subtotal       ₱20.00
 SELLER NET                        ₱980.00
-PLATFORM NET                       ₱22.30   <- 20.00 + 22.30 - 20.00
+PLATFORM NET                       ₱20.00   <- from the seller, not the buyer
 ```
 
-Note the fee is a _rate on the order amount_, so retiring VAT shrank it too:
-the buyer fee fell from ₱24.98 to ₱22.30 because its base fell from ₱1,120 to
-₱1,000.
+The buyer's fee is the gateway's cost passed straight through, so it tracks the
+payment method and nets the platform nothing. Two consequences worth holding on
+to: the fee is a _rate on the order amount_, so retiring VAT shrank it — it fell
+from ₱24.98 to ₱22.30 when the base fell from ₱1,120 to ₱1,000 — and changing
+payment provider changes what the buyer pays without touching what MapAnytime
+earns.
 
 ---
 
@@ -436,19 +507,24 @@ model OrderCharges {
 }
 ```
 
-### Typical Ledger Entry for ₱1,000 Order
+### Typical Ledger Entry for ₱1,000 Order, paid by GCash
 
 | Charge Type              | Amount             | Payer      | Beneficiary        | Source                            |
 | :----------------------- | :----------------- | :--------- | :----------------- | :-------------------------------- |
 | `PRODUCT`                | $\text{₱}1,000.00$ | `BUYER`    | `SELLER`           | Cart Items Subtotal               |
-| `BUYER_TRANSACTION_FEE`  | $\text{₱}22.30$    | `BUYER`    | `PLATFORM`         | Buyer Handling Fee ($2.23\%$)     |
+| `BUYER_TRANSACTION_FEE`  | $\text{₱}22.30$    | `BUYER`    | `PLATFORM`         | GCash rate ($2.23\%$), per method |
 | `SELLER_MARKETPLACE_FEE` | $\text{₱}20.00$    | `SELLER`   | `PLATFORM`         | Marketplace Commission ($2.00\%$) |
-| `PAYMENT_PROCESSING_FEE` | $\text{₱}20.00$    | `PLATFORM` | `PAYMENT_PROVIDER` | PayMongo Gateway Cost             |
+| `PAYMENT_PROCESSING_FEE` | $\text{₱}22.30$    | `PLATFORM` | `PAYMENT_PROVIDER` | Gateway cost, per provider        |
 
-A `DISCOUNT` row (`payer: SELLER`, `beneficiary: BUYER`) is written whenever the
-order carries one, and a `SHIPPING` row when non-zero. No `TAX` row is ever
-written — the `TAX` member and the `GOVERNMENT` beneficiary remain in the enums
-only so historical orders stay readable.
+The first and last rows move with the payment method the buyer picked — and so
+with the provider behind it — but the two always cancel, because the buyer fee
+exists only to recover the gateway cost.
+`SELLER_MARKETPLACE_FEE` is the platform's whole revenue on the order and is
+identical on every method. A `DISCOUNT` row (`payer: SELLER`,
+`beneficiary: BUYER`) is written whenever the order carries one, and a
+`SHIPPING` row when non-zero. No `TAX` row is ever written — the `TAX` member
+and the `GOVERNMENT` beneficiary remain in the enums only so historical orders
+stay readable.
 
 ### A4. Schema reference
 

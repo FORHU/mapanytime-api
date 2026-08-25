@@ -40,10 +40,14 @@ MapAnytime separates marketplace economics into three distinct, dedicated system
 ### A. Core Economics
 
 - **User-Facing Name:** Reward Points (e.g. "1,250 Reward Points $\approx$ ₱125 in discount value").
-- **Default Earning Rate:** **₱100 eligible purchase = 1 Reward Point** (~1% reward rate).
-- **Calculation Base:** Calculated strictly on eligible net goods subtotal (`subtotal - merchant discounts`), excluding buyer fees (2.23%), payment gateway fees, platform commissions, shipping, and taxes.
+- **Default Earning Rate:** **₱100 eligible purchase = 1 Reward Point** — a **0.1%** reward rate, since a point is worth ₱0.10 (see Redemption Value below). ₱1,000 spent earns 10 points, worth ₱1.00.
+  - _This line previously read "~1% reward rate", which contradicted every other number in this document by a factor of ten. The schema defaults (`earnRatePhpPerPoint 100.00`, `pointValueInPhp 0.10`), the redemption value, and the "1,250 points ≈ ₱125" example all describe 0.1%; only that annotation said 1%. Corrected to match them (F63)._
+  - **Cost to the platform:** MapAnytime funds redemptions (F39), and its whole margin is the 2.00% commission — so the programme costs `reward rate ÷ 2.00%` of revenue. At 0.1% that is **5% of margin**. Had 1% been intended it would be 50%.
+  - **Raising it is a config change, not a migration.** §12 makes the rates admin-editable in PostgreSQL at runtime, so shipping at 0.1% and raising it once redemption behaviour is observable costs nothing but a decision.
+- **Calculation Base:** Calculated strictly on eligible net goods subtotal (`subtotal - merchant discounts`), excluding the buyer transaction fee (which varies by payment method), payment gateway fees, platform commissions, shipping, and taxes. Excluding the buyer fee is what keeps the earn amount identical whether the buyer pays by GCash, Maya or card.
 - **Default Redemption Value:** **100 Reward Points = ₱10 discount** (₱0.10 per point).
 - **Maximum Redemption Cap:** Reward points can cover a maximum of **20% of the eligible order subtotal** (enforced server-side).
+  - Worth knowing: at a 0.1% earn rate this cap is effectively unreachable. Covering ₱200 of a ₱1,000 order needs 2,000 points, which is ₱200,000 of prior spend. Keep it as a safety rail — it is the thing that stops a future rate rise from being catastrophic — but do not expect it to bind in practice.
 - **Expiration Policy:** **12-month rolling expiration** (`expiresAt` timestamp per earning lot).
 
 ### B. Buyer Database Schema (`prisma/schema.prisma`)

@@ -147,14 +147,47 @@ export default class SettlementService {
 
   /**
    * Mark a settlement refunded once the money has gone back to the buyer.
-   * Only meaningful while it has not been paid out — after that the platform is
-   * out of pocket and recovery is a manual matter.
+   *
+   * A settlement already swept into a payout is a different situation, and the
+   * old unfiltered `updateMany` erased the difference: it flipped a paid row to
+   * REFUNDED, which is the only record that the seller was ever paid. Nothing
+   * downstream then knows the platform is out of pocket. See OPEN-FLAGS F84.
+   *
+   * The clawback cannot be booked here the way a cash commission debit is —
+   * `Settlements.orderId` is unique, so there is no room for a second, negative
+   * row against the same order. That wants a schema change. Until then this at
+   * least refuses to lose the fact quietly: it logs at error level and hands
+   * the amount back to the caller.
    */
   static async markRefundedForOrder(client: DbClient, orderId: string) {
-    return client.settlements.updateMany({
+    const settlement = await client.settlements.findUnique({
+      where: { orderId },
+      include: { payoutItem: { include: { payout: true } } },
+    });
+
+    if (!settlement) {
+      return { count: 0, clawbackOwed: 0, payoutNumber: null };
+    }
+
+    const paidOut = settlement.payoutItem;
+    const clawbackOwed = paidOut ? Number(paidOut.amount) : 0;
+
+    if (paidOut) {
+      logger.error(
+        `[Settlement] Order ${orderId} refunded after its settlement was already paid out. ` +
+          `Seller ${settlement.sellerId} received ₱${clawbackOwed.toFixed(2)} on payout ` +
+          `${paidOut.payout.payoutNumber} (${paidOut.payout.status}). The platform is out of ` +
+          'pocket by that amount; there is no clawback ledger, so recover it manually or net ' +
+          'it off the next payout by hand.',
+      );
+    }
+
+    await client.settlements.update({
       where: { orderId },
       data: { status: 'REFUNDED', settledAt: new Date() },
     });
+
+    return { count: 1, clawbackOwed, payoutNumber: paidOut?.payout.payoutNumber ?? null };
   }
 
   static async getSettlementsBySeller(sellerId: string) {

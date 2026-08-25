@@ -356,6 +356,35 @@ export class PricingEngineService {
   }
 
   /**
+   * The per-method twin of the warning above, and the gap it left. An ACTIVE
+   * configuration can match the order while an individual method still has no
+   * `PAYMENT_PROCESSING_FEE` component of its own — so `warnNoConfiguration`
+   * stays quiet and the method prices off the fallback in total silence.
+   *
+   * Four methods are in that state today: PayMongo's `QRPH` and `GRAB_PAY`,
+   * and both of Xendit's (`GCASH`, `MAYA`), which have no rate card on file.
+   * Every order paid through one of them is billed the fallback rate rather
+   * than the provider's real one, and where the real rate is higher the
+   * platform absorbs the difference out of its commission.
+   *
+   * Keyed per provider+method, so a newly added gateway cannot hide behind a
+   * warning some other method already tripped.
+   */
+  private static warnedMissingRate = new Set<string>();
+  private static warnMissingMethodRate(providerId?: string, paymentMethodId?: string) {
+    const key = `${providerId ?? 'unknown'}:${paymentMethodId ?? 'unknown'}`;
+    if (this.warnedMissingRate.has(key)) return;
+    this.warnedMissingRate.add(key);
+    logger.warn(
+      `[Pricing] No PAYMENT_PROCESSING_FEE component for provider=${providerId ?? 'unknown'} ` +
+        `method=${paymentMethodId ?? 'unknown'} — pricing off the ` +
+        `${(DEFAULT_PAYMENT_GATEWAY_RATE * 100).toFixed(2)}% fallback. If this ` +
+        'provider bills more than that, the platform absorbs the difference on ' +
+        'every order paid this way. See FLAGS.md F2.',
+    );
+  }
+
+  /**
    * Gross up a gateway fee so it survives being charged on the captured total.
    *
    * PayMongo bills its rate against the amount actually captured. Under `BUYER`
@@ -457,7 +486,10 @@ export class PricingEngineService {
 
     // No configured component matched. This is the state an environment is in
     // until a PricingConfigurations row exists, and it understates every real
-    // rate — see FLAGS.md F2.
+    // rate — see FLAGS.md F2. It is also the state a single method sits in when
+    // the configuration exists but that method has no rate on file, which is
+    // why the warning below is keyed per method rather than per process.
+    this.warnMissingMethodRate(context?.providerId, context?.paymentMethodId);
     const rate = DEFAULT_PAYMENT_GATEWAY_RATE;
     const cost = this.grossUp(amount, rate, 0, buyerShare);
 
