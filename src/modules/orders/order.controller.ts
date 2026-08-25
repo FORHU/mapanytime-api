@@ -82,6 +82,7 @@ export default class OrderController {
         storeId: cart.storeId,
         type: value.type,
         paymentMethod: value.paymentMethod,
+        paymentMethodId: value.paymentMethodId,
         pickupAt: value.pickupAt as Date | undefined,
         items: itemsToOrder,
       };
