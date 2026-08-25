@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { liveWindowFilter } from '../merchantAds/adWindow';
 
 type DbClient = Prisma.TransactionClient | PrismaClient;
 
@@ -60,14 +61,15 @@ export async function computeItemDiscount(
   client: DbClient,
   params: { productId: string; quantity: number; storeId: string; unitPrice: number },
 ): Promise<{ itemDiscount: number; appliedAdId: string | null; freeUnits: number }> {
+  const now = new Date();
+
   const discountLinks = await client.merchantAdProducts.findMany({
     where: {
       productId: params.productId,
       ad: {
         storeId: params.storeId,
-        isActive: true,
         discountType: { not: null },
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        ...liveWindowFilter(now),
       },
     },
     include: { ad: true },
@@ -109,9 +111,10 @@ export async function applyBogoBonus(
       productId: params.productId,
       ad: {
         storeId: params.storeId,
-        isActive: true,
         discountType: 'BOGO',
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        // Same window test as computeItemDiscount — a BOGO that has not
+        // started yet must not hand out bonus units at add-to-cart time.
+        ...liveWindowFilter(),
       },
     },
     include: { ad: true },

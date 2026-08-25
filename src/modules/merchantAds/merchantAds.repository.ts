@@ -1,5 +1,6 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, ADWINDOWSTATE } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
+import { liveWindowFilter, overlappingWindowFilter } from './adWindow';
 
 export default class MerchantAdsRepository {
   static async getSellerByUserId(userId: string) {
@@ -8,6 +9,62 @@ export default class MerchantAdsRepository {
 
   static async getStoreById(storeId: string) {
     return prisma.stores.findUnique({ where: { id: storeId } });
+  }
+
+  /**
+   * The zone every wall-clock time for this store's ads is interpreted in.
+   * Falls back to the column default rather than the server's zone — a server
+   * relocated to another region must not silently reinterpret stored schedules.
+   */
+  static async getStoreTimezone(storeId: string): Promise<string> {
+    const location = await prisma.storeLocations.findUnique({
+      where: { storeId },
+      select: { timezone: true },
+    });
+    return location?.timezone ?? 'Asia/Manila';
+  }
+
+  static async getStoreTimezones(storeIds: string[]): Promise<Map<string, string>> {
+    const locations = await prisma.storeLocations.findMany({
+      where: { storeId: { in: storeIds } },
+      select: { storeId: true, timezone: true },
+    });
+    return new Map(locations.map((l) => [l.storeId, l.timezone]));
+  }
+
+  /**
+   * Discount ads in the same store whose window overlaps `window` and which
+   * touch at least one of `productIds`.
+   *
+   * Deliberately narrow. Overlap is only harmful when two promotions would
+   * apply competing prices to the same product at the same instant — a store
+   * legitimately runs a store-visits ad, a job post and an event at once.
+   * Variant-level precision is settled by the caller, which has both sides'
+   * product links.
+   */
+  static async findWindowConflicts(
+    storeId: string,
+    window: { startAt: Date | null; expiresAt: Date | null },
+    productIds: string[],
+    excludeAdId?: string,
+  ) {
+    return prisma.merchantAds.findMany({
+      where: {
+        storeId,
+        kind: 'PROMO',
+        discountType: { not: null },
+        ...(excludeAdId ? { id: { not: excludeAdId } } : {}),
+        products: { some: { productId: { in: productIds } } },
+        ...overlappingWindowFilter(window),
+      },
+      select: {
+        id: true,
+        title: true,
+        startAt: true,
+        expiresAt: true,
+        products: { select: { productId: true, variantId: true } },
+      },
+    });
   }
 
   static async getAdById(adId: string) {
@@ -72,6 +129,38 @@ export default class MerchantAdsRepository {
           ]
         : []),
     ]);
+  }
+
+  /**
+   * Candidates for the transition sweep.
+   *
+   * Deliberately NOT "what changed in the last minute" — an edge-triggered
+   * query loses every transition that happened while the worker was restarting.
+   * This returns everything not yet in its terminal state and lets the caller
+   * compare derived-vs-recorded, so a worker down for an hour catches up on its
+   * next tick instead of silently dropping an hour of transitions.
+   */
+  static async findAdsNeedingTransition(take = 500) {
+    return prisma.merchantAds.findMany({
+      where: { NOT: { lastNotifiedState: 'ENDED' } },
+      select: {
+        id: true,
+        storeId: true,
+        title: true,
+        startAt: true,
+        expiresAt: true,
+        isActive: true,
+        lastNotifiedState: true,
+      },
+      take,
+    });
+  }
+
+  static async markNotifiedState(adId: string, state: ADWINDOWSTATE) {
+    return prisma.merchantAds.update({
+      where: { id: adId },
+      data: { lastNotifiedState: state },
+    });
   }
 
   static async countOrderItemsByAdId(adId: string) {
@@ -151,14 +240,16 @@ export default class MerchantAdsRepository {
     };
   }
 
-  static async findManyForStores(storeIds: string[], take: number) {
+  static async findManyForStores(storeIds: string[], take: number, now: Date = new Date()) {
     return prisma.merchantAds.findMany({
       where: {
         storeId: { in: storeIds },
-        isActive: true,
         discountType: { not: null },
         products: { some: {} },
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        // Liveness is evaluated inside the query, so a promotion appears at its
+        // exact start instant with no job involved. liveWindowFilter is the SQL
+        // twin of deriveAdState()'s LIVE branch — the two are tested together.
+        ...liveWindowFilter(now),
       },
       include: {
         // The nearby-store projection carries no slug, so it is read here.
