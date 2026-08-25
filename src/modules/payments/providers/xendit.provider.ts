@@ -102,15 +102,10 @@ export class XenditProvider implements PaymentProvider {
       // body (e.g. { error_code, message }). Unwrap it so both the buyer-
       // facing error and the server log say what Xendit actually objected to.
       if (axios.isAxiosError(err)) {
-        const data = err.response?.data as
-          | { message?: string; error_code?: string }
-          | undefined;
+        const data = err.response?.data as { message?: string; error_code?: string } | undefined;
         throw {
           status: err.response?.status || 502,
-          message:
-            data?.message ||
-            data?.error_code ||
-            'Xendit checkout session request failed.',
+          message: data?.message || data?.error_code || 'Xendit checkout session request failed.',
         };
       }
       throw err;
