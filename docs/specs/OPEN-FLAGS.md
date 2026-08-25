@@ -1,7 +1,10 @@
 # MapAnytime — Open Flags, F39 onward
 
 Triage batch raised **2026-08-24**, worked **2026-08-25**. Continues the
-numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently F39–F83.
+numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently F39–F88.
+
+F84–F88 come from a sweep of the returns and refund path — the current branch's
+own module, and ground neither register had covered.
 
 The range is deliberately not in the filename any more. It was
 `OPEN-FLAGS-F39-F62.md`, then `-F72`, and every new finding meant renaming the
@@ -24,19 +27,24 @@ down do not survive it.
 
 ## ✅ Closed 2026-08-25
 
-| Flag    | Outcome                                                                                                                     |
-| :------ | :-------------------------------------------------------------------------------------------------------------------------- |
-| **F45** | Cart clear 404 — app now calls `/cart/clear`; the silent swallow that hid it logs                                           |
-| **F46** | Mock payment button dev-gated, and the fake `x-mock-secret` server guard removed                                            |
-| **F55** | Recovery closed. `FIX-PLAN.md` is unrecoverable — absent from git, editor local history (239 entries) and the recycle bin   |
-| **F57** | `FLAGS.md` header — dangling `FIX-PLAN.md` pointer replaced, all three branch names corrected                               |
-| **F64** | The phantom ₱2.30 (raised and fixed same day, see below)                                                                    |
-| **F65** | _Half closed._ The silent per-method rate fallback now warns. The underpricing itself is open — it needs Xendit's rate card |
-| **F68** | `FLAGS.md` test count corrected — 234/31 was stale, it is 379/45                                                            |
-| **F70** | The production mock guard tests the adapter in use, not the database record                                                 |
-| **F71** | `.env.example` documents `MAPANYTIME_WEB_APP_URL` and the full three-part rule                                              |
-| **F72** | The `process.env.FRONTEND_URL` bridge is gone — both providers read config directly                                         |
-| **F73** | Startup and request-time share one return-URL predicate, pinned by tests                                                    |
+| Flag    | Outcome                                                                                                                        |
+| :------ | :----------------------------------------------------------------------------------------------------------------------------- |
+| **F45** | Cart clear 404 — app now calls `/cart/clear`; the silent swallow that hid it logs                                              |
+| **F46** | Mock payment button dev-gated, and the fake `x-mock-secret` server guard removed                                               |
+| **F55** | Recovery closed. `FIX-PLAN.md` is unrecoverable — absent from git, editor local history (239 entries) and the recycle bin      |
+| **F57** | `FLAGS.md` header — dangling `FIX-PLAN.md` pointer replaced, all three branch names corrected                                  |
+| **F64** | The phantom ₱2.30 (raised and fixed same day, see below)                                                                       |
+| **F65** | _Half closed._ The silent per-method rate fallback now warns. The underpricing itself is open — it needs Xendit's rate card    |
+| **F68** | `FLAGS.md` test count corrected — 234/31 was stale, it is 379/45                                                               |
+| **F70** | The production mock guard tests the adapter in use, not the database record                                                    |
+| **F71** | `.env.example` documents `MAPANYTIME_WEB_APP_URL` and the full three-part rule                                                 |
+| **F72** | The `process.env.FRONTEND_URL` bridge is gone — both providers read config directly                                            |
+| **F73** | Startup and request-time share one return-URL predicate, pinned by tests                                                       |
+| **F83** | Checkout no longer offers a gateway backed by the mock adapter                                                                 |
+| **F84** | _Half closed._ A refund on an already-paid-out settlement is now loud instead of silent. The clawback ledger needs a migration |
+| **F85** | Returns have a window: `RETURN_WINDOW_DAYS`, defaulting to 7 to match the settlement hold                                      |
+| **F87** | A refund restocks the goods and winds back `totalSold`, writing the `RETURN` movement the schema always had room for           |
+| **F88** | A repeat PATCH of the current status is a retry, not a second refund                                                           |
 
 **F55's fallback is still open:** reconstructing the lost decision log from
 `FLAGS.md` and `NEXT-SESSION.md`.
@@ -405,7 +413,7 @@ boxes are ever worth re-reading, which they are not.
 **The reference outlived the file:** `REQUIREMENTS.md` MAP-2 still cited it as
 "still open work" after it was gone. Corrected 2026-08-25 — see F82.
 
-### F83. Checkout offers providers that cannot take money
+### ~~F83. Checkout offers providers that cannot take money~~ — FIXED 2026-08-25
 
 `getActivePaymentMethods` filters on exactly one condition:
 
@@ -426,10 +434,15 @@ Live today: `PAYMONGO_SECRET_KEY` is unset, so all five PayMongo methods
 (GCash, Maya, QR Ph, Card, GrabPay) are dead ends. The only real gateway is
 Xendit sandbox.
 
-**Fix:** resolve the adapter inside `getActivePaymentMethods` and drop any
-provider that comes back as `MockProvider`, the same way the `MOCK` row itself
-is dropped. Product-visible — methods vanish from the picker — so it wants a
-deliberate yes rather than being slipped in.
+**Fixed** in `0348787`: `getActivePaymentMethods` now resolves the adapter and
+drops any provider that comes back as `MockProvider`, the same way the `MOCK`
+row itself is dropped. The warning is emitted once per provider per process
+rather than per checkout page load — that endpoint is public and
+unauthenticated, so a line per unconfigured provider per load buried the log.
+
+It is product-visible: with `PAYMONGO_SECRET_KEY` unset, all five PayMongo
+methods disappear from the picker and only Xendit and Pay on Pickup remain.
+That is the honest state of the system, not a regression.
 
 **This also sharpens F65.** With PayMongo not a real account, it is not that
 _some_ transactions price off the fallback: the seeded rate card is
@@ -590,6 +603,191 @@ both providers take the value from config instead.
 
 ---
 
+## Raised 2026-08-25 — returns and refunds
+
+A sweep of `src/modules/returns/`, the module the current branch is named
+after. Neither register had touched it. Every payments flag so far has been
+about money coming _in_; these are the same questions on the way back out, and
+the answers were mostly missing rather than wrong.
+
+The pattern across all five: **the refund path moves money and nothing else.**
+Stock, the seller ledger and the retry semantics were all left where the sale
+had put them.
+
+### ~~F84. A refund after payout erases the fact that the seller was paid~~ — HALF FIXED 2026-08-25
+
+`markRefundedForOrder` was an unfiltered `updateMany`:
+
+```js
+return client.settlements.updateMany({
+  where: { orderId },
+  data: { status: 'REFUNDED', settledAt: new Date() },
+});
+```
+
+A settlement already swept into a `COMPLETED` payout has the seller's money in
+the seller's account. Flipping that row to `REFUNDED` destroys the only record
+that it was ever paid — `payoutItem` still points at the payout, but the status
+now reads as though the money never left. Nothing downstream notices, nothing is
+logged, and no debt is booked.
+
+The codebase already has the right shape for this debt: a cash sale books a
+**negative settlement** for the commission the seller owes, which nets off their
+next payout. A clawback is the same idea. It cannot be written that way here,
+because `Settlements.orderId` is `@unique` — there is no room for a second,
+negative row against the same order. **That is a schema change**, and the
+migration is not something to slip in alongside a service fix.
+
+**What was done:** the update is now a targeted `findUnique` + `update` that
+first checks for a `payoutItem`, logs at **error** level with the payout number,
+status and amount when it finds one, and returns `{ clawbackOwed, payoutNumber }`
+so `executeRefund` can repeat it on the refund's own log line. Both sides of the
+loss now appear together.
+
+**What is still open:** the clawback itself. A negative settlement, or a seller
+debt ledger, needs `Settlements.orderId` relaxed or a separate model. Until then
+recovery is manual — but at least it is _visible_, which it was not.
+
+Pinned by three tests in `settlement.service.test.ts`.
+
+### ~~F85. There was no return window~~ — FIXED 2026-08-25
+
+`createReturnRequest` accepted any order in `COMPLETED`, with no reference to how
+long ago it completed. A buyer could open a return on a six-month-old order.
+
+This is what made F84 the eventual default rather than an edge case.
+`SETTLEMENT_HOLD_DAYS` is 7, and its own doc comment says the hold exists "to
+cover the return window" — but there was no window for it to cover, so every
+return filed after day 7 hit a settlement that had already been released and
+very likely paid.
+
+It was also a documented requirement that had never been built:
+`MASTER_IMPLEMENTATION_PLAN.md:489` lists "return window is respected" and :492
+adds "the exact return window must be configurable". `NEXT-SESSION.md:35` calls
+the hold the thing that "protects platform during return window". Same family as
+F59/F60/F67 — the docs describing a feature the tree does not have.
+
+**Fixed:** `RETURN_WINDOW_DAYS` (default 7, env-configurable) is enforced in
+`createReturnRequest` against `order.completedAt`. Both halves are now documented
+together in `.env.example`, with the rule that
+`RETURN_WINDOW_DAYS <= SETTLEMENT_HOLD_DAYS` — they are one setting in two parts,
+and drifting them apart re-opens F84 by configuration.
+
+An order that reached `COMPLETED` without a `completedAt` is **refused** (409),
+not treated as open. Open-ended is the one answer that cannot be right.
+
+### F86. A refund hands back the gateway fee the gateway keeps
+
+**Not fixed — this is a decision, not a defect.** It needs a call the same way
+F39–F42 did.
+
+`refundAmount` is `Number(order.totalAmount)`, and `totalAmount` is
+`pricingResult.buyerTotalAmount` — which, under the `BUYER` fee policy that is
+every order today, **includes the payment processing fee**. So a full refund
+returns the buyer their ₱1,000 plus the ~₱22.30 they paid GCash to move it.
+
+The gateway does not return its fee on a refund. PayMongo and Xendit both keep
+it. So:
+
+- the buyer is made whole, including the fee;
+- the seller's settlement is marked `REFUNDED`, so they get nothing;
+- `paymentFeeAmount` on that settlement is **0**, because under `BUYER` the
+  seller never carried the gateway cost;
+- which leaves the platform paying the fee, out of a commission it also just
+  gave back.
+
+Nothing records this. It is not in the pricing engine, not in the settlement row,
+and not in any ledger — the money simply is not there at the end.
+
+Worth putting beside F63's arithmetic: the platform's whole margin is the 2.00%
+commission, and the fee it silently absorbs on a refund is ~2.23%. **One refund
+costs slightly more than the commission on the same order earned.** A 1% return
+rate is roughly a 2% dent in platform revenue.
+
+Three ways to close it, and picking one is the decision:
+
+1. **Refund the goods, keep the fee.** Refund `subtotal - discount` rather than
+   `buyerTotalAmount`. Standard practice, and the buyer bears the cost of their
+   own return. Product-visible, and it needs to be in the returns policy text
+   before it ships.
+2. **Absorb it deliberately**, and price it in — treat it as a cost of the
+   returns promise and account for it, rather than discovering it in a
+   reconciliation. Wants a `PLATFORM`-payer charge row so it is at least visible.
+3. **Move the fee to the seller on a return** — a `SELLER`-payer row on refund.
+   Defensible where the return is the seller's fault; indefensible where it is
+   not, and the system does not record fault.
+
+There is no safe default here, which is why it is not fixed. Note that (1) and
+(3) both change what a buyer gets back, so neither is a quiet change.
+
+### ~~F87. A refund never put the goods back on the shelf~~ — FIXED 2026-08-25
+
+`completeOrder` decrements `quantityOnHand`, decrements `quantityReserved` and
+increments `products.totalSold` when the seller hands the order over.
+`executeRefund` reversed **none** of it. The goods are physically back with the
+seller and the system still counts them as sold and gone.
+
+The only way to correct it was the manual admin restock endpoint, which means it
+only happened when somebody noticed.
+
+The tell that this was an omission rather than a decision: the schema has carried
+`RETURN` in **both** `INVENTORYMOVEMENTTYPE` and `INVENTORYREFERENCETYPE` since
+it was written, and no code has ever written one. Same shape as F81 — dead schema
+implying a flow that was never built.
+
+**Fixed:** `restockReturnedItems` runs inside the refund transaction and, per
+order line, increments `quantityOnHand`, winds `totalSold` back (clamped at zero
+— a negative would sort a returned product below one nobody has ever bought) and
+writes the `RETURN` movement row.
+
+`quantityReserved` is deliberately **not** touched: the reservation was consumed
+at fulfilment, so there is nothing left to release. Incrementing it here would
+make the stock permanently unavailable, which is this exact bug in reverse.
+
+A product whose inventory row has since been deleted is skipped with a warning
+rather than failing the refund. The money has already left the gateway by that
+point; a stock count is the lesser loss.
+
+### ~~F88. The terminal-state guard was bypassed by a same-status call~~ — FIXED 2026-08-25
+
+`updateReturnStatus` put the transition check inside a not-equal guard:
+
+```js
+if (returnRequest.status !== status) {
+  const allowed = ALLOWED_RETURN_TRANSITIONS[returnRequest.status] ?? [];
+  if (!allowed.includes(status)) throw { ... };
+}
+
+if (status === RETURNSTATUS.REFUNDED) {
+  return this.executeRefund(id);
+}
+```
+
+So `PATCH {status: 'REFUNDED'}` on a return **already** in `REFUNDED` skipped the
+terminal guard entirely — the table says `REFUNDED: []`, but that branch never
+ran — and fell straight into `executeRefund` a second time.
+
+**It was not exploitable today**, and that is the interesting part. The only
+thing standing between that and a second payout to the buyer was a check two
+layers away in `executeRefund`, which rejects a payment already in `REFUNDED`.
+That check holds only while refunds are for the full amount: as soon as anything
+makes `totalRefunded < payment.amount` the payment lands in `PARTIALLY_REFUNDED`,
+which `executeRefund` explicitly accepts, and the second call goes through for
+the remaining balance.
+
+Partial refunds are not built yet. F86's option (1) builds them.
+
+The existing test covered `REFUNDED → APPROVED`, which takes the guarded path.
+The same-status case had no test.
+
+**Fixed:** a request for the status the return is already in returns the current
+record and stops, before any side effect. That is the correct idempotent answer
+for a retried PATCH, and it removes the bypass. Two tests pin it — one for the
+refund path, one confirming `APPROVED → APPROVED` no longer re-runs
+`holdForOrder`.
+
+---
+
 ## Suggested order for tomorrow
 
 1. **F63** — the reward rate. One number, and F39–F42 plus F47–F54 all wait on
@@ -599,12 +797,21 @@ both providers take the value from config instead.
 3. **F66** — correct `FLAGS.md` once those rates land.
 4. **F43** — inventory can go negative. Held on 2026-08-25 because one of its
    three sites is in `payment.service.ts`, which the merge touched; that merge
-   is done, so it is unblocked.
-5. **F44 + F52** — one scheduler, two problems. Build the job once.
-6. **F41, F42** — scope calls: agents in or out, and per-store-order semantics.
-7. **F47–F51, F53, F54** — spec edits, once F63 and F39–F42 are settled.
-8. **F55 fallback, F56, F59, F60, F61, F62, F67, F69, F72** — register and doc
-   reconciliation.
+   is done, so it is unblocked. Note F87 now adds a fourth write site: a refund
+   increments `quantityOnHand`, so whatever locking F43 lands on has to cover
+   the restock too.
+5. **F86** — who pays the gateway fee on a refund. A decision, not a fix, and
+   it is the last thing in the money path that is silently unaccounted. Cheap
+   to decide, and F86 option (1) is also what would build partial refunds,
+   which F88's note depends on.
+6. **F84's clawback** — the negative-settlement ledger. Needs
+   `Settlements.orderId` relaxed, so it goes with the other pending
+   migrations rather than on its own.
+7. **F44 + F52** — one scheduler, two problems. Build the job once.
+8. **F41, F42** — scope calls: agents in or out, and per-store-order semantics.
+9. **F47–F51, F53, F54** — spec edits, once F63 and F39–F42 are settled.
+10. **F55 fallback, F56, F59, F60, F61, F62, F67, F69** — register and doc
+    reconciliation.
 
 `F58` is not a task; it is a standing rule for every item above that edits a
 markdown file in this repo.
