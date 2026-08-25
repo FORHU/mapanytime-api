@@ -82,6 +82,12 @@ export default class OrderController {
         storeId: cart.storeId,
         type: value.type,
         paymentMethod: value.paymentMethod,
+        // Was validated by the schema above and then dropped here, so a client
+        // sending only `paymentMethodId` — the id the /payments/methods
+        // response hands out — got "A paymentMethodId or paymentMethod is
+        // required" from PaymentService for a field it had actually supplied.
+        // Only the `paymentMethod` code path ever worked.
+        paymentMethodId: value.paymentMethodId,
         pickupAt: value.pickupAt as Date | undefined,
         items: itemsToOrder,
       };
