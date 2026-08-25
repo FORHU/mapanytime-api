@@ -4,7 +4,6 @@ import {
   CreateCheckoutInput,
   CheckoutResult,
   PaymentProvider,
-  RefundResult,
   WebhookEvent,
 } from './payment-provider.interface';
 

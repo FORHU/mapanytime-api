@@ -129,7 +129,9 @@ export async function seedMarkerShowcase(prisma: PrismaClient) {
     });
 
     if (!user) {
-      console.log(`⚠️ User not found for email: ${spec.ownerEmail}. Skipping store: ${spec.storeName}`);
+      console.log(
+        `⚠️ User not found for email: ${spec.ownerEmail}. Skipping store: ${spec.storeName}`,
+      );
       continue;
     }
 

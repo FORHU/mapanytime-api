@@ -109,11 +109,15 @@ export async function seedPricingConfiguration(prisma: PrismaClient) {
   }
 
   for (const code of RATES_UNKNOWN) {
-    console.warn(`  PayMongo ${code}: no contracted rate on file — will price off the 2.00% fallback.`);
+    console.warn(
+      `  PayMongo ${code}: no contracted rate on file — will price off the 2.00% fallback.`,
+    );
   }
 
   for (const code of XENDIT_RATES_UNKNOWN) {
-    console.warn(`  Xendit ${code}: no contracted rate on file — will price off the 2.00% fallback.`);
+    console.warn(
+      `  Xendit ${code}: no contracted rate on file — will price off the 2.00% fallback.`,
+    );
   }
 
   console.log('Pricing Configuration seeded successfully.');
