@@ -1,7 +1,12 @@
-# MapAnytime — Open Flags F39–F69
+# MapAnytime — Open Flags, F39 onward
 
 Triage batch raised **2026-08-24**, worked **2026-08-25**. Continues the
-numbering in [`FLAGS.md`](FLAGS.md), which ends at F38.
+numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently F39–F73.
+
+The range is deliberately not in the filename any more. It was
+`OPEN-FLAGS-F39-F62.md`, then `-F72`, and every new finding meant renaming the
+file or letting the name contradict the contents — the same drift F57 and F59
+record elsewhere. The name is stable now; the header carries the range.
 
 Every finding below was verified against the working tree, not inferred from
 naming. Where a flag restates something already written down elsewhere, the
@@ -27,6 +32,11 @@ down do not survive it.
 | **F57** | `FLAGS.md` header — dangling `FIX-PLAN.md` pointer replaced, all three branch names corrected                               |
 | **F64** | The phantom ₱2.30 (raised and fixed same day, see below)                                                                    |
 | **F65** | _Half closed._ The silent per-method rate fallback now warns. The underpricing itself is open — it needs Xendit's rate card |
+| **F68** | `FLAGS.md` test count corrected — 234/31 was stale, it is 379/45                                                            |
+| **F70** | The production mock guard tests the adapter in use, not the database record                                                 |
+| **F71** | `.env.example` documents `MAPANYTIME_WEB_APP_URL` and the full three-part rule                                              |
+| **F72** | The `process.env.FRONTEND_URL` bridge is gone — both providers read config directly                                         |
+| **F73** | Startup and request-time share one return-URL predicate, pinned by tests                                                    |
 
 **F55's fallback is still open:** reconstructing the lost decision log from
 `FLAGS.md` and `NEXT-SESSION.md`.
@@ -349,7 +359,43 @@ The variable is now `MAPANYTIME_WEB_APP_URL`, validated at startup by
 `assertCheckoutReturnUrl()`. `.env.example` still needs updating — it was
 modified on main, so it was left for after the merge.
 
-### F72. The `FRONTEND_URL` bridge in `config.ts` is a shim
+### ~~F73. Startup and the provider disagreed on a valid return URL~~ — FIXED 2026-08-25
+
+Main's `b8a7852` fixed the same HTTPS problem independently, by forcing the
+scheme in `xendit.provider.ts`:
+
+```js
+frontendUrl.startsWith('https://') ? frontendUrl : 'https://example.com';
+```
+
+That catches `http://` and nothing else. Measured against the sandbox, all of
+these begin with `https://`, pass the check untouched, and are still rejected:
+`https://localhost`, `https://localhost:3000`, `https://100.124.116.30:4002`,
+`https://app.example.test:443`. So the obvious response to the comment above
+it — "Xendit requires HTTPS, I'll write `https://localhost:3000`" — sails
+through to a 400 that blames the scheme.
+
+Both sides now share one predicate, `checkoutReturnUrlProblems` in
+`config.ts`, so the startup check and the request-time fallback cannot drift
+apart. Pinned by `tests/unit/checkout-return-url.test.ts`.
+
+**A trap inside the trap:** `new URL('https://host:443').port` is the empty
+string, because the URL API normalises a scheme's default port away. Xendit
+rejects that URL anyway — it objects to a port being written at all, not to
+its value. Reading `URL.port` alone therefore misses precisely the case a
+reader is most likely to try. The predicate reads the port as written.
+
+### ~~F72. The `FRONTEND_URL` bridge in `config.ts` is a shim~~ — FIXED 2026-08-25
+
+Closed by the same change: `XenditProvider` now calls
+`strictCheckoutReturnUrlBase()` and `PayMongoProvider` reads
+`MAPANYTIME_WEB_APP_URL`, both imported from config. Neither touches
+`process.env.FRONTEND_URL`, so the write-back shim is gone and the name in
+`.env` is the name that reaches the provider regardless of import order.
+
+The original entry, for the record:
+
+### F72 (original). The `FRONTEND_URL` bridge in `config.ts` is a shim
 
 `PayMongoProvider` and `XenditProvider` read `process.env.FRONTEND_URL`
 directly, so `config.ts` writes the resolved value back into the environment
@@ -361,19 +407,18 @@ both providers take the value from config instead.
 
 ## Suggested order for tomorrow
 
-1. **Merge `origin/main`**, then **F70** — the production webhook guard. It is
-   the only item here with a security consequence, and it is one line.
-2. **F63** — the reward rate. One number, and F39–F42 plus F47–F54 all wait on
+1. **F63** — the reward rate. One number, and F39–F42 plus F47–F54 all wait on
    it.
-3. **F65** — get Xendit's contracted GCash/Maya rates and seed them. Costs
+2. **F65** — get Xendit's contracted GCash/Maya rates and seed them. Costs
    money every day it is open.
-4. **F71, F66, F68** — small doc corrections, all after the merge.
-5. **F43** — inventory can go negative. Held today because one of its three
-   sites is in `payment.service.ts`, which the merge touches.
-6. **F44 + F52** — one scheduler, two problems. Build the job once.
-7. **F41, F42** — scope calls: agents in or out, and per-store-order semantics.
-8. **F47–F51, F53, F54** — spec edits, once F63 and F39–F42 are settled.
-9. **F55 fallback, F56, F59, F60, F61, F62, F67, F69, F72** — register and doc
+3. **F66** — correct `FLAGS.md` once those rates land.
+4. **F43** — inventory can go negative. Held on 2026-08-25 because one of its
+   three sites is in `payment.service.ts`, which the merge touched; that merge
+   is done, so it is unblocked.
+5. **F44 + F52** — one scheduler, two problems. Build the job once.
+6. **F41, F42** — scope calls: agents in or out, and per-store-order semantics.
+7. **F47–F51, F53, F54** — spec edits, once F63 and F39–F42 are settled.
+8. **F55 fallback, F56, F59, F60, F61, F62, F67, F69, F72** — register and doc
    reconciliation.
 
 `F58` is not a task; it is a standing rule for every item above that edits a

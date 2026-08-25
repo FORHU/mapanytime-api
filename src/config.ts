@@ -74,14 +74,75 @@ export const MAPANYTIME_WEB_APP_URL =
   process.env.MAPANYTIME_WEB_APP_URL || process.env.FRONTEND_URL || '';
 
 /**
- * Bridge until the providers import the constant above. `PayMongoProvider` and
- * `XenditProvider` both read `process.env.FRONTEND_URL` directly, so writing
- * the resolved value back is what lets the new name reach them without editing
- * two files that are mid-merge. Remove this once they take the value from
- * config instead of the environment.
+ * The rules Xendit enforces on a checkout return URL, as one predicate.
+ *
+ * This exists so startup validation and the provider agree on what "valid"
+ * means. They previously did not: the provider tested
+ * `startsWith('https://')` alone, which passes `https://localhost:3000`
+ * straight through to a 400 it cannot explain.
+ *
+ * Returns a list of human-readable problems, empty when the URL is usable.
  */
-if (MAPANYTIME_WEB_APP_URL) {
-  process.env.FRONTEND_URL = MAPANYTIME_WEB_APP_URL;
+export function checkoutReturnUrlProblems(url: string): string[] {
+  if (!url) return ['it is not set'];
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return [`"${url}" is not a valid URL`];
+  }
+
+  const problems: string[] = [];
+  if (parsed.protocol !== 'https:') problems.push('the scheme must be https');
+  const port = explicitPortOf(url, parsed);
+  if (port) problems.push(`it must not carry a port (found :${port})`);
+  if (parsed.hostname === 'localhost') problems.push('the hostname "localhost" is rejected');
+  return problems;
+}
+
+/**
+ * The port as written, which is not the same as `URL.port`.
+ *
+ * `new URL()` normalises away a scheme's default port, so
+ * `new URL('https://example.com:443').port` is the empty string. Xendit still
+ * rejects that URL — it objects to the port being written at all, not to its
+ * value — so reading `URL.port` alone silently passes the one case a reader is
+ * most likely to try after being told "it must be https".
+ */
+function explicitPortOf(url: string, parsed: URL): string {
+  if (parsed.port) return parsed.port;
+
+  const schemeEnd = url.indexOf('://');
+  if (schemeEnd === -1) return '';
+
+  let authority = url.slice(schemeEnd + 3).split(/[/?#]/)[0];
+  const at = authority.lastIndexOf('@');
+  if (at !== -1) authority = authority.slice(at + 1);
+
+  // A bracketed IPv6 literal is full of colons; only one after the closing
+  // bracket can be a port.
+  const from = authority.startsWith('[') ? authority.indexOf(']') : 0;
+  const colon = authority.indexOf(':', from);
+  if (colon === -1) return '';
+
+  const match = /^:(\d+)$/.exec(authority.slice(colon));
+  return match ? match[1] : '';
+}
+
+/**
+ * A return-URL base Xendit is guaranteed to accept.
+ *
+ * Falls back to the RFC 2606 placeholder when the configured value fails any
+ * rule, so local development is not blocked by a URL that only has to exist,
+ * not resolve — the webhook confirms payment, this is merely where the browser
+ * lands afterwards. `assertCheckoutReturnUrl` has already warned at startup if
+ * this substitution is going to happen, so it is loud rather than silent.
+ */
+export function strictCheckoutReturnUrlBase(): string {
+  return checkoutReturnUrlProblems(MAPANYTIME_WEB_APP_URL).length === 0
+    ? MAPANYTIME_WEB_APP_URL
+    : 'https://example.com';
 }
 
 /**
@@ -106,32 +167,15 @@ if (MAPANYTIME_WEB_APP_URL) {
  * to the buyer pressing Pay.
  */
 export function assertCheckoutReturnUrl(): void {
-  const problems: string[] = [];
-
-  if (!MAPANYTIME_WEB_APP_URL) {
-    problems.push('it is not set');
-  } else {
-    let parsed: URL | undefined;
-    try {
-      parsed = new URL(MAPANYTIME_WEB_APP_URL);
-    } catch {
-      problems.push(`"${MAPANYTIME_WEB_APP_URL}" is not a valid URL`);
-    }
-
-    if (parsed) {
-      if (parsed.protocol !== 'https:') problems.push('the scheme must be https');
-      if (parsed.port) problems.push(`it must not carry a port (found :${parsed.port})`);
-      if (parsed.hostname === 'localhost') problems.push('the hostname "localhost" is rejected');
-    }
-  }
-
+  const problems = checkoutReturnUrlProblems(MAPANYTIME_WEB_APP_URL);
   if (problems.length === 0) return;
 
   const message =
     `[config] MAPANYTIME_WEB_APP_URL is unusable as a checkout return URL — ` +
-    `${problems.join('; ')}. Xendit will reject every payment session with 400 INVALID_URL. ` +
-    'Use an https origin with no port, e.g. https://<your-tailscale-ipv4> for local device ' +
-    'testing. (The legacy name FRONTEND_URL is still read if the new one is unset.)';
+    `${problems.join('; ')}. Xendit rejects such a session with 400 INVALID_URL, so ` +
+    'checkout will fall back to https://example.com and the buyer will land there after ' +
+    'paying. Use an https origin with no port, e.g. https://<your-tailscale-ipv4> for local ' +
+    'device testing. (The legacy name FRONTEND_URL is still read if the new one is unset.)';
 
   if (NODE_ENV === 'production') throw new Error(message);
   console.warn(message);
