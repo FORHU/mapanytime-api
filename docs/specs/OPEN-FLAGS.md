@@ -43,9 +43,9 @@ down do not survive it.
 
 ---
 
-## ⛔ Do this before anything else
+## ⛔ Closed, but read them — both were "do this first"
 
-### F70. The production mock guard checks the wrong thing
+### ~~F70. The production mock guard checks the wrong thing~~ — FIXED 2026-08-25
 
 `payment.service.ts:454` refuses a mock webhook in production by testing the
 **database record**:
@@ -64,11 +64,14 @@ returns `true` unconditionally.
 orders paid.** The same applies to `/webhook/paymongo`. The guard predates the
 silent-fallback behaviour and was never updated for it.
 
-Fix: key the guard on the adapter actually returned, not the record's code.
-Deferred on 2026-08-25 only because `payment.service.ts` conflicts with main's
-Xendit commit — do it immediately after that merge.
+Fixed by keying the guard on the adapter actually returned:
 
-### F55. `FIX-PLAN.md` is lost
+```js
+const adapter = this.getProviderAdapter(providerRecord.code);
+if (adapter instanceof MockProvider && process.env.NODE_ENV === 'production') {
+```
+
+### ~~F55. `FIX-PLAN.md` is lost~~ — UNRECOVERABLE, closed 2026-08-25
 
 The 2026-08-24 docs consolidation (`0192e8f` → `9f6eea6`, 16:28–16:54) moved the
 workspace-root planning docs into `mapanytime-api/docs/specs/`. `FLAGS.md`,
@@ -81,9 +84,14 @@ any git repository — the old root was not a repo. Its distinctive content (the
 decision log) greps to nothing across the new docs. Roughly 701 lines,
 including every decision settled in the 2026-08-20 session.
 
-**Do first, while the window is open:** check the editor's local history and the
-recycle bin. Git cannot help here. If it is gone for good, the decision log is
-the part worth reconstructing from `FLAGS.md` and `NEXT-SESSION.md`.
+**Searched 2026-08-25 and it is gone.** Editor local history holds 239 entries
+for this workspace and none reference it; the recycle bin holds 35 items,
+several of them deleted docs from this workspace, and it is not among them.
+Git never had it. Nothing further to try.
+
+**What remains open** is the fallback: reconstructing the decision log from
+`FLAGS.md` and `NEXT-SESSION.md`. Note that its "Cart cannot hold two stores"
+item is still true — see the correction under F42.
 
 ---
 
@@ -129,6 +137,20 @@ Phase 1 of item 17 shipped, so a cart can hold items from several stores and one
 checkout produces several store-orders. Both "₱100 eligible subtotal = 1 point"
 and "maximum 20% of the eligible order subtotal" need a definition at the
 store-order level. Neither the spec nor the recommendation mentions multi-store.
+
+> **Correction, 2026-08-25 — the premise above is false.** The cart is still
+> single-store. `CartService` holds one `storeId: string | null`
+> (`cart.service.ts:14`) and refuses a product from a second store while the
+> cart is non-empty (`:62`); `order.controller.ts:65,82` reads that one id and
+> creates one order from it. Phase 1 of item 17 did **not** ship.
+>
+> So F42 is not blocking: there is no multi-store cart for the reward rules to
+> be ambiguous about. It becomes a real question the moment item 17 lands, and
+> the earn/redeem rules should be defined per store-order before it does —
+> which is the cheap moment to decide it, not after.
+>
+> Verified by reading the code rather than the status board, which is what
+> F60 warns the board cannot be trusted for.
 
 ---
 
@@ -227,17 +249,108 @@ delivery was cut (F36 / item 15). Harmless, but it dates the document.
 
 ---
 
+## 🟠 Recovered from the deleted PICKUP-NEXT.md (F56)
+
+Traced in the 2026-08-22 order-flow review, deleted with the file by `2e366bd`,
+and re-verified against the tree on 2026-08-25. Every one of these was checked,
+not carried over on faith.
+
+### F74. The gateway call sits inside the order transaction (S8)
+
+`order.service.ts:302` calls `provider.createCheckoutSession` inside the
+`prisma.$transaction` opened at line 79, and **no timeout override is
+configured** — so Prisma's 5s default applies. A slow gateway response rolls
+the order back after the checkout session already exists at the provider. If
+the buyer then pays, the webhook arrives for an order that was never
+committed.
+
+Captured money, no order. The single most expensive failure on this list.
+
+### F75. Stock has no row lock, and `Inventory.version` is dead (S9)
+
+The stock check at `order.service.ts:113,143-148` uses neither a row lock nor a
+conditional update. The schema carries an `Inventory.version` optimistic-lock
+column and **nothing in `src/` reads or writes it** — confirmed by grep on
+2026-08-25. Classic oversell race on the last unit under concurrent checkout.
+
+### F76. The app never sends `Idempotency-Key` (S10)
+
+`order.controller.ts:13-29` implements Redis-backed idempotency, and the
+Flutter app has **zero occurrences** of the header. `dio_smart_retry` retries
+timeouts, so a slow-but-successful `POST /orders` duplicates the order. The
+server side is already built; only the client half is missing.
+
+### F77. Redis is a single point of failure for ordering (S11)
+
+The cart lives in Redis alone on a 7-day TTL (`cart.service.ts:20,108`), so
+order creation cannot proceed while Redis is down.
+
+### F78. The webhook `orderId` path is unverified against a live payload (S12)
+
+`payment.service.ts` extracts the order id from the nested payment object. If a
+provider does not propagate `reference_number`/`metadata` down to it, every
+real webhook silently no-ops as `ignored_no_order_id` — the failure mode is
+silence, which is why it needs a live payload to settle rather than a reading
+of the code.
+
+### F79. `GET` handlers create rows (S16)
+
+Both `getMyOrders` and order `create` lazily insert a `buyers` row on read — a
+GET with a write side effect, duplicated in two places.
+
+### F80. `PaymentMethod.fromJson` casts an id unguarded (S17)
+
+`json['id'] as String` throws on a null id instead of degrading.
+
+### F81. Dead reservation code implies a flow that was never built (S18)
+
+`lib/features/orders/data/reservation_remote_datasource.dart` and
+`reservationControllerProvider` are referenced nowhere else. Confirmed still
+present 2026-08-25.
+
+---
+
 ## ⚪ Doc and process integrity
 
-### F56. Two disconnected findings registers
+### ~~F56. Two disconnected findings registers~~ — RESOLVED BY DELETION 2026-08-25
 
-`FLAGS.md` holds F1–F38 and calls itself the "single consolidated register".
-`mapanytime-market-app/docs/PICKUP-NEXT.md` holds S1–S18 plus roughly twenty
-more findings from the 2026-08-22/23 sessions, and all three `COMMITS-*.md`
-branch docs point at _it_ as the findings list.
+`FLAGS.md` held F1–F38 and called itself the "single consolidated register",
+while `mapanytime-market-app/docs/PICKUP-NEXT.md` held S1–S18 and never named
+it back.
 
-No S-number appears in `FLAGS.md`, `REQUIREMENTS.md` or `NEXT-SESSION.md`, and
-PICKUP-NEXT never names them. Pick one register and make the other a pointer.
+That second register no longer exists. Commit `2e366bd`
+("docs(guides): standardize Flutter Framework-Structure guide suite") deleted
+`docs/PICKUP-NEXT.md` (510 lines) and `toDo/backlog.md` (28 lines) from the app
+repo.
+
+**Unlike `FIX-PLAN.md` (F55), both are recoverable** — they were tracked, so
+git still has them:
+
+```
+git show 2e366bd^:docs/PICKUP-NEXT.md
+git show 2e366bd^:toDo/backlog.md
+```
+
+The S-findings were swept against the tree on 2026-08-25 and the ones still
+open are carried below as F74–F81, so the register is now genuinely single.
+`FLAGS.md`'s pointer to PICKUP-NEXT was removed at the same time.
+
+**S-number disposition:**
+
+| S       | Status                                                            |
+| :------ | :---------------------------------------------------------------- |
+| S1      | FIXED — the datasource unwraps `data.providers`                   |
+| S2      | FIXED 2026-08-25 — `paymentMethodId` is forwarded                 |
+| S3      | FIXED — cancelling a paid order now refunds through the adapter   |
+| S4      | Open → **F43**                                                    |
+| S5      | Open → **F44**                                                    |
+| S6      | FIXED 2026-08-25 → F45                                            |
+| S7      | FIXED — `MockProvider.checkoutUrl` is `null`, not a relative path |
+| S8–S12  | Open → **F74–F78**                                                |
+| S13     | FIXED — min/max is enforced in `payment.service.ts`               |
+| S14     | Open → **F65** (the fallback rate)                                |
+| S15     | FIXED 2026-08-25 → F46                                            |
+| S16–S18 | Open → **F79–F81**                                                |
 
 ### F57. The `FLAGS.md` header is stale
 
@@ -272,21 +385,35 @@ Item 13 is the mirror image: the first two checkboxes claim the web sends no
 `sessionId`, but it issues and sends one and the API stores it behind
 `@@index([sessionId, occurredAt])`. Only the dedup step is genuinely open.
 
-### F61. PICKUP-NEXT's own open list carries closed items
+### ~~F61. PICKUP-NEXT's own open list carries closed items~~ — MOOT 2026-08-25
 
-Its top priority — decide what to do about the deleted `TODO-NEXT.md` and
-`production-readiness.md` — was settled in commit `cdf29ad`, and is still listed
-as open in two places. Its item 5, the three `finance/page.tsx` unescaped-entity
-eslint errors, is fixed. The `StoreProfileSettings.tsx` unused-import finding is
-also fixed.
+The file was deleted by `2e366bd` (see F56). Its stale entries went with it, and
+its still-open findings are carried as F43, F44 and F74–F81.
 
-### F62. `toDo/backlog.md` is a superseded design
+### ~~F62. `toDo/backlog.md` is a superseded design~~ — MOOT 2026-08-25
 
 Twelve unticked boxes describing a Google Maps implementation — API key in
 `AndroidManifest.xml`, `GMSServices` in `AppDelegate.swift`, `BitmapDescriptor`
-markers. The app shipped on `mapbox_maps_flutter`, and `store_bottom_sheet.dart`,
-`world_map_controller.dart`, `store_model.dart` and `store_repository.dart` all
-exist. `REQUIREMENTS.md` MAP-2 still cites it as open work.
+markers — against an app that shipped on `mapbox_maps_flutter`. Deleted by
+`2e366bd`; recoverable at `git show 2e366bd^:toDo/backlog.md` if the twelve
+boxes are ever worth re-reading, which they are not.
+
+**The reference outlived the file:** `REQUIREMENTS.md` MAP-2 still cited it as
+"still open work" after it was gone. Corrected 2026-08-25 — see F82.
+
+### F82. References outlive the files they point at
+
+Third instance of the same failure in two days: `FLAGS.md` → `FIX-PLAN.md`
+(F57), `REQUIREMENTS.md` MAP-2 → `toDo/backlog.md`, and eight separate
+citations of `PICKUP-NEXT.md` — six in docs, two in shipped source comments
+(`order.service.ts:667`, `profile_page.dart:190,204`).
+
+A deleted doc leaves its citations behind, and a code comment pointing at a
+file nobody can open is worse than no comment: it reads as authoritative. The
+doc-side references were repointed on 2026-08-25.
+
+Worth a convention: a finding cited from source should name its **id**, which
+survives, rather than its **filename**, which does not.
 
 ---
 

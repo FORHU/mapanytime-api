@@ -664,7 +664,8 @@ export default class OrderService {
     // Cancelling a PENDING order (buyer never finished paying) just releases the
     // hold. Cancelling a PROCESSING order means the gateway already captured
     // real money — that must go back through the provider, not just be
-    // stamped FAILED. See PICKUP-NEXT.md S3.
+    // stamped FAILED. Raised as S3 in the since-deleted PICKUP-NEXT.md; the
+    // register now lives in mapanytime-api/docs/specs/OPEN-FLAGS.md.
     const payment = await prisma.payments.findFirst({
       where: { orderId },
       orderBy: { createdAt: 'desc' },

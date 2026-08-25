@@ -7,8 +7,10 @@ scattered per-project findings docs.
 > lost in the 2026-08-24 docs consolidation and is unrecoverable — it survives in
 > no git history, no editor local history and no recycle bin. Until a replacement
 > exists, sequencing lives in [`NEXT-SESSION.md`](NEXT-SESSION.md). Note that
-> `mapanytime-market-app/docs/PICKUP-NEXT.md` runs a second, disconnected
-> register under its own S-numbering — see F56.
+> The second register — `mapanytime-market-app/docs/PICKUP-NEXT.md`, S-numbered
+> — was deleted by `2e366bd`. Its still-open findings were swept and carried
+> into [`OPEN-FLAGS.md`](OPEN-FLAGS.md) as F43, F44 and F74–F81, so there is one
+> register again. See F56 there for the full S-to-F mapping.
 
 **Last verified:** 2026-08-20. Confirmed business rules and both worked examples
 re-verified against `src/modules/pricing/pricing-engine.service.ts` on 2026-08-25.

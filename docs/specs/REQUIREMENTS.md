@@ -16,22 +16,26 @@ to do; `FLAGS.md` says what is currently wrong with it.**
 
 **Status key** — ✅ built · ◐ partial · ⚠ built but wrong · ⬚ not built · ⊘ withdrawn
 
-**Coverage:** 108 requirements — 70 ✅ · 17 ◐ · 16 ⬚ · 5 ⊘
+**Coverage:** 102 requirements — 63 ✅ · 14 ◐ · 19 ⬚ · 6 ⊘ (recounted 2026-08-25)
 
 **No ⚠ rows remain.** The last two — CART-2 (preview disagreed with checkout) and
 FEE-8 (two pricing engines) — closed on 2026-08-20. Everything still outstanding
 is unbuilt or partial, not built-and-wrong.
 
-_The earlier header claimed 100 requirements across a different split; it was a
-stale hand-count. The figures above are a mechanical recount of the 19 tables._
+_This line has now drifted twice. It claimed 100 across one split, was corrected
+to 108 across another on 2026-08-20 and called "a mechanical recount", and was
+still wrong by six rows on 2026-08-25 — before that day's two status changes,
+the real figures were 63 / 15 / 19 / 5, not 70 / 17 / 16 / 5. A hand-maintained
+tally beside a hand-maintained table will keep drifting; if the number matters,
+count it in CI rather than in prose._
 
 ---
 
 ## Product in one paragraph
 
 A map-first local marketplace for the Philippines. Buyers open a map, see nearby
-stores and sponsored deals as pins, buy for pickup or delivery, and pay through a
-gateway. Sellers onboard with verification documents, are approved by an admin,
+stores and sponsored deals as pins, buy for collection at the store, and pay
+through a gateway. Pickup is the only fulfilment mode — delivery was cut (F36). Sellers onboard with verification documents, are approved by an admin,
 run one or more stores, list products (or house-and-lot property listings),
 advertise, and are settled net of commission. Agents recruit sellers. A platform
 pricing engine decides every fee on every order and writes an immutable charge
@@ -63,12 +67,12 @@ ledger.
 
 ## MAP — Map discovery
 
-| #     | Requirement                                                                  | Status | Evidence                                                       |
-| :---- | :--------------------------------------------------------------------------- | :----- | :------------------------------------------------------------- |
-| MAP-1 | Buyers browse stores as pins on a map around their location, within a radius | ✅     | `GET /stores/nearby`, `world_map_page.dart`                    |
-| MAP-2 | Tapping a pin opens store name, distance and a way into the storefront       | ◐      | Still open work in `mapanytime-market-app/toDo/backlog.md`     |
-| MAP-3 | Sponsored deals appear as promoted pins within 1–50 km                       | ◐      | `GET /merchant-ads/nearby` works; no web client calls it (F18) |
-| MAP-4 | A storefront page lists a store's products                                   | ✅     | `storefront_page.dart`, `/store/[id]`                          |
+| #     | Requirement                                                                  | Status | Evidence                                                                                                           |
+| :---- | :--------------------------------------------------------------------------- | :----- | :----------------------------------------------------------------------------------------------------------------- |
+| MAP-1 | Buyers browse stores as pins on a map around their location, within a radius | ✅     | `GET /stores/nearby`, `world_map_page.dart`                                                                        |
+| MAP-2 | Tapping a pin opens store name, distance and a way into the storefront       | ✅     | `store_bottom_sheet.dart`, `world_map_controller.dart`, `store_repository.dart` — shipped on `mapbox_maps_flutter` |
+| MAP-3 | Sponsored deals appear as promoted pins within 1–50 km                       | ◐      | `GET /merchant-ads/nearby` works; no web client calls it (F18)                                                     |
+| MAP-4 | A storefront page lists a store's products                                   | ✅     | `storefront_page.dart`, `/store/[id]`                                                                              |
 
 ## CAT — Catalog
 
@@ -112,15 +116,15 @@ ledger.
 
 ## ORD — Orders & fulfillment
 
-| #     | Requirement                                                                       | Status | Evidence                                                                 |
-| :---- | :-------------------------------------------------------------------------------- | :----- | :----------------------------------------------------------------------- |
-| ORD-1 | An order is for pickup or delivery, with a pickup time when relevant              | ✅     | `FULLFILLMENTTYPE`, `pickupAt`                                           |
-| ORD-2 | Orders move through a state machine; cancel and complete are explicit transitions | ✅     | `order.state.test.ts`, `PATCH /orders/status`                            |
-| ORD-3 | Store contact and address are snapshotted onto the order at creation              | ✅     | `storeAddressSnapshot`, `sellerPhoneSnapshot`                            |
-| ORD-4 | A seller works a queue of their store's orders and sees store stats               | ✅     | `GET /orders/store`, `/orders/store/stats`                               |
-| ORD-5 | Shipments are created and tracked through statuses                                | ✅     | `/v1/shipments`, `SHIPMENTSTATUS`                                        |
-| ORD-6 | A buyer requests a return; approval refunds the money at the provider             | ◐      | `return.service.ts` computes `refundAmount` and stops — no provider call |
-| ORD-7 | A buyer shows a pickup pass at the store                                          | ✅     | `pickup_pass_page.dart`                                                  |
+| #     | Requirement                                                                          | Status | Evidence                                                                                                                                                                              |
+| :---- | :----------------------------------------------------------------------------------- | :----- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ORD-1 | An order is for pickup or delivery, with a pickup time when relevant                 | ✅     | `FULLFILLMENTTYPE`, `pickupAt`                                                                                                                                                        |
+| ORD-2 | Orders move through a state machine; cancel and complete are explicit transitions    | ✅     | `order.state.test.ts`, `PATCH /orders/status`                                                                                                                                         |
+| ORD-3 | Store contact and address are snapshotted onto the order at creation                 | ✅     | `storeAddressSnapshot`, `sellerPhoneSnapshot`                                                                                                                                         |
+| ORD-4 | A seller works a queue of their store's orders and sees store stats                  | ✅     | `GET /orders/store`, `/orders/store/stats`                                                                                                                                            |
+| ORD-5 | ~~Shipments are created and tracked through statuses~~ — **withdrawn with delivery** | ⊘      | No `Shipments` model, no `SHIPMENTSTATUS`, no `src/modules/shipments/`. `FULLFILLMENTTYPE` has exactly one member: `PICKUP`. Was marked ✅ against code that does not exist — see F59 |
+| ORD-6 | A buyer requests a return; approval refunds the money at the provider                | ◐      | `return.service.ts` computes `refundAmount` and stops — no provider call                                                                                                              |
+| ORD-7 | A buyer shows a pickup pass at the store                                             | ✅     | `pickup_pass_page.dart`                                                                                                                                                               |
 
 ## PAY — Payments
 
