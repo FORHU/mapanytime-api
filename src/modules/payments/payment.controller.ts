@@ -78,7 +78,10 @@ export const handleProviderWebhook = async (req: Request, res: Response, next: N
   try {
     const provider = req.params.provider || 'paymongo';
     const signature =
-      (req.headers['paymongo-signature'] as string) || (req.headers['x-signature'] as string) || '';
+      (req.headers['paymongo-signature'] as string) ||
+      (req.headers['x-callback-token'] as string) ||
+      (req.headers['x-signature'] as string) ||
+      '';
 
     // app.ts captures the unparsed bytes via express.json({ verify }). Falling
     // back to a re-serialised body would change key order and whitespace, and

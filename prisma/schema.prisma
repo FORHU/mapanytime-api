@@ -373,6 +373,9 @@ model Stores {
   description       String?
   logoId            String?
   bannerId          String?
+  markerDisplayMode MARKERDISPLAYMODE   @default(PHOTO_CARD)
+  markerPrice       Decimal?            @db.Decimal(12, 2)
+  markerSubtitle    String?
   slug              String?             @unique
   phone             String?
   email             String?
@@ -486,6 +489,12 @@ enum ADFORMAT {
   PROMOTED_PIN
   DISCOVERY_CAROUSEL
   SPONSORED_SEARCH
+}
+
+enum MARKERDISPLAYMODE {
+  PHOTO_CARD
+  PRICE_CARD
+  LABEL_CARD
 }
 
 enum ADSTATUS {

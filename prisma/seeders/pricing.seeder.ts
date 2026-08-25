@@ -30,6 +30,17 @@ const PAYMONGO_RATES = [
  */
 const RATES_UNKNOWN = ['QRPH', 'GRAB_PAY'];
 
+/**
+ * Xendit's GCash/Maya rates are real contracted commercial terms specific to
+ * this account, not public numbers — not fabricating them here. Both methods
+ * (seeded in payments.seeder.ts) get no PricingComponents row at all, so
+ * `matchComponent`'s provider+method lookup (pricing-engine.service.ts) finds
+ * nothing and falls through to the same DEFAULT_PAYMENT_GATEWAY_RATE (2.00%)
+ * PayMongo's own RATES_UNKNOWN methods use — same code path, not a special
+ * case. Fill these in once the Xendit account has a real rate card.
+ */
+const XENDIT_RATES_UNKNOWN = ['GCASH', 'MAYA'];
+
 export async function seedPricingConfiguration(prisma: PrismaClient) {
   console.log('Seeding Pricing Configuration...');
 
@@ -98,7 +109,11 @@ export async function seedPricingConfiguration(prisma: PrismaClient) {
   }
 
   for (const code of RATES_UNKNOWN) {
-    console.warn(`  ${code}: no contracted rate on file — will price off the 2.00% fallback.`);
+    console.warn(`  PayMongo ${code}: no contracted rate on file — will price off the 2.00% fallback.`);
+  }
+
+  for (const code of XENDIT_RATES_UNKNOWN) {
+    console.warn(`  Xendit ${code}: no contracted rate on file — will price off the 2.00% fallback.`);
   }
 
   console.log('Pricing Configuration seeded successfully.');

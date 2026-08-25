@@ -157,6 +157,28 @@ npm run worker
 | RabbitMQ Dashboard | `http://localhost:15672` (guest / guest) |
 | Worker Health      | `http://localhost:8080/health`           |
 
+### Testing payment gateways locally (PayMongo / Xendit)
+
+Without `PAYMONGO_SECRET_KEY` / `XENDIT_SECRET_KEY` set, `PaymentService.getProviderAdapter`
+falls back to `MockProvider` so checkout still works with no real gateway — no
+hosted checkout page, no real webhook.
+
+To sandbox-test against a real gateway (e.g. Xendit's Payment Sessions API):
+
+1. Fill in the provider's env vars in `.env` (see `.env.example` — secret key
+   and webhook verification token/secret, from that gateway's dashboard).
+2. Expose your local API with `npm run tunnel` (wraps `ngrok`, already a
+   devDependency) — copy the printed `https://*.ngrok-free.app` URL.
+3. In the gateway's dashboard, set the webhook URL to
+   `<ngrok-url>/api/v1/payments/webhook/<provider>` (e.g. `.../webhook/xendit`),
+   and copy its verification token/secret into `.env`.
+4. Place a real order selecting that gateway's method — it should redirect to
+   the gateway's hosted checkout page, and completing a sandbox test payment
+   should land a webhook back through the tunnel.
+
+`npm run tunnel` uses the default port (`4002`) — pass a different port to
+`ngrok http` directly if you've changed `PORT` in `.env`.
+
 ---
 
 ## 📂 Project Structure
