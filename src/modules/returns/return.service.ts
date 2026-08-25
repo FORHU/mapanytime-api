@@ -14,6 +14,23 @@ import { ADMIN_ROLES, SystemRole } from '../../constants/roles.constant';
  * a return could jump straight from PENDING to REFUNDED — skipping approval and
  * skipping the goods coming back. See FLAGS.md ORD-6.
  */
+/**
+ * How long after completion a buyer may still open a return.
+ *
+ * Kept at or below `SETTLEMENT_HOLD_DAYS`, which exists to cover exactly this
+ * window: once the hold elapses the settlement is released and can be swept
+ * into a payout, and a refund after that comes out of the platform's own
+ * pocket with no way to claw it back (OPEN-FLAGS F84).
+ *
+ * There was no window at all before — any COMPLETED order was returnable
+ * forever, which made that overrun the eventual default rather than an edge
+ * case. `MASTER_IMPLEMENTATION_PLAN.md` required the window and required it to
+ * be configurable; neither had been built. See OPEN-FLAGS F85.
+ */
+export const RETURN_WINDOW_DAYS = Number(process.env.RETURN_WINDOW_DAYS ?? 7);
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 const ALLOWED_RETURN_TRANSITIONS: Record<RETURNSTATUS, RETURNSTATUS[]> = {
   PENDING: [RETURNSTATUS.APPROVED, RETURNSTATUS.REJECTED],
   APPROVED: [RETURNSTATUS.ITEM_RECEIVED, RETURNSTATUS.REJECTED],
@@ -56,6 +73,28 @@ export default class ReturnService {
       throw {
         status: 400,
         message: `Only completed orders can be returned. This order is ${order.status}. Cancel it instead.`,
+      };
+    }
+
+    // The window runs from completion, not from order creation. An order that
+    // reached COMPLETED without a `completedAt` predates that field being set;
+    // it is treated as out of window rather than as returnable forever.
+    if (!order.completedAt) {
+      throw {
+        status: 409,
+        message:
+          'This order has no completion date on record, so its return window cannot be ' +
+          'established. Contact support to have it reviewed manually.',
+      };
+    }
+
+    const windowClosesAt = new Date(order.completedAt.getTime() + RETURN_WINDOW_DAYS * DAY_MS);
+    if (Date.now() > windowClosesAt.getTime()) {
+      throw {
+        status: 400,
+        message:
+          `The ${RETURN_WINDOW_DAYS}-day return window for this order closed on ` +
+          `${windowClosesAt.toISOString().slice(0, 10)}.`,
       };
     }
 
@@ -114,16 +153,25 @@ export default class ReturnService {
 
     await this.assertCanDecide(returnRequest.sellerId, actorUserId);
 
-    if (returnRequest.status !== status) {
-      const allowed = ALLOWED_RETURN_TRANSITIONS[returnRequest.status] ?? [];
-      if (!allowed.includes(status)) {
-        throw {
-          status: 400,
-          message: allowed.length
-            ? `Invalid return transition from '${returnRequest.status}' to '${status}'. Allowed next states: [${allowed.join(', ')}].`
-            : `A return in terminal state '${returnRequest.status}' cannot be changed.`,
-        };
-      }
+    // A request for the state the return is already in is a retry, not a
+    // transition: answer with the current record and do nothing else. The
+    // transition check used to sit *inside* this same condition, so a second
+    // PATCH of REFUNDED skipped the terminal guard entirely and fell straight
+    // back into `executeRefund`. Only the payment-state check two layers down
+    // stood between that and a second payout to the buyer, and that check holds
+    // only while refunds are for the full amount. See OPEN-FLAGS F88.
+    if (returnRequest.status === status) {
+      return returnRequest;
+    }
+
+    const allowed = ALLOWED_RETURN_TRANSITIONS[returnRequest.status] ?? [];
+    if (!allowed.includes(status)) {
+      throw {
+        status: 400,
+        message: allowed.length
+          ? `Invalid return transition from '${returnRequest.status}' to '${status}'. Allowed next states: [${allowed.join(', ')}].`
+          : `A return in terminal state '${returnRequest.status}' cannot be changed.`,
+      };
     }
 
     if (status === RETURNSTATUS.APPROVED) {
@@ -296,9 +344,12 @@ export default class ReturnService {
       });
 
       // The seller is not paid for a sale that came back.
-      await SettlementService.markRefundedForOrder(tx, returnRequest.orderId);
+      const settlement = await SettlementService.markRefundedForOrder(tx, returnRequest.orderId);
 
-      return tx.returnRequests.update({
+      // The goods are back with the seller, so the stock is sellable again.
+      await this.restockReturnedItems(tx, returnRequest.orderId, returnId);
+
+      const closed = await tx.returnRequests.update({
         where: { id: returnId },
         data: {
           status: RETURNSTATUS.REFUNDED,
@@ -306,7 +357,20 @@ export default class ReturnService {
           closedAt: new Date(),
         },
       });
+
+      return { closed, settlement };
     });
+
+    // Refunding a settlement that was already paid out leaves the platform
+    // short by the seller's net. `markRefundedForOrder` logs it; repeat it on
+    // the refund's own log line so the two sides of the loss appear together.
+    if (updated.settlement?.clawbackOwed) {
+      logger.error(
+        `[Refund] Order ${returnRequest.orderId} refunded to the buyer, but the seller had ` +
+          `already been paid ₱${updated.settlement.clawbackOwed.toFixed(2)} on payout ` +
+          `${updated.settlement.payoutNumber}. Recover it manually. See OPEN-FLAGS F84.`,
+      );
+    }
 
     try {
       const order = await prisma.orders.findUnique({
@@ -326,6 +390,84 @@ export default class ReturnService {
       // Notification delivery is best-effort.
     }
 
-    return updated;
+    return updated.closed;
+  }
+
+  /**
+   * Put the goods back on the shelf.
+   *
+   * `completeOrder` decrements `quantityOnHand` and increments `totalSold` when
+   * the seller hands the order over. A refund is that sale coming back, and
+   * nothing reversed either half: stock the seller physically has again stayed
+   * unsellable until somebody noticed and used the manual restock endpoint.
+   *
+   * `quantityReserved` is deliberately untouched — the reservation was consumed
+   * at fulfilment, so there is nothing left to release. Note that the schema has
+   * carried `RETURN` in both `INVENTORYMOVEMENTTYPE` and `INVENTORYREFERENCETYPE`
+   * since it was written, and no code ever wrote one. See OPEN-FLAGS F87.
+   */
+  private static async restockReturnedItems(
+    tx: Prisma.TransactionClient,
+    orderId: string,
+    returnId: string,
+  ) {
+    const items = await tx.orderItems.findMany({
+      where: { orderId },
+      select: { productId: true, quantity: true },
+    });
+
+    for (const item of items) {
+      if (item.quantity <= 0) continue;
+
+      const inventory = await tx.inventory.findFirst({
+        where: { productId: item.productId },
+        select: { id: true, storeId: true, quantityOnHand: true },
+      });
+
+      // A product whose inventory row has since been removed has no ledger to
+      // credit. Skip it rather than failing the refund — the money has already
+      // left the gateway by this point, and a stock count is the lesser loss.
+      if (!inventory) {
+        logger.warn(
+          `[Refund] No inventory row for product ${item.productId} on order ${orderId}; ` +
+            'its stock was not restored.',
+        );
+        continue;
+      }
+
+      const newOnHand = inventory.quantityOnHand + item.quantity;
+
+      await tx.inventory.update({
+        where: { id: inventory.id },
+        data: { quantityOnHand: { increment: item.quantity } },
+      });
+
+      // Clamped rather than decremented blind: `totalSold` drives the product
+      // ranking, and a negative one would sort a returned product below a
+      // product nobody has ever bought.
+      const product = await tx.products.findUnique({
+        where: { id: item.productId },
+        select: { totalSold: true },
+      });
+      await tx.products.update({
+        where: { id: item.productId },
+        data: { totalSold: Math.max(0, (product?.totalSold ?? 0) - item.quantity) },
+      });
+
+      await tx.inventoryMovements.create({
+        data: {
+          inventoryId: inventory.id,
+          productId: item.productId,
+          storeId: inventory.storeId,
+          movementType: 'RETURN',
+          quantityDelta: item.quantity,
+          previousOnHand: inventory.quantityOnHand,
+          newOnHand,
+          referenceId: returnId,
+          referenceType: 'RETURN',
+          note: `Refunded return ${returnId} for order ${orderId}`,
+        },
+      });
+    }
   }
 }
