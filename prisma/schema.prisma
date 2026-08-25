@@ -440,6 +440,7 @@ model StoreLocations {
   country        String
   latitude       Float
   longitude      Float
+  timezone       String   @default("Asia/Manila")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   store          Stores   @relation(fields: [storeId], references: [id])
@@ -496,6 +497,13 @@ enum ADSTATUS {
   BUDGET_EXHAUSTED
 }
 
+enum ADWINDOWSTATE {
+  SCHEDULED
+  LIVE
+  PAUSED
+  ENDED
+}
+
 model MerchantAds {
   id            String                @id @default(cuid())
   storeId       String
@@ -530,9 +538,13 @@ model MerchantAds {
   conversionsCount  Int     @default(0)
   attributedRevenue Decimal @default(0) @db.Decimal(12, 2)
 
-  expiresAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  startAt   DateTime? @db.Timestamptz(3)
+  expiresAt DateTime? @db.Timestamptz(3)
+
+  lastNotifiedState ADWINDOWSTATE?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   store      Stores               @relation(fields: [storeId], references: [id])
   products   MerchantAdProducts[]
@@ -542,6 +554,8 @@ model MerchantAds {
   @@index([storeId, isActive])
   @@index([radiusKm])
   @@index([expiresAt])
+  @@index([storeId, startAt, expiresAt])
+  @@index([lastNotifiedState])
 }
 
 // Links an EVENT (or any ad) to the specific products/variants whose

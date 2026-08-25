@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import S3Util from '../../utils/s3.util';
+import { liveWindowFilter } from '../merchantAds/adWindow';
 
 export interface NearbyStore {
   id: string;
@@ -204,7 +205,9 @@ export default class StoreRepository {
         logoFile: true,
         bannerFile: true,
         merchantAds: {
-          where: { isActive: true, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+          // Buyers must not see a promotion before its start instant, so the
+          // store page uses the same window test as discovery and checkout.
+          where: liveWindowFilter(),
           include: {
             products: {
               include: {

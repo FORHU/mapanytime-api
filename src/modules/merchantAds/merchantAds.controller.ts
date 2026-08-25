@@ -3,11 +3,45 @@ import Joi from 'joi';
 import MerchantAdsService from './merchantAds.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
 import { money, MAX_MONEY } from '../../helpers/money.helper';
+import { MIN_WINDOW_MS, MAX_HORIZON_MS } from './adWindow';
 
 const productLinkSchema = Joi.object({
   productId: Joi.string().required(),
   variantId: Joi.string().optional(),
 });
+
+/**
+ * Cross-field schedule rules that need no database read. Rules that do — start
+ * not-in-the-past, the start lock on a running ad, and product overlap — live
+ * in the service, which has the stored row to compare against.
+ */
+const scheduleWindow = (
+  value: { startAt?: Date; expiresAt?: Date },
+  helpers: Joi.CustomHelpers,
+) => {
+  const { startAt, expiresAt } = value;
+
+  if (startAt && expiresAt) {
+    const durationMs = expiresAt.getTime() - startAt.getTime();
+
+    if (durationMs < MIN_WINDOW_MS) {
+      const minutes = Math.max(0, Math.round(durationMs / 60000));
+      return helpers.message({
+        custom:
+          `This promotion would run for ${minutes} minute${minutes === 1 ? '' : 's'}. ` +
+          'Give it at least 5 minutes so it can be shown to buyers.',
+      } as Joi.LanguageMessages);
+    }
+  }
+
+  if (startAt && startAt.getTime() > Date.now() + MAX_HORIZON_MS) {
+    return helpers.message({
+      custom: 'Start time is more than a year away. Check the year on the start date.',
+    } as Joi.LanguageMessages);
+  }
+
+  return value;
+};
 
 const adFieldsSchema = {
   kind: Joi.string().valid('PROMO', 'JOB', 'EVENT').optional(),
@@ -44,7 +78,20 @@ const adFieldsSchema = {
       ],
       otherwise: Joi.forbidden(),
     }),
-  expiresAt: Joi.date().iso().optional(),
+  startAt: Joi.date().iso().optional().allow(null),
+  // .greater() is applied only when startAt is present: an unresolvable
+  // reference makes Joi reject the field outright, which would break every
+  // request that sets an end date and no start date.
+  expiresAt: Joi.date()
+    .iso()
+    .when('startAt', {
+      is: Joi.exist().not(null),
+      then: Joi.date().greater(Joi.ref('startAt')).messages({
+        'date.greater': 'End time must be after the start time.',
+      }),
+    })
+    .optional()
+    .allow(null),
   products: Joi.array()
     .items(productLinkSchema)
     .when('kind', { is: 'EVENT', then: Joi.array().min(1).required() })
@@ -107,7 +154,7 @@ export default class MerchantAdsController {
     const schema = Joi.object({
       storeId: Joi.string().required(),
       ...adFieldsSchema,
-    });
+    }).custom(scheduleWindow);
 
     const { error, value } = schema.validate(req.body);
     if (error) return responseError(res, 400, error.message);
@@ -124,7 +171,7 @@ export default class MerchantAdsController {
   }
 
   static async update(req: Request, res: Response, next: NextFunction) {
-    const schema = Joi.object(adFieldsSchema);
+    const schema = Joi.object(adFieldsSchema).custom(scheduleWindow);
 
     const { error, value } = schema.validate(req.body);
     if (error) return responseError(res, 400, error.message);
