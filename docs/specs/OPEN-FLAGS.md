@@ -1,7 +1,7 @@
 # MapAnytime — Open Flags, F39 onward
 
 Triage batch raised **2026-08-24**, worked **2026-08-25**. Continues the
-numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently F39–F73.
+numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently F39–F83.
 
 The range is deliberately not in the filename any more. It was
 `OPEN-FLAGS-F39-F62.md`, then `-F72`, and every new finding meant renaming the
@@ -404,6 +404,38 @@ boxes are ever worth re-reading, which they are not.
 
 **The reference outlived the file:** `REQUIREMENTS.md` MAP-2 still cited it as
 "still open work" after it was gone. Corrected 2026-08-25 — see F82.
+
+### F83. Checkout offers providers that cannot take money
+
+`getActivePaymentMethods` filters on exactly one condition:
+
+```js
+(provider) => provider.code !== 'MOCK' || process.env.NODE_ENV !== 'production';
+```
+
+A provider whose secret key is missing is still offered. `getProviderAdapter`
+silently returns `MockProvider` in that case, and `MockProvider` returns
+`checkoutUrl: null` — so the buyer picks GCash, an order and a `PENDING`
+payment row are created, and **there is no way to pay it.**
+
+The `MOCK` provider row is correctly hidden in production. _PayMongo backed by
+the mock_ is not, so this fails identically in production, announced only by a
+`console.warn`.
+
+Live today: `PAYMONGO_SECRET_KEY` is unset, so all five PayMongo methods
+(GCash, Maya, QR Ph, Card, GrabPay) are dead ends. The only real gateway is
+Xendit sandbox.
+
+**Fix:** resolve the adapter inside `getActivePaymentMethods` and drop any
+provider that comes back as `MockProvider`, the same way the `MOCK` row itself
+is dropped. Product-visible — methods vanish from the picker — so it wants a
+deliberate yes rather than being slipped in.
+
+**This also sharpens F65.** With PayMongo not a real account, it is not that
+_some_ transactions price off the fallback: the seeded rate card is
+"PayMongo Standard Rates v1" for an account that does not exist, and Xendit —
+the only usable gateway — has no rates at all. Every real payment the platform
+can currently take is priced off a guessed 2.00%.
 
 ### F82. References outlive the files they point at
 
