@@ -3,6 +3,7 @@ import logger from '../../utils/logger';
 import InventoryReservationService from '../../modules/inventory/inventoryReservation.service';
 import SettlementService from '../../modules/settlements/settlement.service';
 import MerchantAdsService from '../../modules/merchantAds/merchantAds.service';
+import RewardService from '../../modules/rewards/reward.service';
 import RedisUtil from '../../utils/redis.util';
 
 /**
@@ -81,6 +82,28 @@ export const startScheduler = () => {
       }
     } catch (err) {
       logger.error('[Scheduler] Failed to release matured settlements:', err);
+    }
+  });
+
+  // ── MapPoints expiry sweep — runs hourly ────────────────────────────────
+  // Expires EARN lots past their rolling expiry and stale claimed vouchers
+  // past their own expiresAt. One job for both — see OPEN-FLAGS.md F44+F52
+  // ("one scheduler, two problems").
+  cron.schedule('30 * * * *', async () => {
+    try {
+      await withJobLock('mappoints-expiry', 300, async () => {
+        const [pointsExpired, vouchersExpired] = await Promise.all([
+          RewardService.expireOldPoints(),
+          RewardService.expireStaleVouchers(),
+        ]);
+        if (pointsExpired > 0 || vouchersExpired > 0) {
+          logger.info(
+            `[Scheduler] Expired ${pointsExpired} MapPoints lot(s), ${vouchersExpired} voucher(s).`,
+          );
+        }
+      });
+    } catch (err) {
+      logger.error('[Scheduler] MapPoints expiry sweep failed:', err);
     }
   });
 

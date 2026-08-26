@@ -188,4 +188,57 @@ describe('Confirmed financial rules', () => {
       );
     });
   });
+
+  // A MapPoints voucher is platform-funded (OPEN-FLAGS.md F39/F40): it must
+  // reduce what the buyer pays without touching seller commission, unlike a
+  // seller-funded DISCOUNT which reduces both.
+  describe('MapPoints voucher redemption', () => {
+    it('reduces the order amount and buyer total, same as a discount would', async () => {
+      const r = await PricingEngineService.calculateOrderPricing({
+        subtotalAmount: SUBTOTAL,
+        voucherAmount: 50,
+      });
+      expect(r.voucherAmount).toBe(50);
+      expect(r.orderAmount).toBe(SUBTOTAL - 50);
+      expect(r.buyerTotalAmount).toBe(
+        Number((r.orderAmount + r.buyerTransactionFee.totalBuyerFeeAmount).toFixed(2)),
+      );
+    });
+
+    it('leaves seller commission and settlement on the pre-voucher subtotal', async () => {
+      const withoutVoucher = await PricingEngineService.calculateOrderPricing({
+        subtotalAmount: SUBTOTAL,
+      });
+      const withVoucher = await PricingEngineService.calculateOrderPricing({
+        subtotalAmount: SUBTOTAL,
+        voucherAmount: 50,
+      });
+
+      expect(withVoucher.sellerMarketplaceCommission.amount).toBe(
+        withoutVoucher.sellerMarketplaceCommission.amount,
+      );
+      expect(withVoucher.sellerNetAmount).toBe(withoutVoucher.sellerNetAmount);
+    });
+
+    it('combines with a seller discount without either affecting the other', async () => {
+      const r = await PricingEngineService.calculateOrderPricing({
+        subtotalAmount: SUBTOTAL,
+        discountAmount: 200,
+        voucherAmount: 50,
+      });
+      // Buyer-fee base: 1,000 - 200 discount - 50 voucher.
+      expect(r.orderAmount).toBe(750);
+      // Commission base: 1,000 - 200 discount only, per F4/F40 — the voucher
+      // never enters it.
+      expect(r.sellerMarketplaceCommission.amount).toBe(16);
+    });
+
+    it('never goes negative when a voucher exceeds the subtotal', async () => {
+      const r = await PricingEngineService.calculateOrderPricing({
+        subtotalAmount: SUBTOTAL,
+        voucherAmount: SUBTOTAL + 500,
+      });
+      expect(r.orderAmount).toBe(0);
+    });
+  });
 });
