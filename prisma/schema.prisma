@@ -691,6 +691,7 @@ model ProductOptions {
   product Products              @relation(fields: [productId], references: [id], onDelete: Cascade)
   values  ProductOptionValues[]
 
+  @@unique([productId, name])
   @@index([productId])
 }
 
@@ -704,7 +705,22 @@ model ProductOptionValues {
   option   ProductOptions                @relation(fields: [optionId], references: [id], onDelete: Cascade)
   variants ProductVariantToOptionValue[]
 
+  @@unique([optionId, value])
   @@index([optionId])
+}
+
+model CategoryVariantSuggestions {
+  id         String   @id @default(cuid())
+  categoryId String
+  name       String
+  position   Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  category Categories @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, name])
+  @@index([categoryId, position])
 }
 
 model ProductVariantToOptionValue {
@@ -735,7 +751,7 @@ model SupplierProducts {
   @@index([productId])
 }
 
-model Categories {
+model   Categories {
   id                String              @id @default(cuid())
   parentId          String?
   name              String
@@ -751,6 +767,8 @@ model Categories {
   primaryForStores  Stores[]            @relation("StorePrimaryCategory")
   commissionRules   CommissionRules?
   pricingComponents PricingComponents[]
+  /// Suggested product-option names, inherited by sub-categories at read time.
+  variantSuggestions CategoryVariantSuggestions[]
 
   @@unique([parentId, name])
   @@index([parentId])

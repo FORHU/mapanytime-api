@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { seedUsers } from './seeders/users.seeder';
 import { seedRoles } from './seeders/roles.seeder';
 import { seedCategories } from './seeders/categories.seeder';
+import { seedCategoryVariantSuggestions } from './seeders/category_variant_suggestions.seeder';
 import { seedPaymentProviders } from './seeders/payments.seeder';
 import { seedPricingConfiguration } from './seeders/pricing.seeder';
 import { seedStoresAndProducts } from './seeders/stores_and_products.seeder';
@@ -20,6 +21,8 @@ async function main() {
     await seedRoles(prisma);
     await seedUsers(prisma);
     await seedCategories(prisma);
+    // Depends only on Categories, and keeps the taxonomy block contiguous.
+    await seedCategoryVariantSuggestions(prisma);
     await seedTags(prisma);
     await seedPaymentProviders(prisma);
     await seedPricingConfiguration(prisma);

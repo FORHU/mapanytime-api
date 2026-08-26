@@ -22,6 +22,58 @@ export default class CategoryService {
     return CategoryRepository.getRootCategories();
   }
 
+  static async getVariantSuggestions(categoryId: string) {
+    const category = await prisma.categories.findFirst({
+      where: { id: categoryId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!category) throw { status: 404, message: 'Category not found.' };
+
+    const closure = await CategoryRepository.getAncestorClosure([categoryId]);
+    const rows = await CategoryRepository.getVariantSuggestionsForCategories(
+      closure.map((node) => node.id),
+    );
+
+    const byId = new Map(closure.map((node) => [node.id, node]));
+    const chain: { id: string; name: string }[] = [];
+    let cursor = byId.get(categoryId);
+    while (cursor) {
+      chain.push({ id: cursor.id, name: cursor.name });
+      cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
+    }
+
+    const byCategory = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const bucket = byCategory.get(row.categoryId) ?? [];
+      bucket.push(row);
+      byCategory.set(row.categoryId, bucket);
+    }
+
+    // Case-insensitive dedupe, nearest category wins — a sub-category that
+    // re-declares "Color" keeps its own position rather than the root's.
+    const seen = new Set<string>();
+    const suggestions: {
+      name: string;
+      source: 'category' | 'inherited';
+      fromCategoryName: string | null;
+    }[] = [];
+
+    for (const [depth, node] of chain.entries()) {
+      for (const row of byCategory.get(node.id) ?? []) {
+        const key = row.name.trim().toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        suggestions.push({
+          name: row.name,
+          source: depth === 0 ? 'category' : 'inherited',
+          fromCategoryName: depth === 0 ? null : node.name,
+        });
+      }
+    }
+
+    return { categoryId, suggestions };
+  }
+
   static async updateCategory(payload: {
     categoryId: string;
     updateData: { name?: string; description?: string };

@@ -7,6 +7,20 @@ import { money } from '../../helpers/money.helper';
 import { ALLOWED_PRODUCT_TAGS } from '../../helpers/product-tags';
 import { PRODUCT_LIMITS } from '../../constants/product-limits.constant';
 
+const optionsSchema = Joi.array()
+  .max(PRODUCT_LIMITS.OPTIONS_MAX)
+  .items(
+    Joi.object({
+      name: Joi.string().trim().min(1).max(PRODUCT_LIMITS.OPTION_NAME_MAX).required(),
+      values: Joi.array()
+        .min(1)
+        .max(PRODUCT_LIMITS.OPTION_VALUES_MAX)
+        .items(Joi.string().trim().min(1).max(PRODUCT_LIMITS.OPTION_VALUE_MAX))
+        .required(),
+    }),
+  )
+  .optional();
+
 export default class ProductController {
   static async create(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
@@ -22,6 +36,7 @@ export default class ProductController {
       isActive: Joi.boolean().default(false),
       initialStock: Joi.number().integer().min(0).max(PRODUCT_LIMITS.STOCK_MAX).default(0),
       imageIds: Joi.array().items(Joi.string()).optional(),
+      options: optionsSchema,
     });
 
     const { error, value } = schema.validate(req.body);
@@ -149,6 +164,8 @@ export default class ProductController {
       tags: Joi.array()
         .items(Joi.string().valid(...ALLOWED_PRODUCT_TAGS))
         .optional(),
+      // Same replace-all contract as `tags` above.
+      options: optionsSchema,
     });
 
     const { error, value } = schema.validate(req.body);

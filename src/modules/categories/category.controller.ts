@@ -58,6 +58,15 @@ export default class CategoryController {
     }
   }
 
+  static async variantSuggestions(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await CategoryService.getVariantSuggestions(req.params.id);
+      return responseSuccess(res, 200, data, 'Variant suggestions fetched successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async index(req: Request, res: Response, next: NextFunction) {
     try {
       const servicePayload = {

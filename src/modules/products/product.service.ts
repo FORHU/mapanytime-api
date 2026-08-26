@@ -5,6 +5,11 @@ import CategoryService from '../categories/category.service';
 import { prisma } from '../../utils/prisma';
 import { buildPage } from '../../helpers/pagination.helper';
 import { AllowedProductTag } from '../../helpers/product-tags';
+import {
+  normalizeProductOptions,
+  toOptionsCreateInput,
+  type RawProductOption,
+} from './product-options.helper';
 
 export interface CategoryTreeNode {
   id: string;
@@ -31,6 +36,7 @@ export default class ProductService {
       isActive?: boolean;
       initialStock?: number;
       imageIds?: string[];
+      options?: RawProductOption[];
     },
   ) {
     const seller = await ProductRepository.getSellerByUserId(userId);
@@ -51,7 +57,9 @@ export default class ProductService {
       throw { status: 403, message: 'Store must be approved before adding products.' };
     }
 
-    const { tags, initialStock = 0, imageIds, categoryId, ...productFields } = payload;
+    // `options` MUST be destructured out: left in `...productFields` it reaches
+    // Prisma as a raw array where a nested write is expected.
+    const { tags, initialStock = 0, imageIds, categoryId, options, ...productFields } = payload;
 
     const tagsInput =
       tags && tags.length > 0
@@ -64,34 +72,50 @@ export default class ProductService {
           }
         : undefined;
 
-    const newProduct = await ProductRepository.createProduct({
-      ...productFields,
-      store: { connect: { id: storeId } },
-      category: { connect: { id: categoryId } },
-      tags: tagsInput,
-    });
+    const normalizedOptions = normalizeProductOptions(options);
+    const optionsInput =
+      normalizedOptions.length > 0
+        ? { create: toOptionsCreateInput(normalizedOptions) }
+        : undefined;
 
-    await prisma.inventory.create({
-      data: {
-        productId: newProduct.id,
-        storeId: storeId,
-        quantityOnHand: initialStock,
-        quantityReserved: 0,
-      },
-    });
+    // One user intent, one commit. These were three unguarded writes: a failed
+    // inventory.create left a product with NO inventory row, which then made
+    // every later stock edit throw "Inventory record not found" forever.
+    // Authorisation reads stay outside so they don't hold the transaction open.
+    return prisma.$transaction(async (tx) => {
+      const newProduct = await ProductRepository.createProduct(
+        {
+          ...productFields,
+          store: { connect: { id: storeId } },
+          category: { connect: { id: categoryId } },
+          tags: tagsInput,
+          options: optionsInput,
+        },
+        tx,
+      );
 
-    if (imageIds && imageIds.length > 0) {
-      await prisma.productImages.createMany({
-        data: imageIds.map((fileId, index) => ({
+      await tx.inventory.create({
+        data: {
           productId: newProduct.id,
-          fileId,
-          isPrimary: index === 0,
-          displayOrder: index,
-        })),
+          storeId: storeId,
+          quantityOnHand: initialStock,
+          quantityReserved: 0,
+        },
       });
-    }
 
-    return newProduct;
+      if (imageIds && imageIds.length > 0) {
+        await tx.productImages.createMany({
+          data: imageIds.map((fileId, index) => ({
+            productId: newProduct.id,
+            fileId,
+            isPrimary: index === 0,
+            displayOrder: index,
+          })),
+        });
+      }
+
+      return newProduct;
+    });
   }
 
   /**
@@ -246,6 +270,7 @@ export default class ProductService {
       isActive?: boolean;
       tags?: AllowedProductTag[];
       stock?: number;
+      options?: RawProductOption[];
     },
   ) {
     const seller = await ProductRepository.getSellerByUserId(userId);
@@ -263,7 +288,9 @@ export default class ProductService {
       throw { status: 403, message: 'Unauthorized to update this product.' };
     }
 
-    const { tags, categoryId, brand, description, stock, ...fields } = payload;
+    // `options`, like `tags`, MUST be destructured out — left in `...fields` it
+    // reaches Prisma as a raw array where a nested write is expected.
+    const { tags, categoryId, brand, description, stock, options, ...fields } = payload;
 
     // `brand` and `description` are nullable columns, so an empty string from a
     // form means "cleared" and is stored as NULL rather than ''.
@@ -288,6 +315,15 @@ export default class ProductService {
               create: tags.map((name) => ({
                 tag: { connect: { name } },
               })),
+            },
+          }
+        : {}),
+
+      ...(options !== undefined
+        ? {
+            options: {
+              deleteMany: {},
+              create: toOptionsCreateInput(normalizeProductOptions(options)),
             },
           }
         : {}),
