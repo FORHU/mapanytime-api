@@ -1,5 +1,18 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
+
+export const PRODUCT_OPTIONS_INCLUDE = {
+  orderBy: { position: 'asc' },
+  select: {
+    id: true,
+    name: true,
+    position: true,
+    values: {
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, value: true },
+    },
+  },
+} satisfies Prisma.Products$optionsArgs;
 import { S3_CDN_URL } from '../../config';
 import S3Util from '../../utils/s3.util';
 import { liveWindowFilter } from '../merchantAds/adWindow';
@@ -26,8 +39,17 @@ export default class ProductRepository {
     });
   }
 
-  static async createProduct(data: Prisma.ProductsCreateInput) {
-    return prisma.products.create({
+  /**
+   * `client` lets a caller run this inside an existing transaction — product
+   * creation writes the product, its inventory row and its images together, and
+   * a partial result leaves a product whose stock can never be edited.
+   * Same signature shape as `updateProduct` below.
+   */
+  static async createProduct(
+    data: Prisma.ProductsCreateInput,
+    client: Prisma.TransactionClient = prisma,
+  ) {
+    return client.products.create({
       data,
     });
   }
@@ -77,6 +99,7 @@ export default class ProductRepository {
           category: true,
           tags: { include: { tag: true } },
           inventory: true,
+          options: PRODUCT_OPTIONS_INCLUDE,
           store: { select: { storeName: true } },
           productImages: {
             include: { file: { select: { path: true, bucket: true } } },
@@ -151,6 +174,7 @@ export default class ProductRepository {
         category: true,
         tags: { include: { tag: true } },
         inventory: true,
+        options: PRODUCT_OPTIONS_INCLUDE,
       },
     });
   }
@@ -207,6 +231,7 @@ export default class ProductRepository {
         include: {
           category: true,
           tags: { include: { tag: true } },
+          options: PRODUCT_OPTIONS_INCLUDE,
           store: { select: { id: true, storeName: true } },
           productImages: {
             where: { isPrimary: true },

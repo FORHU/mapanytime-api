@@ -127,6 +127,16 @@ export default class CategoryRepository {
     return [...seen.values()];
   }
 
+  static async getVariantSuggestionsForCategories(categoryIds: string[]) {
+    if (categoryIds.length === 0) return [];
+
+    return prisma.categoryVariantSuggestions.findMany({
+      where: { categoryId: { in: categoryIds } },
+      orderBy: [{ position: 'asc' }, { name: 'asc' }],
+      select: { categoryId: true, name: true, position: true },
+    });
+  }
+
   static async updateCategory(id: string, data: { name?: string; description?: string }) {
     return prisma.categories.update({
       where: { id },

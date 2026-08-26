@@ -20,4 +20,14 @@ export const PRODUCT_LIMITS = {
   PRICE_MAX: 999_999_999.99,
   /** `Inventory.quantityOnHand` is int4; this stays well inside it. */
   STOCK_MAX: 999_999_999,
+
+  // ── Option tier (Size: S/M/L, Color: Red/Blue) ──────────────────────────
+  // We do not generate combinations — the product keeps one price and one
+  // stock number — so these are UX bounds rather than a combinatorial guard.
+  /** Distinct option names per product, e.g. Size + Color + Material. */
+  OPTIONS_MAX: 3,
+  OPTION_NAME_MAX: 40,
+  /** Choices within one option, e.g. how many sizes. */
+  OPTION_VALUES_MAX: 20,
+  OPTION_VALUE_MAX: 40,
 } as const;

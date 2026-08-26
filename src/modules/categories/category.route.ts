@@ -12,6 +12,7 @@ router.get('/', CategoryController.index);
 router.get('/roots', CategoryController.listRootCategories);
 router.get('/branches', CategoryController.listBranchCategories);
 router.get('/trees', CategoryController.listCategoryTrees);
+router.get('/:id/variant-suggestions', authenticate, CategoryController.variantSuggestions);
 router.put('/:id', authenticate, requireAdmin, CategoryController.update);
 router.delete('/:id', authenticate, requireAdmin, CategoryController.destroy);
 

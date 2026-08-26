@@ -157,6 +157,64 @@ paths:
         '404':
           description: No categories found
 
+  /v1/categories/{id}/variant-suggestions:
+    get:
+      summary: Suggested product-option names for a category
+      description: >
+        Returns the option names to offer in the seller's product option builder
+        (e.g. Size, Color, Alcohol Level), merged with everything inherited from
+        the category's ancestors. Suggestion-only — sellers can always type a
+        custom name instead.
+
+
+        Unlike /root, /branch and /trees, this returns 200 with an empty array
+        rather than 404 when a category has no suggestions: most categories have
+        none of their own, and the seller form treats a non-2xx as a hard error.
+      tags: [Categories]
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The category to fetch suggestions for (usually the sub-category the product is filed under).
+      responses:
+        '200':
+          description: Suggestions retrieved successfully (may be an empty list)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: success }
+                  statusCode: { type: integer, example: 200 }
+                  message: { type: string, example: Variant suggestions fetched successfully }
+                  data:
+                    type: object
+                    properties:
+                      categoryId: { type: string }
+                      suggestions:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name: { type: string, example: Size }
+                            source:
+                              type: string
+                              enum: [category, inherited]
+                              description: Whether this came from the requested category itself or an ancestor.
+                            fromCategoryName:
+                              type: string
+                              nullable: true
+                              example: Shopping & Retail
+                              description: The ancestor it was inherited from; null when source is `category`.
+        '401':
+          description: Unauthorized (Invalid or missing token)
+        '404':
+          description: Category not found
+
   /v1/categories/{id}:
     patch:
       summary: Update a category
