@@ -59,6 +59,8 @@ export const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY || '';
 export const AWS_S3_BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME || process.env.S3_BUCKET || '';
 export const S3_CDN_URL = process.env.S3_CDN_URL || '';
 
+export const THIRD_PARTY_API_KEY = process.env.THIRD_PARTY_API_KEY || '';
+
 export const isDev = NODE_ENV === 'development';
 
 /**
