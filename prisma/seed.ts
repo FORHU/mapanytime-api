@@ -6,6 +6,7 @@ import { seedCategoryVariantSuggestions } from './seeders/category_variant_sugge
 import { seedPaymentProviders } from './seeders/payments.seeder';
 import { seedPricingConfiguration } from './seeders/pricing.seeder';
 import { seedStoresAndProducts } from './seeders/stores_and_products.seeder';
+import { seedMarkerShowcase } from './seeders/marker_showcase.seeder';
 import { seedMarketplaceData } from './seeders/marketplace_data.seeder';
 import { seedMultiStoreSeller } from './seeders/multi_store_seller.seeder';
 import { seedTags } from './seeders/tags.seeder';
@@ -27,6 +28,7 @@ async function main() {
     await seedPaymentProviders(prisma);
     await seedPricingConfiguration(prisma);
     await seedStoresAndProducts(prisma);
+    await seedMarkerShowcase(prisma);
     await seedMarketplaceData(prisma);
     await seedMultiStoreSeller(prisma);
     await seedBulkMapStores(prisma);

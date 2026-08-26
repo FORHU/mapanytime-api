@@ -17,6 +17,9 @@ export interface NearbyStore {
   categoryId: string | null;
   categoryName: string | null;
   isOpen: boolean;
+  markerDisplayMode: string;
+  markerPrice: number | null;
+  markerSubtitle: string | null;
   address: {
     currentAddress: string;
     city: string;
@@ -46,6 +49,9 @@ interface NearbyRow {
   province: string;
   country: string;
   distanceKm: number;
+  markerDisplayMode: string;
+  markerPrice: Prisma.Decimal | null;
+  markerSubtitle: string | null;
 }
 
 // No hours row for today (isClosed is null) defaults to open — matches the
@@ -128,6 +134,7 @@ export default class StoreRepository {
         f."path" AS "logoUrl",
         f2."path" AS "markerPhotoUrl",
         s."ratingAverage", s."ratingCount",
+        s."markerDisplayMode", s."markerPrice", s."markerSubtitle",
         s."primaryCategoryId" AS "categoryId",
         h."isClosed" AS "hoursIsClosed", h."openMinutes", h."closeMinutes",
         l."latitude", l."longitude",
@@ -171,6 +178,9 @@ export default class StoreRepository {
       categoryId: r.categoryId,
       categoryName: r.categoryName,
       isOpen: isOpenNow(r.hoursIsClosed, r.openMinutes, r.closeMinutes),
+      markerDisplayMode: r.markerDisplayMode,
+      markerPrice: r.markerPrice === null ? null : Number(r.markerPrice),
+      markerSubtitle: r.markerSubtitle,
       distanceKm: Number(r.distanceKm),
       coordinates: { lat: r.latitude, lng: r.longitude },
       address: {
