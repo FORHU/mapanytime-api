@@ -16,10 +16,10 @@ const productLinkSchema = Joi.object({
  * in the service, which has the stored row to compare against.
  */
 const scheduleWindow = (
-  value: { startAt?: Date; expiresAt?: Date },
+  value: { startAt?: Date; expiresAt?: Date; badgeId?: string | null; badgeLabel?: string | null },
   helpers: Joi.CustomHelpers,
 ) => {
-  const { startAt, expiresAt } = value;
+  const { startAt, expiresAt, badgeId, badgeLabel } = value;
 
   if (startAt && expiresAt) {
     const durationMs = expiresAt.getTime() - startAt.getTime();
@@ -40,6 +40,12 @@ const scheduleWindow = (
     } as Joi.LanguageMessages);
   }
 
+  if (badgeId && badgeLabel) {
+    return helpers.message({
+      custom: 'Choose a preset badge or type a custom one, not both.',
+    } as Joi.LanguageMessages);
+  }
+
   return value;
 };
 
@@ -48,7 +54,8 @@ const adFieldsSchema = {
   title: Joi.string().required(),
   description: Joi.string().required(),
   imageUrl: Joi.string().optional(),
-  badgeLabel: Joi.string().optional(),
+  badgeId: Joi.string().allow(null).optional(),
+  badgeLabel: Joi.string().trim().max(24).allow(null, '').optional(),
   ctaLabel: Joi.string().optional(),
   salaryLabel: Joi.string().optional(),
   goal: Joi.string().valid('STORE_VISITS', 'IMPRESSIONS', 'PURCHASES').optional(),
@@ -124,6 +131,15 @@ export default class MerchantAdsController {
         value.lng,
         value.limit,
       );
+      return responseSuccess(res, 200, data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async badges(req: Request, res: Response, next: NextFunction) {
+    try {
+      const data = await MerchantAdsService.listBadges();
       return responseSuccess(res, 200, data);
     } catch (error) {
       next(error);

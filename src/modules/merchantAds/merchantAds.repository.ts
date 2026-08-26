@@ -11,6 +11,17 @@ export default class MerchantAdsRepository {
     return prisma.stores.findUnique({ where: { id: storeId } });
   }
 
+  static async listActiveBadges() {
+    return prisma.promotionBadges.findMany({
+      where: { isActive: true },
+      orderBy: { position: 'asc' },
+    });
+  }
+
+  static async getBadgeById(badgeId: string) {
+    return prisma.promotionBadges.findUnique({ where: { id: badgeId } });
+  }
+
   /**
    * The zone every wall-clock time for this store's ads is interpreted in.
    * Falls back to the column default rather than the server's zone — a server
