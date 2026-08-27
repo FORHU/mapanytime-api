@@ -2,7 +2,7 @@
 
 Triage batch raised **2026-08-24**, worked **2026-08-25** and **2026-08-27**.
 Continues the numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently
-F39–F93.
+F39–F96.
 
 F84–F88 come from a sweep of the returns and refund path — the current branch's
 own module, and ground neither register had covered.
@@ -1003,7 +1003,110 @@ refund path, one confirming `APPROVED → APPROVED` no longer re-runs
 
 ---
 
+## 🔴 Raised 2026-08-27 — production CORS, and the web front end is down
+
+Found from a screenshot of the production console, not from a sweep. Every
+request from `https://www.mapanytime.com` failed, login included.
+
+### F94. Production accepts no browser origin at all
+
+`CORS_ORIGIN` in the production environment matches neither front-end origin,
+so the allowlist added by `14a3950` refuses every browser that calls the API.
+Measured against the live host on 2026-08-27:
+
+| Preflight to `https://mapanytime.com/api/v1/auth/login` | Result                    |
+| :------------------------------------------------------ | :------------------------ |
+| no `Origin` header (curl, Postman, Flutter)             | **204**                   |
+| `Origin: https://www.mapanytime.com`                    | **500**, no `ACAO` header |
+| `Origin: https://mapanytime.com`                        | **500**, no `ACAO` header |
+| `Origin: https://evil.example`                          | 500                       |
+
+The API is up and healthy. It rejects the apex — its own host — which is what
+distinguishes this from a missing `www` entry: the value is wrong, not merely
+incomplete.
+
+**Timeline.** Until 2026-08-20 `src/app.ts` read
+`origin: (origin, callback) => callback(null, true)`, so any host worked.
+`14a3950` ("feat(security): admin endpoints, order expiry window, and CORS
+allowlisting", the F22 fix) replaced that with the allowlist and added a
+production guard that throws when `CORS_ORIGIN` is empty. The guard is
+satisfied by any non-empty string. Whoever set the secret satisfied it with a
+value that names neither origin, and from the first production deploy after
+that commit the web front end has been unusable.
+
+The symptom differs by host, which is why it can look intermittent. Both `www`
+and the apex serve the site with a 200 and no redirect between them (F96), and
+the bundle always calls the apex API:
+
+- from `www` the call is cross-origin, so the browser reports CORS;
+- from the apex it is same-origin, so the browser says nothing about CORS and
+  the user gets a bare 500 from `/auth/login`.
+
+**Three things hid it for a week.** Rejection throws, so it surfaced as
+`500 - Internal Server Error` and read as a crash (F95). Every non-browser
+client sends no `Origin` and takes the pass-through branch, so curl, Postman
+and the Flutter app all reported the API healthy. And local dev leaves
+`CORS_ORIGIN` unset, which opens the allowlist entirely — this cannot reproduce
+on a developer machine.
+
+**Not fixable from this repo.** The value is a GitHub Actions secret, written
+into the server `.env` by `deploy-production.yml:110`. Set it to
+`https://mapanytime.com,https://www.mapanytime.com` — bare origins, comma
+separated, no trailing slash, matching is exact string equality — and re-run
+the production deploy. `CORS_ORIGIN` also feeds the socket allowlist, so
+realtime is down for the same reason and recovers with it. Staging deserves the
+same check; the same secret name is read by `deploy-staging.yml:127`.
+
+### ~~F95. The failure could not be diagnosed from the logs~~ — FIXED 2026-08-27
+
+Two gaps, both of which kept F94 invisible:
+
+1. The origin callback rejected with a bare `Error`, which the global handler
+   maps to a 500. A configuration fact was logged identically to a crash, and
+   the log line named neither the rejected origin nor the allowlist it was
+   checked against.
+2. `assertConfigured` proves only that `CORS_ORIGIN` is non-empty. Nothing ever
+   printed the parsed allowlist, so a wrong value and a right one are
+   indistinguishable until a browser tries to load the site.
+
+Fixed in a new `src/middleware/cors.middleware.ts`, now the single allowlist for
+both HTTP and the socket gateway — they each parsed `CORS_ORIGIN` for
+themselves before, which is the drift F73 records elsewhere:
+
+- a rejected origin returns **403** and logs the origin alongside the allowlist;
+- the parsed allowlist is logged at boot;
+- entries that cannot match a browser `Origin` (no scheme, a path, `*`) are
+  warned about at boot;
+- a trailing slash is stripped rather than silently failing to match — it is
+  the most common way to write this value wrong, and its intent is unambiguous.
+
+Covered by `tests/unit/cors.allowlist.test.ts` (16 cases), which pin the
+no-`Origin` pass-through and the `www`/apex distinction that F94 turned on.
+Suite: 536 tests / 53 suites passing, `tsc`, ESLint and Prettier clean.
+
+This changes no verdict: the same origins are accepted and refused as before.
+
+### F96. There is no canonical host
+
+`https://mapanytime.com` and `https://www.mapanytime.com` both serve the site
+with a 200 and neither redirects to the other, while the bundle calls the apex
+API on both. So half the traffic makes a cross-origin, preflighted call for no
+reason, and the two hosts fail differently under F94.
+
+Pick one, 301 the other at nginx, and set `NEXT_PUBLIC_SITE_URL` to match. It
+removes the preflight, halves what `CORS_ORIGIN` has to get right, and stops
+`www` and apex sessions being separate origins for anything origin-scoped.
+
+**Not fixed** — it is an infrastructure change, and which host is canonical is
+a call worth making deliberately (SEO and any existing links point at both).
+
+---
+
 ## Suggested order for tomorrow
+
+**F94 comes before any of this.** It is a live outage, the fix is one secret
+and a redeploy, and every hour it stays open is an hour nobody can use the
+site. Everything below is work on a system no customer can currently reach.
 
 1. **F63** — the reward rate. One number, and F39–F42 plus F47–F54 all wait on
    it.
