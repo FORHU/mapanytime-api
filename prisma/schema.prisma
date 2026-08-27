@@ -997,8 +997,8 @@ model RewardConfigurations {
   version  Int     @default(1)
   isActive Boolean @default(true)
 
-  earnRatePhpPerPoint Decimal @default(100.00) @db.Decimal(10, 2) // ₱100 = 1 pt
-  pointValueInPhp     Decimal @default(0.10) @db.Decimal(10, 4) // 1 pt = ₱0.10
+  earnPercentage  Decimal @default(0.0010) @db.Decimal(7, 6) // fraction of eligible spend, 0.0010 = 0.1%
+  pointValueInPhp Decimal @default(0.10) @db.Decimal(10, 4) // 1 pt = ₱0.10
   expirationMonths    Int     @default(12)
   isEarningActive     Boolean @default(true)
 

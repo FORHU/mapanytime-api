@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { USERVOUCHERSTATUS, REWARDDISCOUNTTYPE } from '@prisma/client';
 import RewardService, {
-  DEFAULT_EARN_RATE_PHP_PER_POINT,
+  DEFAULT_EARN_PERCENTAGE,
   DEFAULT_POINT_VALUE_PHP,
 } from './reward.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
@@ -79,7 +79,7 @@ export default class RewardController {
         res,
         200,
         {
-          earnRatePhpPerPoint: config?.earnRatePhpPerPoint ?? DEFAULT_EARN_RATE_PHP_PER_POINT,
+          earnPercentage: config?.earnPercentage ?? DEFAULT_EARN_PERCENTAGE,
           pointValueInPhp: config?.pointValueInPhp ?? DEFAULT_POINT_VALUE_PHP,
           isEarningActive: config?.isEarningActive ?? true,
         },

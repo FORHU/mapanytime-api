@@ -11,7 +11,7 @@ import { buildPage, PaginationParams } from '../../helpers/pagination.helper';
 
 type DbClient = Prisma.TransactionClient | PrismaClient;
 
-export const DEFAULT_EARN_RATE_PHP_PER_POINT = 100;
+export const DEFAULT_EARN_PERCENTAGE = 0.001;
 export const DEFAULT_POINT_VALUE_PHP = 0.1;
 const DEFAULT_EXPIRATION_MONTHS = 12;
 
@@ -28,7 +28,7 @@ function addDays(date: Date, days: number) {
 }
 
 export interface UpdateRewardConfigInput {
-  earnRatePhpPerPoint?: number;
+  earnPercentage?: number;
   pointValueInPhp?: number;
   expirationMonths?: number;
   isEarningActive?: boolean;
@@ -60,7 +60,7 @@ export default class RewardService {
     this.warnedNoConfiguration = true;
     logger.warn(
       '[Rewards] No active RewardConfigurations row. Falling back to built-in defaults: ' +
-        '₱100 = 1 point, 1 point = ₱0.10, 12-month expiry.',
+        '0.1% earn rate, 1 point = ₱0.10, 12-month expiry.',
     );
   }
 
@@ -76,7 +76,7 @@ export default class RewardService {
   private static async resolveConfig(client: DbClient) {
     const config = await this.getActiveConfig(client);
     return {
-      earnRatePhpPerPoint: config ? Number(config.earnRatePhpPerPoint) : DEFAULT_EARN_RATE_PHP_PER_POINT,
+      earnPercentage: config ? Number(config.earnPercentage) : DEFAULT_EARN_PERCENTAGE,
       pointValueInPhp: config ? Number(config.pointValueInPhp) : DEFAULT_POINT_VALUE_PHP,
       expirationMonths: config ? config.expirationMonths : DEFAULT_EXPIRATION_MONTHS,
       isEarningActive: config ? config.isEarningActive : true,
@@ -95,6 +95,10 @@ export default class RewardService {
    * same transaction as OrderService.completeOrder, right after the
    * settlement is booked. Points on the eligible net goods subtotal only
    * (subtotal - discount), same base the platform's other ledgers use.
+   * Proportional to spend (rounded to the nearest whole point) — not floored
+   * to a fixed-₱ block, so there is no minimum-spend cliff. Amounts under
+   * about half a point's worth still round to zero; that's the rate being
+   * too fine-grained for the purchase, not a bug.
    */
   static async awardPointsForCompletedOrder(client: DbClient, orderId: string) {
     const existing = await client.rewardTransactions.findFirst({
@@ -109,7 +113,8 @@ export default class RewardService {
     if (!config.isEarningActive) return null;
 
     const eligibleBase = Math.max(0, Number(order.subtotalAmount) - Number(order.discountAmount));
-    const points = Math.floor(eligibleBase / config.earnRatePhpPerPoint);
+    const pointsValuePhp = eligibleBase * config.earnPercentage;
+    const points = Math.round(pointsValuePhp / config.pointValueInPhp);
     if (points <= 0) return null;
 
     const wallet = await this.getOrCreateWallet(client, order.buyerId);
@@ -400,8 +405,7 @@ export default class RewardService {
         data: {
           version: (current?.version ?? 0) + 1,
           isActive: true,
-          earnRatePhpPerPoint:
-            patch.earnRatePhpPerPoint ?? current?.earnRatePhpPerPoint ?? DEFAULT_EARN_RATE_PHP_PER_POINT,
+          earnPercentage: patch.earnPercentage ?? current?.earnPercentage ?? DEFAULT_EARN_PERCENTAGE,
           pointValueInPhp: patch.pointValueInPhp ?? current?.pointValueInPhp ?? DEFAULT_POINT_VALUE_PHP,
           expirationMonths:
             patch.expirationMonths ?? current?.expirationMonths ?? DEFAULT_EXPIRATION_MONTHS,

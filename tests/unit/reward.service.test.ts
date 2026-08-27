@@ -33,7 +33,7 @@ jest.mock('../../src/utils/prisma', () => ({ prisma: {} }));
  * must not double-credit. See OPEN-FLAGS.md F47/F54.
  */
 describe('RewardService.awardPointsForCompletedOrder', () => {
-  it('credits points at the default rate (₱100 = 1 point) with no configured rate', async () => {
+  it('credits points at the default 0.1% earn rate with no configured rate', async () => {
     const client = buildMockClient();
     client.orders.findUnique.mockResolvedValue({
       id: 'order-1',
@@ -77,7 +77,7 @@ describe('RewardService.awardPointsForCompletedOrder', () => {
 
     await RewardService.awardPointsForCompletedOrder(client as never, 'order-1');
 
-    // (1000 - 200) / 100 = 8 points.
+    // (1000 - 200) * 0.001 / 0.1 = 8 points.
     expect(client.rewardWallet.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { balance: { increment: 8 }, lifetimeEarned: { increment: 8 } } }),
     );
@@ -94,7 +94,7 @@ describe('RewardService.awardPointsForCompletedOrder', () => {
     expect(result).toEqual({ id: 'txn-1', type: 'EARN' });
   });
 
-  it('awards nothing for an order under the earn threshold', async () => {
+  it('rounds a sub-100 order to the nearest point instead of flooring it to zero', async () => {
     const client = buildMockClient();
     client.orders.findUnique.mockResolvedValue({
       id: 'order-1',
@@ -103,7 +103,33 @@ describe('RewardService.awardPointsForCompletedOrder', () => {
       discountAmount: 0,
     });
     client.rewardTransactions.findFirst.mockResolvedValue(null);
+    client.rewardWallet.findUnique.mockResolvedValue(null);
+    client.rewardWallet.create.mockResolvedValue({ id: 'wallet-1', balance: 0 });
+    client.rewardWallet.update.mockResolvedValue({ id: 'wallet-1', balance: 1 });
+    client.rewardTransactions.create.mockImplementation(({ data }) => Promise.resolve(data));
 
+    // 50 * 0.001 / 0.1 = 0.5 points, rounds up to 1 (no ₱100 floor cliff anymore).
+    const result = await RewardService.awardPointsForCompletedOrder(client as never, 'order-1');
+
+    expect(client.rewardWallet.update).toHaveBeenCalledWith({
+      where: { id: 'wallet-1' },
+      data: { balance: { increment: 1 }, lifetimeEarned: { increment: 1 } },
+    });
+    expect(result).toMatchObject({ amount: 1 });
+  });
+
+  it('still awards nothing when the amount rounds down to zero points', async () => {
+    const client = buildMockClient();
+    client.orders.findUnique.mockResolvedValue({
+      id: 'order-1',
+      buyerId: 'buyer-1',
+      subtotalAmount: 30,
+      discountAmount: 0,
+    });
+    client.rewardTransactions.findFirst.mockResolvedValue(null);
+
+    // 30 * 0.001 / 0.1 = 0.3 points, rounds down to 0 — genuinely below half
+    // a point's worth at the default rate, not a regression of the cliff fix.
     const result = await RewardService.awardPointsForCompletedOrder(client as never, 'order-1');
 
     expect(client.rewardWallet.update).not.toHaveBeenCalled();
