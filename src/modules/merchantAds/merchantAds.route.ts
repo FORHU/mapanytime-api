@@ -10,6 +10,8 @@ router.post('/:id/events', MerchantAdsController.recordEvent);
 
 // Seller-authenticated management
 router.get('/', authenticate, MerchantAdsController.index);
+// Above /:id/* so 'badges' isn't swallowed as an ad id.
+router.get('/badges', authenticate, MerchantAdsController.badges);
 router.get('/:id/analytics', authenticate, MerchantAdsController.analytics);
 router.post('/', authenticate, MerchantAdsController.create);
 router.put('/:id', authenticate, MerchantAdsController.update);

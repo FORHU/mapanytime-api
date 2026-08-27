@@ -11,6 +11,7 @@ import { seedMarketplaceData } from './seeders/marketplace_data.seeder';
 import { seedMultiStoreSeller } from './seeders/multi_store_seller.seeder';
 import { seedTags } from './seeders/tags.seeder';
 import { seedBulkMapStores } from './seeders/bulk_map_stores.seeder';
+import { seedPromotionBadges } from './seeders/promotion_badges.seeder';
 
 const prisma = new PrismaClient();
 
@@ -25,6 +26,7 @@ async function main() {
     // Depends only on Categories, and keeps the taxonomy block contiguous.
     await seedCategoryVariantSuggestions(prisma);
     await seedTags(prisma);
+    await seedPromotionBadges(prisma);
     await seedPaymentProviders(prisma);
     await seedPricingConfiguration(prisma);
     await seedStoresAndProducts(prisma);

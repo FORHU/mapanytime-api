@@ -513,6 +513,25 @@ enum ADWINDOWSTATE {
   ENDED
 }
 
+// Preset promotional badge options (Hot, Sale Now, Flash Sale, ...) sellers can
+// pick for a promotion's badgeLabel, instead of free-typing one every time.
+// `slug` is the stable seeding key; `label` is what's shown and copied onto
+// MerchantAds.badgeLabel at selection time.
+model PromotionBadges {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  label       String
+  description String?
+  position    Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ads MerchantAds[]
+
+  @@index([isActive, position])
+}
+
 model MerchantAds {
   id            String                @id @default(cuid())
   storeId       String
@@ -520,6 +539,11 @@ model MerchantAds {
   title         String
   description   String
   imageUrl      String?
+  badgeId       String?
+  // Denormalized snapshot of the badge's label at selection time (or a
+  // seller-typed custom string when badgeId is null). Buyer-facing reads
+  // (e.g. the /nearby feed and the mobile app) use this directly so they
+  // never need to join PromotionBadges.
   badgeLabel    String?
   ctaLabel      String?
   salaryLabel   String?
@@ -556,6 +580,7 @@ model MerchantAds {
   updatedAt DateTime @updatedAt
 
   store      Stores               @relation(fields: [storeId], references: [id])
+  badge      PromotionBadges?     @relation(fields: [badgeId], references: [id], onDelete: SetNull)
   products   MerchantAdProducts[]
   orderItems OrderItems[]
   adEvents   AdEvents[]
@@ -565,6 +590,7 @@ model MerchantAds {
   @@index([expiresAt])
   @@index([storeId, startAt, expiresAt])
   @@index([lastNotifiedState])
+  @@index([badgeId])
 }
 
 // Links an EVENT (or any ad) to the specific products/variants whose

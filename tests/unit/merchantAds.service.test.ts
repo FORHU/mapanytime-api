@@ -6,7 +6,7 @@ jest.mock('../../src/modules/merchantAds/merchantAds.repository');
 const seller = { id: 'seller-1', userId: 'user-1' };
 const store = { id: 'store-1', sellerId: 'seller-1' };
 const otherStore = { id: 'store-1', sellerId: 'seller-2' };
-const ad = { id: 'ad-1', storeId: 'store-1' };
+const ad = { id: 'ad-1', storeId: 'store-1', products: [] };
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -60,6 +60,160 @@ describe('MerchantAdsService.updateAd', () => {
       description: 'd',
     });
     expect(MerchantAdsRepository.replaceAdProducts).toHaveBeenCalledWith('ad-1', payload.products);
+  });
+});
+
+describe('MerchantAdsService badge resolution', () => {
+  const badge = {
+    id: 'badge-hot',
+    slug: 'HOT',
+    label: 'Hot',
+    description: 'Great for trending items',
+    isActive: true,
+  };
+
+  describe('createAd', () => {
+    beforeEach(() => {
+      (MerchantAdsRepository.getSellerByUserId as jest.Mock).mockResolvedValue(seller);
+      (MerchantAdsRepository.getStoreById as jest.Mock).mockResolvedValue(store);
+      (MerchantAdsRepository.createAd as jest.Mock).mockResolvedValue({ id: 'ad-1' });
+    });
+
+    it('resolves a preset badgeId to the DB row and ignores a client-sent label', async () => {
+      (MerchantAdsRepository.getBadgeById as jest.Mock).mockResolvedValue(badge);
+
+      await MerchantAdsService.createAd('user-1', {
+        storeId: 'store-1',
+        kind: 'PROMO',
+        title: 't',
+        description: 'd',
+        badgeId: 'badge-hot',
+        badgeLabel: 'ignored client text',
+      } as never);
+
+      expect(MerchantAdsRepository.getBadgeById).toHaveBeenCalledWith('badge-hot');
+      expect(MerchantAdsRepository.createAd).toHaveBeenCalledWith(
+        expect.objectContaining({
+          badgeLabel: 'Hot',
+          badge: { connect: { id: 'badge-hot' } },
+        }),
+      );
+    });
+
+    it('rejects an unknown badgeId', async () => {
+      (MerchantAdsRepository.getBadgeById as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        MerchantAdsService.createAd('user-1', {
+          storeId: 'store-1',
+          kind: 'PROMO',
+          title: 't',
+          description: 'd',
+          badgeId: 'does-not-exist',
+        } as never),
+      ).rejects.toMatchObject({ status: 400, code: 'BADGE_NOT_FOUND' });
+      expect(MerchantAdsRepository.createAd).not.toHaveBeenCalled();
+    });
+
+    it('rejects an inactive badgeId', async () => {
+      (MerchantAdsRepository.getBadgeById as jest.Mock).mockResolvedValue({
+        ...badge,
+        isActive: false,
+      });
+
+      await expect(
+        MerchantAdsService.createAd('user-1', {
+          storeId: 'store-1',
+          kind: 'PROMO',
+          title: 't',
+          description: 'd',
+          badgeId: 'badge-hot',
+        } as never),
+      ).rejects.toMatchObject({ status: 400, code: 'BADGE_NOT_FOUND' });
+    });
+
+    it('stores a custom badgeLabel with no badge connected', async () => {
+      await MerchantAdsService.createAd('user-1', {
+        storeId: 'store-1',
+        kind: 'PROMO',
+        title: 't',
+        description: 'd',
+        badgeLabel: '  My Custom Badge  ',
+      } as never);
+
+      expect(MerchantAdsRepository.getBadgeById).not.toHaveBeenCalled();
+      const call = (MerchantAdsRepository.createAd as jest.Mock).mock.calls[0][0];
+      expect(call.badgeLabel).toBe('My Custom Badge');
+      expect(call.badge).toBeUndefined();
+    });
+
+    it('leaves the badge fields off the write entirely when neither is sent', async () => {
+      await MerchantAdsService.createAd('user-1', {
+        storeId: 'store-1',
+        kind: 'PROMO',
+        title: 't',
+        description: 'd',
+      } as never);
+
+      const call = (MerchantAdsRepository.createAd as jest.Mock).mock.calls[0][0];
+      expect('badgeLabel' in call).toBe(false);
+      expect('badge' in call).toBe(false);
+    });
+  });
+
+  describe('updateAd', () => {
+    beforeEach(() => {
+      (MerchantAdsRepository.getAdById as jest.Mock).mockResolvedValue(ad);
+      (MerchantAdsRepository.getSellerByUserId as jest.Mock).mockResolvedValue(seller);
+      (MerchantAdsRepository.getStoreById as jest.Mock).mockResolvedValue(store);
+      (MerchantAdsRepository.updateAd as jest.Mock).mockResolvedValue({ id: 'ad-1' });
+    });
+
+    it('switches from a custom label to a preset, connecting the badge and overwriting the label', async () => {
+      (MerchantAdsRepository.getBadgeById as jest.Mock).mockResolvedValue(badge);
+
+      await MerchantAdsService.updateAd('user-1', 'ad-1', {
+        title: 't',
+        description: 'd',
+        badgeId: 'badge-hot',
+      } as never);
+
+      expect(MerchantAdsRepository.updateAd).toHaveBeenCalledWith(
+        'ad-1',
+        expect.objectContaining({
+          badgeLabel: 'Hot',
+          badge: { connect: { id: 'badge-hot' } },
+        }),
+      );
+    });
+
+    it('explicitly clears the badge when both fields are sent as null', async () => {
+      await MerchantAdsService.updateAd('user-1', 'ad-1', {
+        title: 't',
+        description: 'd',
+        badgeId: null,
+        badgeLabel: null,
+      } as never);
+
+      expect(MerchantAdsRepository.updateAd).toHaveBeenCalledWith(
+        'ad-1',
+        expect.objectContaining({
+          badgeLabel: null,
+          badge: { disconnect: true },
+        }),
+      );
+    });
+
+    it('leaves the badge untouched when neither field is present in the payload', async () => {
+      await MerchantAdsService.updateAd('user-1', 'ad-1', {
+        title: 'new title',
+        description: 'd',
+      } as never);
+
+      const call = (MerchantAdsRepository.updateAd as jest.Mock).mock.calls[0][1];
+      expect('badgeLabel' in call).toBe(false);
+      expect('badge' in call).toBe(false);
+    });
   });
 });
 

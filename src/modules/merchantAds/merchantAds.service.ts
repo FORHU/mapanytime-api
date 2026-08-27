@@ -17,7 +17,8 @@ interface AdFields {
   title: string;
   description: string;
   imageUrl?: string;
-  badgeLabel?: string;
+  badgeId?: string | null;
+  badgeLabel?: string | null;
   ctaLabel?: string;
   salaryLabel?: string;
   buyQuantity?: number;
@@ -196,6 +197,74 @@ export default class MerchantAdsService {
     }
   }
 
+  /**
+   * A preset (`badgeId` set) always wins: `badgeLabel` is overwritten from the
+   * badge row so a client-sent label can never drift from the seller's actual
+   * pick. Otherwise the trimmed `badgeLabel` is treated as a custom string.
+   * Throws 400 on an unknown or inactive badge id.
+   */
+  private static async lookupBadgeChoice(input: {
+    badgeId?: string | null;
+    badgeLabel?: string | null;
+  }): Promise<{ badgeLabel: string | null; badgeRowId: string | null }> {
+    if (input.badgeId) {
+      const badge = await MerchantAdsRepository.getBadgeById(input.badgeId);
+      if (!badge || !badge.isActive) {
+        throw {
+          status: 400,
+          code: 'BADGE_NOT_FOUND',
+          message: 'Select a valid badge from the list.',
+        };
+      }
+      return { badgeLabel: badge.label, badgeRowId: badge.id };
+    }
+
+    return { badgeLabel: input.badgeLabel?.trim() || null, badgeRowId: null };
+  }
+
+  /**
+   * Returns `undefined` when the caller's payload had neither key of its own
+   * (checked by the caller against the *original* payload — an object
+   * literal like `{ badgeId, badgeLabel }` always has both keys, even when
+   * both values are `undefined`, so that check can't be done in here),
+   * so createAd leaves the column at its nullable default.
+   */
+  private static async resolveBadgeForCreate(
+    input: { badgeId?: string | null; badgeLabel?: string | null },
+    hasBadgeField: boolean,
+  ): Promise<{ badgeLabel: string | null; badge?: { connect: { id: string } } } | undefined> {
+    if (!hasBadgeField) return undefined;
+
+    const { badgeLabel, badgeRowId } = await this.lookupBadgeChoice(input);
+    return { badgeLabel, ...(badgeRowId ? { badge: { connect: { id: badgeRowId } } } : {}) };
+  }
+
+  /**
+   * Returns `undefined` when the caller's payload had neither key of its own,
+   * so updateAd leaves the badge untouched — Prisma ignores undefined fields
+   * on update. Clearing a preset needs an explicit `disconnect`, since a
+   * stale connect otherwise survives.
+   */
+  private static async resolveBadgeForUpdate(
+    input: { badgeId?: string | null; badgeLabel?: string | null },
+    hasBadgeField: boolean,
+  ): Promise<
+    | { badgeLabel: string | null; badge: { connect: { id: string } } | { disconnect: true } }
+    | undefined
+  > {
+    if (!hasBadgeField) return undefined;
+
+    const { badgeLabel, badgeRowId } = await this.lookupBadgeChoice(input);
+    return {
+      badgeLabel,
+      badge: badgeRowId ? { connect: { id: badgeRowId } } : { disconnect: true as const },
+    };
+  }
+
+  static async listBadges() {
+    return MerchantAdsRepository.listActiveBadges();
+  }
+
   /** Attaches the derived window state and the store's zone to an ad row. */
   private static decorate<
     T extends { startAt: Date | null; expiresAt: Date | null; isActive: boolean },
@@ -244,7 +313,7 @@ export default class MerchantAdsService {
   static async createAd(userId: string, payload: CreateAdPayload) {
     await this.assertOwnership(userId, payload.storeId);
 
-    const { storeId, products, ...adFields } = payload;
+    const { storeId, products, badgeId, badgeLabel, ...adFields } = payload;
 
     this.assertStartNotPast(adFields.startAt);
     await this.assertNoWindowConflict(storeId, {
@@ -258,8 +327,14 @@ export default class MerchantAdsService {
       })),
     });
 
+    const hasBadgeField =
+      Object.prototype.hasOwnProperty.call(payload, 'badgeId') ||
+      Object.prototype.hasOwnProperty.call(payload, 'badgeLabel');
+    const resolvedBadge = await this.resolveBadgeForCreate({ badgeId, badgeLabel }, hasBadgeField);
+
     return MerchantAdsRepository.createAd({
       ...adFields,
+      ...resolvedBadge,
       kind: adFields.kind || 'PROMO',
       store: { connect: { id: storeId } },
       products:
@@ -309,7 +384,7 @@ export default class MerchantAdsService {
 
     await this.assertOwnership(userId, ad.storeId);
 
-    const { products, ...adFields } = payload;
+    const { products, badgeId, badgeLabel, ...adFields } = payload;
 
     const hasStartAtKey = Object.prototype.hasOwnProperty.call(payload, 'startAt');
     const nextStartAt = hasStartAtKey ? (adFields.startAt ?? null) : ad.startAt;
@@ -347,7 +422,12 @@ export default class MerchantAdsService {
       adId,
     );
 
-    const updated = await MerchantAdsRepository.updateAd(adId, adFields);
+    const hasBadgeField =
+      Object.prototype.hasOwnProperty.call(payload, 'badgeId') ||
+      Object.prototype.hasOwnProperty.call(payload, 'badgeLabel');
+    const resolvedBadge = await this.resolveBadgeForUpdate({ badgeId, badgeLabel }, hasBadgeField);
+
+    const updated = await MerchantAdsRepository.updateAd(adId, { ...adFields, ...resolvedBadge });
 
     if (products) {
       await MerchantAdsRepository.replaceAdProducts(adId, products);
