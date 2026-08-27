@@ -4,11 +4,11 @@ import helmet from 'helmet';
 import router from './routes';
 import { isDev } from './config';
 import setup from './setup';
-import cors from 'cors';
 import { errorHandler } from './middleware/error.middleware';
 import { correlationMiddleware } from './middleware/correlation.middleware';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './utils/swagger';
+import { assertConfigured, corsMiddleware, logConfiguration } from './middleware/cors.middleware';
 
 const app = express();
 
@@ -34,43 +34,11 @@ app.use(
   }),
 );
 
-/**
- * HTTP CORS allowlist, matching the socket's (F14).
- *
- * Reflecting every origin while `credentials: true` is set lets any site make
- * authenticated calls on a signed-in user's behalf. The socket was fixed for
- * exactly this; HTTP was left reflecting, which is the larger surface of the
- * two. See FLAGS.md F22.
- *
- * Left open when CORS_ORIGIN is unset, because local dev and the Flutter client
- * send no usable Origin header — but see the production guard below: shipping
- * without it configured is a deploy mistake, not a supported mode.
- */
-const allowedOrigins = (process.env.CORS_ORIGIN ?? '')
-  .split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
-
-if (process.env.NODE_ENV === 'production' && allowedOrigins.length === 0) {
-  throw new Error(
-    'CORS_ORIGIN must be set in production. Starting without it would reflect every ' +
-      'origin with credentials enabled, letting any site call this API as a signed-in user.',
-  );
-}
-
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (allowedOrigins.length === 0 || !origin || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      return callback(new Error(`Origin not allowed by CORS: ${origin}`));
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
-  }),
-);
+// HTTP CORS allowlist, shared with the socket gateway — see cors.middleware.ts
+// for why it is one module and what each branch is protecting (F14, F22, F94).
+assertConfigured();
+logConfiguration();
+app.use(corsMiddleware);
 
 /**
  * `verify` runs before the body is parsed, which is the only point the
