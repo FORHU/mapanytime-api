@@ -1,5 +1,7 @@
 import {
   ORIGIN_SHAPE,
+  buildAllowlist,
+  webAppOrigins,
   isOriginAllowed,
   parseAllowedOrigins,
   rejectOrigin,
@@ -95,5 +97,84 @@ describe('ORIGIN_SHAPE', () => {
     ['*', 'a wildcard, which exact matching can never satisfy'],
   ])('flags %s (%s)', (value) => {
     expect(ORIGIN_SHAPE.test(value)).toBe(false);
+  });
+});
+
+/**
+ * F94's fix: a wrong CORS_ORIGIN must not be able to lock every browser out of
+ * a healthy API. The web app URL is the one front-end address the code can
+ * actually verify — `assertCheckoutReturnUrl` throws at boot in production
+ * when it is unusable — so a running production process proves it is real.
+ */
+describe('webAppOrigins', () => {
+  it('derives the origin and its www sibling from an apex URL', () => {
+    expect(webAppOrigins('https://mapanytime.com')).toEqual([
+      'https://mapanytime.com',
+      'https://www.mapanytime.com',
+    ]);
+  });
+
+  it('derives the apex from a www URL', () => {
+    expect(webAppOrigins('https://www.mapanytime.com')).toEqual([
+      'https://www.mapanytime.com',
+      'https://mapanytime.com',
+    ]);
+  });
+
+  it('drops any path, so a URL with one still yields a bare origin', () => {
+    expect(webAppOrigins('https://mapanytime.com/checkout/return')).toEqual([
+      'https://mapanytime.com',
+      'https://www.mapanytime.com',
+    ]);
+  });
+
+  /** Same predicate the boot check uses — these never reach production. */
+  it.each([
+    ['', 'unset'],
+    ['http://mapanytime.com', 'not https'],
+    ['https://localhost:3000', 'localhost and a port'],
+    ['https://mapanytime.com:443', 'an explicit port'],
+  ])('derives nothing from %s (%s)', (url) => {
+    expect(webAppOrigins(url)).toEqual([]);
+  });
+
+  it('toggles only the www prefix and never widens to other subdomains', () => {
+    const derived = webAppOrigins('https://shop.mapanytime.com');
+    expect(derived).toEqual(['https://shop.mapanytime.com', 'https://www.shop.mapanytime.com']);
+    expect(isOriginAllowed('https://evil.mapanytime.com', derived)).toBe(false);
+  });
+});
+
+describe('buildAllowlist', () => {
+  it('adds the front end to what the secret names', () => {
+    expect(buildAllowlist('https://partner.example', 'https://mapanytime.com')).toEqual([
+      'https://partner.example',
+      'https://mapanytime.com',
+      'https://www.mapanytime.com',
+    ]);
+  });
+
+  it('keeps a wrong secret from locking the front end out — the F94 case', () => {
+    const allowed = buildAllowlist('https://nonsense.invalid', 'https://mapanytime.com');
+    expect(isOriginAllowed('https://www.mapanytime.com', allowed)).toBe(true);
+    expect(isOriginAllowed('https://mapanytime.com', allowed)).toBe(true);
+    expect(isOriginAllowed('https://evil.example', allowed)).toBe(false);
+  });
+
+  it('does not duplicate an origin the secret already names', () => {
+    expect(buildAllowlist('https://mapanytime.com', 'https://mapanytime.com')).toEqual([
+      'https://mapanytime.com',
+      'https://www.mapanytime.com',
+    ]);
+  });
+
+  /**
+   * An unset CORS_ORIGIN is the development-only open mode, and production
+   * refuses to boot in it. Deriving origins must not quietly convert that into
+   * a two-entry allowlist and change what local development does.
+   */
+  it('leaves the open development mode open', () => {
+    expect(buildAllowlist('', 'https://mapanytime.com')).toEqual([]);
+    expect(buildAllowlist(undefined, 'https://mapanytime.com')).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 import cors from 'cors';
 import logger from '../utils/logger';
+import { MAPANYTIME_WEB_APP_URL, checkoutReturnUrlProblems } from '../config';
 
 /**
  * One CORS allowlist, shared by the HTTP app and the socket gateway (F14, F22).
@@ -43,7 +44,53 @@ export function isOriginAllowed(origin: string | undefined, allowed: string[]): 
   return allowed.length === 0 || !origin || allowed.includes(origin);
 }
 
-export const allowedOrigins = parseAllowedOrigins();
+/**
+ * The origin(s) of the buyer-facing web app, derived from the URL the API is
+ * already configured to send buyers back to after paying.
+ *
+ * This exists because F94 was survivable only by luck: `CORS_ORIGIN` is a
+ * deploy secret with no relationship to anything the code can check, so a wrong
+ * value locked every browser out of a healthy API for a week. The web app URL
+ * is different — `assertCheckoutReturnUrl` throws at boot in production when it
+ * is missing or unusable, so a running production process is proof that this
+ * value is a real https front-end origin. An origin the API already trusts
+ * enough to hand a paying customer to is, by definition, its own front end.
+ *
+ * The `www` sibling is included because both hosts serve the same application
+ * (F96) and a browser treats them as different origins. Only that exact prefix
+ * is toggled — this is not a wildcard, and it never leaves the configured host.
+ */
+export function webAppOrigins(webAppUrl: string = MAPANYTIME_WEB_APP_URL): string[] {
+  if (checkoutReturnUrlProblems(webAppUrl).length > 0) return [];
+
+  const { protocol, host } = new URL(webAppUrl);
+  const origin = `${protocol}//${host}`;
+  const sibling = host.startsWith('www.')
+    ? `${protocol}//${host.slice(4)}`
+    : `${protocol}//www.${host}`;
+
+  return [origin, sibling];
+}
+
+/**
+ * The effective allowlist: what `CORS_ORIGIN` names, plus the app's own front
+ * end. The secret still governs every *other* origin — partners, admin hosts,
+ * staging front ends — and nothing here reflects an arbitrary origin. It only
+ * guarantees that a correctly configured payment redirect and a working login
+ * can never again disagree.
+ */
+export function buildAllowlist(
+  raw: string | undefined = process.env.CORS_ORIGIN,
+  webAppUrl: string = MAPANYTIME_WEB_APP_URL,
+): string[] {
+  const configured = parseAllowedOrigins(raw);
+  if (configured.length === 0) return [];
+
+  const derived = webAppOrigins(webAppUrl).filter((o) => !configured.includes(o));
+  return [...configured, ...derived];
+}
+
+export const allowedOrigins = buildAllowlist();
 
 /** Refuses to boot a production process that would reflect every origin. */
 export function assertConfigured(nodeEnv = process.env.NODE_ENV): void {
@@ -73,10 +120,25 @@ export function logConfiguration(): void {
     );
   }
 
+  if (allowedOrigins.length === 0) {
+    logger.info('CORS: no allowlist configured, every origin is accepted (development only)');
+    return;
+  }
+
+  // Name the derived entries separately. They are the difference between a
+  // wrong CORS_ORIGIN taking the site down and merely being wrong, so which
+  // origins came from where is the first thing worth knowing in an incident.
+  //
+  // Attribution runs from the secret outwards, not from the derived set: an
+  // origin both sources name belongs to CORS_ORIGIN, and counting it as derived
+  // would report a correctly configured deploy as "0 from CORS_ORIGIN" — the
+  // exact reading that would send the next incident looking in the wrong place.
+  const fromSecret = parseAllowedOrigins();
+  const derived = allowedOrigins.filter((o) => !fromSecret.includes(o));
+  logger.info(`CORS allowlist: ${allowedOrigins.join(', ')}`);
   logger.info(
-    allowedOrigins.length === 0
-      ? 'CORS: no allowlist configured, every origin is accepted (development only)'
-      : `CORS allowlist: ${allowedOrigins.join(', ')}`,
+    `CORS sources: ${fromSecret.length} from CORS_ORIGIN, ` +
+      `${derived.length} derived from MAPANYTIME_WEB_APP_URL`,
   );
 }
 

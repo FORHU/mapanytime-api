@@ -242,4 +242,32 @@ jobs:
               exit 1
             fi
 
+            # A loopback liveness probe sends no Origin header, which is the one
+            # caller shape the CORS allowlist waves through unconditionally — so it
+            # passes just as happily when no browser can reach the API. That is how
+            # F94 shipped green for a week. Assert a browser-shaped preflight too.
+            # The origin comes from CORS_ORIGIN itself: a smoke test that can
+            # disagree with the value it is checking is worth nothing.
+            # Prefer the web app URL: it is the origin the site is actually served
+            # from, and it is now part of the allowlist by construction, so this
+            # check follows the fix rather than the secret that broke.
+            SMOKE_ORIGIN="${MAPANYTIME_WEB_APP_URL:-${CORS_ORIGIN%%,*}}"
+            SMOKE_ORIGIN="${SMOKE_ORIGIN%/}"
+            if [ -n "$SMOKE_ORIGIN" ]; then
+              echo "Verifying the CORS allowlist accepts $SMOKE_ORIGIN..."
+              PREFLIGHT=$(curl -s -o /dev/null -w "%{http_code}" \
+                -X OPTIONS "http://127.0.0.1:${{ env.HOST_PORT }}/api/v1/auth/login" \
+                -H "Origin: $SMOKE_ORIGIN" \
+                -H "Access-Control-Request-Method: POST" \
+                -H "Access-Control-Request-Headers: content-type")
+              if [ "$PREFLIGHT" != "204" ]; then
+                echo "CORS preflight for $SMOKE_ORIGIN returned $PREFLIGHT, expected 204."
+                echo "The API is running, but no browser served from that origin can call it."
+                echo "CORS_ORIGIN is wrong for this environment. The allowlist it parsed:"
+                docker logs ${{ env.CONTAINER_NAME }} 2>&1 | grep -i "CORS allowlist" | tail -1
+                exit 1
+              fi
+              echo "CORS preflight passed."
+            fi
+
             docker image prune -f

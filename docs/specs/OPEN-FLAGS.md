@@ -2,7 +2,7 @@
 
 Triage batch raised **2026-08-24**, worked **2026-08-25** and **2026-08-27**.
 Continues the numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently
-F39–F96.
+F39–F97.
 
 F84–F88 come from a sweep of the returns and refund path — the current branch's
 own module, and ground neither register had covered.
@@ -42,7 +42,12 @@ New in `src/modules/inventory/inventoryStock.repository.ts`, covered by
 `tests/unit/inventoryStock.repository.test.ts` (9 cases). Suite: 517 tests / 51
 suites passing, `tsc`, ESLint and Prettier clean.
 
-**One migration is written but not applied:**
+**Applied to production 2026-08-27.** The evening deploy that shipped F95 ran
+`prisma migrate deploy` ahead of the container swap (`deploy-production.yml:181`),
+and the new build is live — so the migration below, and the four pending with it,
+are on the production database. Staging has still not been migrated.
+
+**The migration, for the record:**
 `20260827160000_inventory_nonnegative_check` adds `CHECK` constraints so neither
 counter can go negative again, clamping existing damage first. It joins the four
 already pending — see F84's clawback note, they should go together.
@@ -1008,7 +1013,7 @@ refund path, one confirming `APPROVED → APPROVED` no longer re-runs
 Found from a screenshot of the production console, not from a sweep. Every
 request from `https://www.mapanytime.com` failed, login included.
 
-### F94. Production accepts no browser origin at all
+### F94. Production accepts no browser origin at all — FIXED IN CODE, AWAITING DEPLOY
 
 `CORS_ORIGIN` in the production environment matches neither front-end origin,
 so the allowlist added by `14a3950` refuses every browser that calls the API.
@@ -1057,7 +1062,74 @@ the production deploy. `CORS_ORIGIN` also feeds the socket allowlist, so
 realtime is down for the same reason and recovers with it. Staging deserves the
 same check; the same secret name is read by `deploy-staging.yml:127`.
 
-### ~~F95. The failure could not be diagnosed from the logs~~ — FIXED 2026-08-27
+**Still open after the F95 deploy — 2026-08-27, 18:06.** `f1ed7cf` is now live
+in production: a rejected origin returns `403` with
+`{"message":"Origin not allowed by CORS: …"}` where the old build returned a
+bare `500`. The deploy is therefore confirmed, and the outage is confirmed to
+be the secret alone.
+
+The value is not a near miss. Ten candidate origins were sent to the live host
+and every one was refused:
+
+```
+http://localhost:4000        http://localhost:3000        https://staging.mapanytime.com
+https://api.mapanytime.com   https://admin.mapanytime.com http://mapanytime.com
+http://www.mapanytime.com    https://mapanytime.com:443   https://www.mapanytime.com/
+*                                                          → all 403
+```
+
+So it is neither a stale localhost entry from `.env.example`, nor the trailing
+slash the parser now strips, nor a scheme or port mismatch. `CORS_ORIGIN` holds
+something that matches no origin this system has ever served from — a
+placeholder, or a value belonging to a different environment.
+
+Since F95 shipped, the running process prints the value it parsed, so the
+remaining unknown can be read directly rather than guessed:
+
+```
+docker logs mapanytime-api | grep -i "CORS allowlist"
+```
+
+Each refusal since that deploy also logs `CORS rejected origin … — allowlist: …`.
+
+**Fixed in code 2026-08-27 — restores the site on the next deploy, with or
+without the secret.**
+
+The secret still has no correct value, and after a full day it is clear that
+waiting on one is not a plan. The allowlist now also includes the origin the API
+is already configured to send buyers back to after paying:
+
+```
+allowlist = CORS_ORIGIN  ∪  origin(MAPANYTIME_WEB_APP_URL) + its www sibling
+```
+
+This is safe precisely because that value is checkable in a way `CORS_ORIGIN`
+is not. `assertCheckoutReturnUrl` throws at boot in production when it is unset
+or unusable (`server.ts:24`), so **a running production process is proof that
+`MAPANYTIME_WEB_APP_URL` is a real https front-end origin.** An address the API
+trusts enough to hand a paying customer to is, by definition, its own front end.
+Nothing else changes: the secret still governs every other origin, an unset
+`CORS_ORIGIN` still means the development-only open mode, and no arbitrary
+origin is ever reflected.
+
+The `www` sibling is included because both hosts serve the same application
+(F96) and browsers treat them as separate origins. Only that exact prefix is
+toggled — never a wildcard, never another subdomain.
+
+Boot now logs the allowlist and, separately, how many entries came from the
+secret versus the web app URL, so an incident starts with knowing which source
+is wrong.
+
+`buildAllowlist` and `webAppOrigins` are covered by 12 further cases in
+`tests/unit/cors.allowlist.test.ts`, including the F94 case itself: a nonsense
+`CORS_ORIGIN` no longer locks the front end out. Suite: 548 tests / 53 suites.
+
+**Still worth correcting the secret.** This is a floor, not a substitute — it
+guarantees the app's own front end, nothing more. `CORS_ORIGIN` remains the
+right home for partner and admin origins, and F97's deploy check now verifies
+against the web app URL so it follows the fix rather than the broken value.
+
+### ~~F95. The failure could not be diagnosed from the logs~~ — FIXED AND DEPLOYED 2026-08-27
 
 Two gaps, both of which kept F94 invisible:
 
@@ -1099,6 +1171,61 @@ removes the preflight, halves what `CORS_ORIGIN` has to get right, and stops
 
 **Not fixed** — it is an infrastructure change, and which host is canonical is
 a call worth making deliberately (SEO and any existing links point at both).
+
+### ~~F97. The deploy's health check cannot see a CORS misconfiguration~~ — FIXED 2026-08-27
+
+`deploy-production.yml:210` verifies a release with:
+
+```sh
+curl -sf http://127.0.0.1:${APP_PORT}/api/health/live
+```
+
+Loopback, no `Origin` header, no preflight. That is precisely the caller shape
+`isOriginAllowed` waves through unconditionally — the branch that exists for
+curl, server-to-server callers and the Flutter client. **The check passes by
+taking the one path the allowlist never applies to.**
+
+So every deploy since 2026-08-20 reported healthy while no browser could reach
+the API (F94). The pipeline was not silent about the outage; it was structurally
+incapable of noticing it. `deploy-staging.yml` verifies the same way.
+
+The fix is to assert on a browser-shaped request in the same loop — a preflight
+carrying the origin the site is actually served from, which must come back
+`204`:
+
+```sh
+curl -sf -o /dev/null -X OPTIONS "http://127.0.0.1:${APP_PORT}/api/v1/auth/login" \
+  -H "Origin: ${SMOKE_ORIGIN}" \
+  -H "Access-Control-Request-Method: POST"
+```
+
+`SMOKE_ORIGIN` should be the first entry of `CORS_ORIGIN` rather than a second
+secret to keep in step — a check that can disagree with the thing it checks is
+the drift F73 and F94 both record. Failing the deploy on it turns a week-long
+silent outage into a red pipeline before traffic ever reaches the release.
+
+**Fixed 2026-08-27.** Both deploy workflows now assert a browser-shaped
+preflight in the same health-check loop, and fail the deploy when it does not
+return `204`:
+
+```sh
+SMOKE_ORIGIN="${CORS_ORIGIN%%,*}"
+PREFLIGHT=$(curl -s -o /dev/null -w "%{http_code}" \
+  -X OPTIONS "http://127.0.0.1:${PORT}/api/v1/auth/login" \
+  -H "Origin: $SMOKE_ORIGIN" ...)
+```
+
+The origin is the first entry of `CORS_ORIGIN` itself, not a second secret — a
+smoke test that can disagree with the value it checks is worth nothing, which
+is the drift F73 and F94 both record. On failure the step prints the parsed
+allowlist from the container's own boot log, so the run says what was wrong
+rather than only that something was.
+
+`deploy-staging.yml` got the same block against `HOST_PORT`. Both files parse as
+YAML and their deploy scripts pass `bash -n`.
+
+This would have failed the very first deploy after `14a3950` instead of letting
+the outage run for a week.
 
 ---
 
