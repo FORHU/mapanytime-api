@@ -20,6 +20,7 @@ import {
 import PaymentService from '../payments/payment.service';
 import PricingEngineService from '../pricing/pricing-engine.service';
 import SettlementService from '../settlements/settlement.service';
+import RewardService from '../rewards/reward.service';
 import NotificationService from '../notifications/notification.service';
 import logger from '../../utils/logger';
 
@@ -74,6 +75,7 @@ export default class OrderService {
     paymentMethod?: string;
     paymentMethodId?: string;
     pickupAt?: Date;
+    userVoucherId?: string;
     items: { productId: string; quantity: number }[];
   }) {
     const order = await prisma.$transaction(async (tx) => {
@@ -175,6 +177,22 @@ export default class OrderService {
         });
       }
 
+      // A claimed MapPoints voucher, validated but not yet marked used —
+      // that happens after the order row exists, so a phantom spend can
+      // never outlive a failed order creation.
+      let voucherAmount = 0;
+      let userVoucherId: string | undefined;
+      if (payload.userVoucherId) {
+        const validated = await RewardService.validateVoucherForOrder(
+          tx,
+          payload.buyerId,
+          payload.userVoucherId,
+          Math.max(0, subtotalAmount - totalDiscount),
+        );
+        userVoucherId = validated.userVoucher.id;
+        voucherAmount = validated.discountAmount;
+      }
+
       // 1. Resolve payment provider and method
       // Throws a 400 when the method is unknown or inactive rather than
       // substituting an arbitrary one. See FLAGS.md.
@@ -187,6 +205,7 @@ export default class OrderService {
       const pricingResult = await PricingEngineService.calculateOrderPricing({
         subtotalAmount,
         discountAmount: totalDiscount,
+        voucherAmount,
         storeId: payload.storeId,
         sellerId: store.sellerId,
         categoryId: primaryCategoryId,
@@ -211,6 +230,20 @@ export default class OrderService {
                 source: 'Store / Item Promotion',
                 amount: pricingResult.discountAmount,
                 payer: CHARGEPAYER.SELLER,
+                beneficiary: CHARGEBENEFICIARY.BUYER,
+              },
+            ]
+          : []),
+        // MapPoints voucher redemption. Payer PLATFORM, not SELLER — the
+        // platform absorbs it and the seller is still paid in full, so it
+        // must never fold into the DISCOUNT row above. See F39/F40.
+        ...(pricingResult.voucherAmount > 0
+          ? [
+              {
+                type: ORDERCHARGETYPE.PLATFORM_SUBSIDY,
+                source: 'MapPoints Voucher Redemption',
+                amount: pricingResult.voucherAmount,
+                payer: CHARGEPAYER.PLATFORM,
                 beneficiary: CHARGEBENEFICIARY.BUYER,
               },
             ]
@@ -251,6 +284,7 @@ export default class OrderService {
         totalAmount: pricingResult.buyerTotalAmount,
         subtotalAmount: pricingResult.subtotalAmount,
         discountAmount: pricingResult.discountAmount,
+        voucherAmount: pricingResult.voucherAmount,
         marketplaceFeeAmount: pricingResult.sellerMarketplaceCommission.amount,
         sellerNetAmount: pricingResult.sellerNetAmount,
 
@@ -287,6 +321,12 @@ export default class OrderService {
       };
 
       const createdOrder = await OrderRepository.insertOrder(orderData, tx);
+
+      if (userVoucherId) {
+        // Inside the same transaction: a voucher marked used for an order
+        // that then failed to create would be a phantom spend.
+        await RewardService.markVoucherUsed(tx, userVoucherId, createdOrder.id);
+      }
 
       const providerCode = method.provider.code;
       const provider = PaymentService.getProviderAdapter(providerCode);
@@ -480,6 +520,11 @@ export default class OrderService {
       // transaction as the completion, so the ledger cannot record a debt for
       // an order that did not finish completing. See FLAGS.md LED-3.
       await SettlementService.createForCompletedOrder(tx, orderId);
+
+      // Credit MapPoints in the same transaction as completion, for the same
+      // reason the settlement is booked here: a ledger row for an order that
+      // then failed to complete would be a phantom credit.
+      await RewardService.awardPointsForCompletedOrder(tx, orderId);
 
       return completed;
     });

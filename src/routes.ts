@@ -30,6 +30,7 @@ import reviewRoute from './modules/reviews/review.route';
 import wishlistRoute from './modules/wishlists/wishlist.route';
 import notificationRoute from './modules/notifications/notification.route';
 import sellerRoute from './modules/sellers/seller.route';
+import rewardRoute from './modules/rewards/reward.route';
 
 const router = express.Router();
 
@@ -68,5 +69,6 @@ router.use('/v1/analytics', analyticsRoute);
 router.use('/v1/reviews', reviewRoute);
 router.use('/v1/wishlist', wishlistRoute);
 router.use('/v1/notifications', notificationRoute);
+router.use('/v1/rewards', rewardRoute);
 
 export default router;

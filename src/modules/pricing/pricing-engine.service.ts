@@ -31,6 +31,13 @@ interface ResolvedPricingConfiguration {
 export interface PricingCalculationInput {
   subtotalAmount: number;
   discountAmount?: number;
+  /**
+   * A MapPoints voucher redemption. Reduces the buyer-fee base and
+   * `buyerTotalAmount` exactly like `discountAmount` does, but — unlike a
+   * seller discount — must NOT reduce the seller commission base: the
+   * platform funds it, the seller is paid in full. See OPEN-FLAGS.md F39/F40.
+   */
+  voucherAmount?: number;
   storeId?: string;
   sellerId?: string;
   sellerPlan?: string;
@@ -89,7 +96,8 @@ export interface OrderPricingResult {
   // 1. Order Core
   subtotalAmount: number;
   discountAmount: number;
-  orderAmount: number; // Subtotal - Discount
+  voucherAmount: number; // MapPoints redemption. Kept out of discountAmount — see PricingCalculationInput.
+  orderAmount: number; // Subtotal - Discount - Voucher
 
   // 2. Gateway Processing Cost
   paymentProcessingCost: PaymentProcessingCostBreakdown;
@@ -204,10 +212,18 @@ export class PricingEngineService {
   ): OrderPricingResult {
     const subtotal = Math.max(0, Number(input.subtotalAmount) || 0);
     const discount = Math.max(0, Number(input.discountAmount) || 0);
+    const voucher = Math.max(0, Number(input.voucherAmount) || 0);
     // Eligible transaction base amount. No tax term: the platform is a
     // marketplace intermediary and collects no VAT on the seller's goods.
     // See FLAGS.md.
-    const orderAmount = Math.max(0, subtotal - discount);
+    //
+    // `voucher` is subtracted here — reducing the buyer-fee base and
+    // `buyerTotalAmount` below, which both derive from `orderAmount` — but
+    // deliberately NOT from `commissionBase`/`sellerNetAmount` further down,
+    // which read `subtotal - discount` directly rather than from
+    // `orderAmount`. That's what keeps a MapPoints redemption from touching
+    // seller commission. See OPEN-FLAGS.md F39/F40.
+    const orderAmount = Math.max(0, subtotal - discount - voucher);
 
     // ── STEP 1: Active Pricing Configuration Container ────────────────
     const activePricingConfig = resolved.config;
@@ -305,6 +321,7 @@ export class PricingEngineService {
     return {
       subtotalAmount: Number(subtotal.toFixed(2)),
       discountAmount: Number(discount.toFixed(2)),
+      voucherAmount: Number(voucher.toFixed(2)),
       orderAmount: Number(orderAmount.toFixed(2)),
       paymentProcessingCost,
       buyerPlatformFee,
