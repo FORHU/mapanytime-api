@@ -1,5 +1,6 @@
-import { RESERVATIONSTATUS } from '@prisma/client';
+import { ORDERSTATUS, RESERVATIONSTATUS } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
+import InventoryStockRepository from './inventoryStock.repository';
 
 export default class InventoryReservationRepository {
   /**
@@ -22,20 +23,21 @@ export default class InventoryReservationRepository {
         throw new Error('Inventory record not found.');
       }
 
-      const availableQuantity = inventory.quantityOnHand - inventory.quantityReserved;
-      if (availableQuantity < data.quantity) {
+      // The availability test and the increment have to be one statement, or
+      // two callers racing for the last unit both pass the test (F75). The
+      // quantity reported back is the pre-attempt read, which is good enough
+      // for the message.
+      const reserved = await InventoryStockRepository.tryReserve(
+        tx,
+        data.inventoryId,
+        data.quantity,
+      );
+      if (!reserved) {
+        const availableQuantity = inventory.quantityOnHand - inventory.quantityReserved;
         throw new Error(
           `Insufficient stock available for reservation. Available: ${availableQuantity}, Requested: ${data.quantity}`,
         );
       }
-
-      // Increment quantityReserved
-      await tx.inventory.update({
-        where: { id: data.inventoryId },
-        data: {
-          quantityReserved: { increment: data.quantity },
-        },
-      });
 
       // Create reservation record
       return tx.inventoryReservations.create({
@@ -90,25 +92,34 @@ export default class InventoryReservationRepository {
       }
 
       const inv = reservation.inventory;
-      const previousOnHand = inv.quantityOnHand;
-      const newOnHand = previousOnHand - reservation.quantity;
 
-      // Decrement both on-hand and reserved
-      await tx.inventory.update({
+      // Claim the hold before touching stock. The status test above is a read,
+      // and the TTL sweeper can expire this row in between — consuming it then
+      // would decrement a reservation that had already been given back.
+      const claimed = await InventoryStockRepository.claimReservation(
+        tx,
+        reservationId,
+        RESERVATIONSTATUS.CONSUMED,
+      );
+      if (!claimed) {
+        throw new Error(`Cannot consume reservation ${reservationId}; its hold has already ended.`);
+      }
+
+      // The sale takes the goods off the shelf and ends the hold together.
+      const updatedInventory = await tx.inventory.update({
         where: { id: inv.id },
         data: {
-          quantityOnHand: { decrement: reservation.quantity },
-          quantityReserved: { decrement: reservation.quantity },
+          quantityOnHand: { decrement: claimed.quantity },
+          quantityReserved: { decrement: claimed.quantity },
+          version: { increment: 1 },
         },
       });
+      const newOnHand = updatedInventory.quantityOnHand;
+      const previousOnHand = newOnHand + claimed.quantity;
 
-      // Update reservation status
       const updatedReservation = await tx.inventoryReservations.update({
         where: { id: reservationId },
-        data: {
-          status: RESERVATIONSTATUS.CONSUMED,
-          orderId: orderId,
-        },
+        data: { orderId: orderId },
       });
 
       // Audit movement
@@ -119,7 +130,7 @@ export default class InventoryReservationRepository {
           variantId: inv.variantId,
           storeId: inv.storeId,
           movementType: 'SALE',
-          quantityDelta: -reservation.quantity,
+          quantityDelta: -claimed.quantity,
           previousOnHand: previousOnHand,
           newOnHand: newOnHand,
           referenceId: orderId,
@@ -145,23 +156,16 @@ export default class InventoryReservationRepository {
         throw new Error('Reservation not found.');
       }
 
-      if (reservation.status !== RESERVATIONSTATUS.RESERVED) {
-        return reservation; // Already released/consumed/expired
-      }
+      // The status flip is the claim, so a hold the TTL sweeper released a
+      // moment ago is not credited back a second time (F43). Releasing an
+      // already-ended reservation stays a no-op that returns the row.
+      await InventoryStockRepository.releaseReservation(
+        tx,
+        reservationId,
+        RESERVATIONSTATUS.RELEASED,
+      );
 
-      await tx.inventory.update({
-        where: { id: reservation.inventoryId },
-        data: {
-          quantityReserved: { decrement: reservation.quantity },
-        },
-      });
-
-      return tx.inventoryReservations.update({
-        where: { id: reservationId },
-        data: {
-          status: RESERVATIONSTATUS.RELEASED,
-        },
-      });
+      return tx.inventoryReservations.findUniqueOrThrow({ where: { id: reservationId } });
     });
   }
 
@@ -173,28 +177,38 @@ export default class InventoryReservationRepository {
       where: {
         status: RESERVATIONSTATUS.RESERVED,
         expiresAt: { lte: new Date() },
+        // A hold on a paid order belongs to the buyer until the goods are
+        // handed over, however late they are to collect — expiring it would
+        // put stock they have already paid for back on sale, and the seller
+        // could then sell the same unit twice.
+        //
+        // This guard is load-bearing only since payment stopped marking holds
+        // CONSUMED (F90). Before that, a paid order's rows were invisible here
+        // by accident. Cart holds (no order) and unpaid orders are fair game;
+        // CANCELLED, FAILED and COMPLETED orders release their own holds, so
+        // anything still RESERVED against those is leftovers worth sweeping.
+        OR: [
+          { orderId: null },
+          {
+            order: {
+              status: { notIn: [ORDERSTATUS.PROCESSING, ORDERSTATUS.READY_FOR_PICKUP] },
+            },
+          },
+        ],
       },
     });
 
     let expiredCount = 0;
     for (const res of staleReservations) {
       try {
-        await prisma.$transaction(async (tx) => {
-          await tx.inventory.update({
-            where: { id: res.inventoryId },
-            data: {
-              quantityReserved: { decrement: res.quantity },
-            },
-          });
-
-          await tx.inventoryReservations.update({
-            where: { id: res.id },
-            data: {
-              status: RESERVATIONSTATUS.EXPIRED,
-            },
-          });
-        });
-        expiredCount++;
+        // Re-claimed inside the transaction rather than trusted from the read
+        // above: between the two, a checkout can consume the reservation or a
+        // cancel can release it, and expiring it again would credit the stock
+        // twice. A row someone else took releases 0 and is not counted.
+        const released = await prisma.$transaction((tx) =>
+          InventoryStockRepository.releaseReservation(tx, res.id, RESERVATIONSTATUS.EXPIRED),
+        );
+        if (released > 0) expiredCount++;
       } catch (err) {
         console.error(`Failed to expire reservation ${res.id}:`, err);
       }

@@ -31,9 +31,13 @@ const ORDER_ID = 'order-1';
 const makeTx = () => ({
   payments: { findFirst: jest.fn(), update: jest.fn(), create: jest.fn() },
   orders: { updateMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
-  inventory: { updateMany: jest.fn() },
+  inventory: { updateMany: jest.fn(), update: jest.fn() },
   inventoryReservations: { updateMany: jest.fn() },
   paymentWebhookEvents: { upsert: jest.fn() },
+  // Ending a hold is an UPDATE ... RETURNING of the rows still RESERVED.
+  // Default: nothing left to claim.
+  $queryRaw: jest.fn().mockResolvedValue([]),
+  $executeRaw: jest.fn().mockResolvedValue(1),
 });
 
 let tx: ReturnType<typeof makeTx>;
@@ -206,10 +210,10 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
         where: { id: ORDER_ID, status: 'PENDING' },
         data: { status: 'PROCESSING' },
       });
-      expect(tx.inventoryReservations.updateMany).toHaveBeenCalledWith({
-        where: { orderId: ORDER_ID, status: 'RESERVED' },
-        data: { status: 'CONSUMED' },
-      });
+      // Payment succeeding moves no goods — they stay on the shelf, held for
+      // this buyer, until pickup. completeOrder is what consumes the hold, in
+      // the same claim that takes the stock down (F43).
+      expect(tx.inventoryReservations.updateMany).not.toHaveBeenCalled();
       expect(mockEmit).toHaveBeenCalledTimes(2);
     });
 
@@ -217,11 +221,8 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
       const pendingPayment = { id: 'pay-1', orderId: ORDER_ID, status: 'PENDING', amount: 500 };
       tx.payments.findFirst.mockResolvedValue(pendingPayment);
       tx.payments.update.mockResolvedValue({ ...pendingPayment, status: 'FAILED' });
-      tx.orders.findUnique.mockResolvedValue({
-        id: ORDER_ID,
-        status: 'PENDING',
-        orderitems: [{ productId: 'prod-1', quantity: 2 }],
-      });
+      tx.orders.findUnique.mockResolvedValue({ id: ORDER_ID, status: 'PENDING' });
+      tx.$queryRaw.mockResolvedValue([{ inventoryId: 'inv-1', quantity: 2 }]);
 
       const payload = {
         data: {
@@ -251,14 +252,14 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
           data: expect.objectContaining({ status: 'FAILED' }),
         }),
       );
-      expect(tx.inventoryReservations.updateMany).toHaveBeenCalledWith({
-        where: { orderId: ORDER_ID, status: 'RESERVED' },
-        data: { status: 'RELEASED' },
-      });
-      expect(tx.inventory.updateMany).toHaveBeenCalledWith({
-        where: { productId: 'prod-1' },
-        data: { quantityReserved: { decrement: 2 } },
-      });
+      // The hold is given back by claiming the rows still RESERVED and
+      // decrementing what that claim returned — never by walking the order's
+      // items, which handed the stock back a second time when the TTL sweeper
+      // had already released it (F43).
+      const claim = tx.$queryRaw.mock.calls[0];
+      expect((claim[0] as string[]).join('?')).toContain(`"status" = 'RESERVED'`);
+      expect(claim.slice(1)).toEqual(['RELEASED', ORDER_ID]);
+      expect(tx.inventory.updateMany).not.toHaveBeenCalled();
     });
   });
   describe('COMPLETED is terminal', () => {

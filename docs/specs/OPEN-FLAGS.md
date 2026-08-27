@@ -1,7 +1,8 @@
 # MapAnytime — Open Flags, F39 onward
 
-Triage batch raised **2026-08-24**, worked **2026-08-25**. Continues the
-numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently F39–F88.
+Triage batch raised **2026-08-24**, worked **2026-08-25** and **2026-08-27**.
+Continues the numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently
+F39–F93.
 
 F84–F88 come from a sweep of the returns and refund path — the current branch's
 own module, and ground neither register had covered.
@@ -22,6 +23,29 @@ original id is given in parentheses.
 the batch was being agreed, which is the same one-copy-in-one-place state that
 lost `FIX-PLAN.md` (F55). Findings raised during a session and never written
 down do not survive it.
+
+---
+
+## ✅ Closed 2026-08-27 — the inventory races
+
+| Flag    | Outcome                                                                                                                     |
+| :------ | :-------------------------------------------------------------------------------------------------------------------------- |
+| **F43** | Stock is no longer handed back twice. Releases claim the reservation rows; a hold already given back releases nothing       |
+| **F75** | Reserving is one conditional UPDATE, so the loser of a race for the last unit is refused. `Inventory.version` is live again |
+| **F89** | Reservations are linked to their order by id — the old match also attached the buyer's unrelated holds                      |
+| **F90** | A successful payment no longer marks the hold CONSUMED while the goods are still on the shelf                               |
+| **F91** | _New._ The reservation TTL sweeper exists but nothing calls it — raised, not fixed; it belongs with F44                     |
+| **F92** | _New._ No ownership check on the reservation release/confirm endpoints — raised, not fixed                                  |
+| **F93** | _New._ Inventory lookups ignore variantId — latent, a precondition on variant-level stock                                   |
+
+New in `src/modules/inventory/inventoryStock.repository.ts`, covered by
+`tests/unit/inventoryStock.repository.test.ts` (9 cases). Suite: 517 tests / 51
+suites passing, `tsc`, ESLint and Prettier clean.
+
+**One migration is written but not applied:**
+`20260827160000_inventory_nonnegative_check` adds `CHECK` constraints so neither
+counter can go negative again, clamping existing damage first. It joins the four
+already pending — see F84's clawback note, they should go together.
 
 ---
 
@@ -172,12 +196,29 @@ All four are traced in `mapanytime-market-app/docs/PICKUP-NEXT.md` under its own
 S-numbering and were re-verified in code on 2026-08-24. None of them appear in
 `FLAGS.md`, so anyone reading only the F-register will miss them.
 
-### F43. Inventory can go negative (S4)
+### ~~F43. Inventory can go negative (S4)~~ — FIXED 2026-08-27
 
 `order.service.ts:442`, `order.service.ts:761` and `payment.service.ts:643` all
 decrement `quantityReserved` without checking whether the reservation-expiry
 sweeper already released it. Reachable in normal use — any pickup later than
 `pickupAt + 2h` trips it.
+
+**The fix.** All three sites decremented from the _order's items_, which say
+what was bought, not from the _reservation rows_, which say what is still held.
+Releases now go through `InventoryStockRepository.releaseOrderReservations`,
+which claims the rows still `RESERVED` in a single
+`UPDATE ... RETURNING "inventoryId", "quantity"` and decrements only what that
+claim returned. The status transition _is_ the claim, so whoever gets there
+first — sweeper, cancel, completion, or a retry of any of them — releases the
+stock exactly once, and everyone else releases nothing.
+
+The same claim-first rule now covers `consumeReservation`, `releaseReservation`
+and the TTL sweeper in `inventoryReservation.repository.ts`, all three of which
+read the status and then wrote, with a window in between.
+
+Note the fourth write site F87 added: a refund increments `quantityOnHand`. That
+one needed no change — it puts goods back on the shelf and never touches
+`quantityReserved`, which is the counter that was going negative.
 
 ### F44. Orders stick in `PENDING` forever (S5)
 
@@ -278,12 +319,32 @@ committed.
 
 Captured money, no order. The single most expensive failure on this list.
 
-### F75. Stock has no row lock, and `Inventory.version` is dead (S9)
+### ~~F75. Stock has no row lock, and `Inventory.version` is dead (S9)~~ — FIXED 2026-08-27
 
 The stock check at `order.service.ts:113,143-148` uses neither a row lock nor a
 conditional update. The schema carries an `Inventory.version` optimistic-lock
 column and **nothing in `src/` reads or writes it** — confirmed by grep on
 2026-08-25. Classic oversell race on the last unit under concurrent checkout.
+
+**The fix.** `InventoryStockRepository.tryReserve` moves the availability test
+inside the write:
+
+```sql
+UPDATE "Inventory" SET "quantityReserved" = "quantityReserved" + $qty
+WHERE "id" = $id AND "quantityOnHand" - "quantityReserved" >= $qty
+```
+
+Postgres re-evaluates that `WHERE` against the latest committed row after the
+statement blocks on a concurrent writer, so the loser of a race for the last
+unit matches no row and is refused — no retry loop, and no reliance on an
+isolation level the connection does not actually use. The earlier read is kept
+only so the common-case error message can quote a stock count.
+
+This is a row lock rather than the optimistic-lock scheme `version` was added
+for, and it is the better fit: an optimistic column needs a retry loop around
+every caller to be worth anything. `version` is no longer dead — every stock
+write increments it, so it is an honest change counter — but nothing _gates_ on
+it. Dropping it stays an option; it is cheap to keep.
 
 ### F76. The app never sends `Idempotency-Key` (S10)
 
@@ -450,6 +511,140 @@ _some_ transactions price off the fallback: the seeded rate card is
 the only usable gateway — has no rates at all. Every real payment the platform
 can currently take is priced off a guessed 2.00%.
 
+### ~~F89. Checkout attached the buyer's unrelated reservations to the order~~ — FIXED 2026-08-27
+
+Found while fixing F43. After creating the order, `createOrder` linked
+reservations with
+`updateMany({ where: { buyerId, orderId: null, status: 'RESERVED' } })` — every
+dangling hold that buyer had, not the ones this checkout had just taken. A cart
+reservation, or a concurrent checkout at another store, was adopted by whichever
+order committed first.
+
+Harmless while releases decremented from the order's own items; actively wrong
+once they decrement from the reservation rows, which is what F43's fix does —
+the order would hand back stock it never held. `createOrder` now collects the
+ids it creates and links exactly those.
+
+### ~~F90. A successful payment ended the hold in name only~~ — FIXED 2026-08-27
+
+Also found while fixing F43. On `payment.succeeded` the webhook flipped the
+order's reservations to `CONSUMED` — but never decremented `quantityReserved`.
+The rows said the stock was gone while the counter still held it, and the
+balancing decrement arrived later, from the order's items at completion.
+
+That is exactly the pairing F43 removed, so the two had to be settled together.
+The reservations now stay `RESERVED` through payment: money changing hands moves
+no goods, and they sit on the shelf held for that buyer until pickup.
+`completeOrder` ends the hold in the same claim that takes the stock down.
+
+That change has a consequence that had to be handled in the same breath. A paid
+order's reservations are now visible to the TTL sweeper, which would expire the
+hold `pickupAt + 2h` and put goods the buyer has **already paid for** back on
+sale — the seller could then sell the same unit twice. The old `CONSUMED` flip
+hid those rows from the sweeper by accident, so the protection was real but
+undocumented and resting on a bug.
+
+`expireStaleReservations` now says so explicitly: it skips holds whose order is
+`PROCESSING` or `READY_FOR_PICKUP`. Cart holds and unpaid orders are still swept;
+`CANCELLED`, `FAILED` and `COMPLETED` orders release their own holds, so anything
+still `RESERVED` against those is leftovers worth clearing. Pinned by
+`tests/unit/inventoryReservation.repository.sweeper.test.ts`.
+
+A late pickup on a paid order therefore keeps its hold, and completion ends it
+normally. If a hold _has_ already gone — by any route — completion now releases
+nothing rather than driving the counter negative, which is the F43 case.
+
+### F91. The reservation TTL sweeper is never called
+
+`InventoryReservationRepository.expireStaleReservations` is reachable only
+through `InventoryReservationService.expireReservations`, and **nothing calls
+that** — no route, no controller, no cron. Verified by grep on 2026-08-27.
+`infrastructure/scheduler/index.ts` schedules ad windows, settlement maturation
+and the MapPoints sweep; there is no reservation job among them.
+
+So reservations never expire on their own today. Stock is held until the order
+completes, is cancelled, or its payment fails. An abandoned checkout holds its
+units forever.
+
+This belongs with F44 (P1-7, "verify reservation expiration job; remove or
+implement empty cron shells") — same job, same scheduler. Two notes for whoever
+wires it up:
+
+- The paid-order guard described in F90 is what stops the sweep from reselling
+  goods out from under a buyer who has paid. It is already in place; do not
+  remove it as a redundant filter.
+- It made F43 look unreachable-by-sweeper, but F43 was reachable anyway:
+  `POST /inventory/reservations/:id/release` is routed and authenticated, so a
+  buyer could release a hold and then cancel the order, which released the same
+  stock a second time.
+
+### F92. Any logged-in user can release or consume anyone's reservation
+
+Found while tracing F43's reachability. `inventoryReservation.controller.ts`
+never reads `req.user` in either handler:
+
+```ts
+static async release(req, res, next) {
+  const { id } = req.params;
+  const reservation = await InventoryReservationService.releaseReservation(id);
+```
+
+`confirm` is the same shape. The service methods take only a reservation id —
+there is no `buyerId` parameter to check against. `authenticate` proves somebody
+is logged in, nothing more, and reservation ids are the only thing standing
+between an attacker and someone else's held stock. Compare `reserve` and
+`getActiveReservations` in the same controller, which both resolve
+`req.user.id` properly.
+
+Two routed endpoints, both stock-mutating:
+
+- `POST /inventory/reservations/:id/release` — frees another buyer's hold, so
+  their goods go back on sale mid-checkout.
+- `POST /inventory/reservations/:id/confirm` — worse. It runs
+  `consumeReservation`, which decrements real `quantityOnHand`, writes a `SALE`
+  movement, and attaches the reservation to **an `orderId` supplied in the
+  request body**. An authenticated user can book someone else's held stock as
+  sold against an order of their choosing.
+
+Pre-existing, not introduced by the F43 work — but F43's fix routes both
+handlers through the new claim primitives, so they are freshly worth reading.
+The fix is an ownership check in the service (resolve the buyer from the user
+and require `reservation.buyerId` to match), plus a decision on whether
+`confirm` should be buyer-callable at all: order completion already consumes
+reservations internally, so the endpoint may just want removing.
+
+**Not fixed** — it needs the `confirm`-should-exist call, and an authz change
+deserves its own change rather than riding along with an inventory fix.
+
+### F93. Inventory lookups ignore `variantId`
+
+`Inventory` is unique on `[storeId, productId, variantId]`, so one product can
+own several stock rows. Three lookups pick one arbitrarily:
+
+- `order.service.ts:131` — `product.inventory[0]` (what checkout reserves against)
+- `order.service.ts:471` — `findFirst({ where: { productId } })` (what completion decrements)
+- `return.service.ts:422` — the same `findFirst`, for the F87 restock
+
+Nothing guarantees those three resolve to the same row. `store.service.ts:48`
+already reads `p.variant?.inventory[0] ?? p.product.inventory[0]`, so the
+variant-row shape is anticipated in the codebase.
+
+**Latent today, verified 2026-08-27:** nothing in `src/` creates an `Inventory`
+row with a `variantId` — the only mention outside these lookups is
+`inventoryReservation.repository.ts:130`, which copies `inv.variantId` onto a
+movement record. Product creation writes one variant-less row per product, so
+every lookup above resolves to the same single row and the ambiguity cannot
+bite yet.
+
+It becomes live the moment variant stock is written, which the varieties work in
+PR #68/#69 is heading towards. `OrderItems.variantId` already exists in the
+schema and checkout does not populate it (see the "cart items are product-only
+today" note on `computeItemDiscount`). Treat this as a precondition on
+variant-level stock, not a bug to fix now: whoever writes the first
+variant-scoped `Inventory` row has to fix these three lookups in the same
+change, or checkout will reserve against one row and completion will decrement
+another.
+
 ### F82. References outlive the files they point at
 
 Third instance of the same failure in two days: `FLAGS.md` → `FIX-PLAN.md`
@@ -483,8 +678,28 @@ at 1%**. F39 settled that MapAnytime funds redemptions (sellers give
 discounts, the platform gives vouchers), which puts the whole cost here with
 no seller contribution.
 
-**Blocks F39–F42 and F47–F54.** Nothing in MapPoints can be built until this
-one number is decided.
+~~**Blocks F39–F42 and F47–F54.** Nothing in MapPoints can be built until this
+one number is decided.~~
+
+**Settled at 0.1% — in code, not here.** MapPoints shipped while this register
+sat idle: `269adf9` (PR #68) and `a66929a` (PR #70) landed
+`src/modules/rewards/`, and `reward.service.ts` reads
+`DEFAULT_EARN_PERCENTAGE = 0.001` with `DEFAULT_POINT_VALUE_PHP = 0.1` — ₱100
+spent earns 1 point worth ₱0.10. That is the 0.1% reading every other number in
+the spec agreed with, so the annotation on line 43 of
+[`MAP_POINTS_FEATURE_SPEC.md`](MAP_POINTS_FEATURE_SPEC.md) is the one thing left
+to correct; it still says "~1%". The rate is admin-editable and versioned
+(`RewardConfigurations`), so it is a configuration decision now, not a code one.
+
+**F47–F54 need re-sweeping against that module, not reading as open.** Spot-checked
+on 2026-08-27, all against the shipped code: F49's concurrency is a conditional
+`updateMany` on the wallet balance and on the voucher status; F51's `REFUND` is
+in `REWARDTRANSACTIONTYPE`; F52's expiry job exists as
+`RewardService.expireOldPoints` and is wired into
+`infrastructure/scheduler/index.ts`; F50's non-negative `CHECK` is in migration
+`20260825080357`. The earn hook is live in `OrderService.completeOrder`. The
+rest of F47–F54 were not checked — verify each in the tree before acting on what
+this register says about them.
 
 ### F65. Xendit's GCash and Maya have no contracted rate
 
@@ -795,22 +1010,25 @@ refund path, one confirming `APPROVED → APPROVED` no longer re-runs
 2. **F65** — get Xendit's contracted GCash/Maya rates and seed them. Costs
    money every day it is open.
 3. **F66** — correct `FLAGS.md` once those rates land.
-4. **F43** — inventory can go negative. Held on 2026-08-25 because one of its
-   three sites is in `payment.service.ts`, which the merge touched; that merge
-   is done, so it is unblocked. Note F87 now adds a fourth write site: a refund
-   increments `quantityOnHand`, so whatever locking F43 lands on has to cover
-   the restock too.
-5. **F86** — who pays the gateway fee on a refund. A decision, not a fix, and
+4. ~~**F43** — inventory can go negative.~~ **Done 2026-08-27**, together with
+   F75, F89 and F90; the restock site F87 added needed no change. Its
+   `CHECK`-constraint migration is written but unapplied.
+5. **F92** — the reservation endpoints have no ownership check. Live, routed,
+   and one of the two writes real stock. Small fix; needs a call on whether
+   `confirm` should be buyer-callable at all.
+6. **F86** — who pays the gateway fee on a refund. A decision, not a fix, and
    it is the last thing in the money path that is silently unaccounted. Cheap
    to decide, and F86 option (1) is also what would build partial refunds,
    which F88's note depends on.
-6. **F84's clawback** — the negative-settlement ledger. Needs
+7. **F84's clawback** — the negative-settlement ledger. Needs
    `Settlements.orderId` relaxed, so it goes with the other pending
    migrations rather than on its own.
-7. **F44 + F52** — one scheduler, two problems. Build the job once.
-8. **F41, F42** — scope calls: agents in or out, and per-store-order semantics.
-9. **F47–F51, F53, F54** — spec edits, once F63 and F39–F42 are settled.
-10. **F55 fallback, F56, F59, F60, F61, F62, F67, F69** — register and doc
+8. **F44 + F52 + F91** — one scheduler, three problems. F52's half is already
+   built and wired (`RewardService.expireOldPoints`); F91 is the reservation
+   sweep, which exists but is called by nothing. Build the job once.
+9. **F41, F42** — scope calls: agents in or out, and per-store-order semantics.
+10. **F47–F51, F53, F54** — spec edits, once F63 and F39–F42 are settled.
+11. **F55 fallback, F56, F59, F60, F61, F62, F67, F69** — register and doc
     reconciliation.
 
 `F58` is not a task; it is a standing rule for every item above that edits a

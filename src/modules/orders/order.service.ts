@@ -21,6 +21,7 @@ import PaymentService from '../payments/payment.service';
 import PricingEngineService from '../pricing/pricing-engine.service';
 import SettlementService from '../settlements/settlement.service';
 import RewardService from '../rewards/reward.service';
+import InventoryStockRepository from '../inventory/inventoryStock.repository';
 import NotificationService from '../notifications/notification.service';
 import logger from '../../utils/logger';
 
@@ -108,6 +109,7 @@ export default class OrderService {
       let subtotalAmount = 0;
       let totalDiscount = 0;
       const orderItemsData = [];
+      const reservationIds: string[] = [];
       let primaryCategoryId: string | undefined;
 
       for (const item of payload.items) {
@@ -159,14 +161,15 @@ export default class OrderService {
           appliedAdId,
         });
 
-        await tx.inventory.update({
-          where: { id: inventory.id },
-          data: {
-            quantityReserved: { increment: item.quantity },
-          },
-        });
+        // The availableStock read above is advisory only — another checkout
+        // can take the last unit between that read and this line. The
+        // conditional UPDATE inside tryReserve is the actual guard (F75).
+        const reserved = await InventoryStockRepository.tryReserve(tx, inventory.id, item.quantity);
+        if (!reserved) {
+          throw new Error(`Insufficient stock for ${product.name}. It sold out during checkout.`);
+        }
 
-        await tx.inventoryReservations.create({
+        const reservation = await tx.inventoryReservations.create({
           data: {
             inventoryId: inventory.id,
             buyerId: payload.buyerId,
@@ -175,6 +178,7 @@ export default class OrderService {
             expiresAt: resolveReservationExpiry(payload.pickupAt),
           },
         });
+        reservationIds.push(reservation.id);
       }
 
       // A claimed MapPoints voucher, validated but not yet marked used —
@@ -357,16 +361,14 @@ export default class OrderService {
         },
       });
 
-      // Link newly created reservations to the order
+      // Link this checkout's own reservations to the order, by id. Matching on
+      // (buyerId, orderId: null) instead also swept up the same buyer's
+      // unrelated holds — a cart reservation, or a concurrent checkout at
+      // another store — and attached them here, after which this order's
+      // release paths would hand back stock it never held.
       await tx.inventoryReservations.updateMany({
-        where: {
-          buyerId: payload.buyerId,
-          orderId: null,
-          status: 'RESERVED',
-        },
-        data: {
-          orderId: createdOrder.id,
-        },
+        where: { id: { in: reservationIds } },
+        data: { orderId: createdOrder.id },
       });
 
       return {
@@ -475,11 +477,13 @@ export default class OrderService {
 
         const newOnHand = inventory.quantityOnHand - item.quantity;
 
+        // Only the on-hand count moves here. The matching quantityReserved
+        // release is claimed from the reservation rows once, below.
         await tx.inventory.update({
           where: { id: inventory.id },
           data: {
             quantityOnHand: { decrement: item.quantity },
-            quantityReserved: { decrement: item.quantity },
+            version: { increment: 1 },
           },
         });
 
@@ -502,10 +506,12 @@ export default class OrderService {
         });
       }
 
-      await tx.inventoryReservations.updateMany({
-        where: { orderId: orderId, status: 'RESERVED' },
-        data: { status: 'CONSUMED' },
-      });
+      // Releases the hold and flips the rows to CONSUMED in one claim. The
+      // quantity comes from the reservation rows rather than the order's items:
+      // if the TTL sweeper already expired this order's hold there is nothing
+      // left to give back, and decrementing per item drove quantityReserved
+      // negative (F43).
+      await InventoryStockRepository.releaseOrderReservations(tx, orderId, 'CONSUMED');
 
       const completed = await OrderRepository.updateOrderStatus(
         orderId,
@@ -793,26 +799,9 @@ export default class OrderService {
           );
         }
 
-        for (const item of order.orderitems) {
-          const inventory = await tx.inventory.findFirst({
-            where: { productId: item.productId },
-          });
-
-          if (!inventory)
-            throw new Error(`Inventory tracking ledger missing for product ID ${item.productId}.`);
-
-          await tx.inventory.update({
-            where: { id: inventory.id },
-            data: {
-              quantityReserved: { decrement: item.quantity },
-            },
-          });
-        }
-
-        await tx.inventoryReservations.updateMany({
-          where: { orderId: orderId, status: 'RESERVED' },
-          data: { status: 'RELEASED' },
-        });
+        // One claim, idempotent: a hold the TTL sweeper already released is no
+        // longer RESERVED, so it is not given back a second time (F43).
+        await InventoryStockRepository.releaseOrderReservations(tx, orderId, 'RELEASED');
 
         if (needsRefund && payment) {
           await tx.payments.update({
