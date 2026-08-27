@@ -118,6 +118,7 @@ jobs:
           INGESTION_QUEUE_NAME: ${{ secrets.INGESTION_QUEUE_NAME || 'ingestion_jobs' }}
           WORKER_HEALTH_PORT: ${{ secrets.WORKER_HEALTH_PORT || '8080' }}
           METRICS_INTERVAL_MS: ${{ secrets.METRICS_INTERVAL_MS || '60000' }}
+          MAPANYTIME_WEB_APP_URL: ${{ secrets.MAPANYTIME_WEB_APP_URL || '' }}
         run: |
           cat > ${{ github.workspace }}/${{ env.ENV_FILE_NAME }} << EOF
           DATABASE_URL=${DATABASE_URL}
@@ -159,6 +160,7 @@ jobs:
           INGESTION_QUEUE_NAME=${INGESTION_QUEUE_NAME}
           WORKER_HEALTH_PORT=${WORKER_HEALTH_PORT}
           METRICS_INTERVAL_MS=${METRICS_INTERVAL_MS}
+          MAPANYTIME_WEB_APP_URL=${MAPANYTIME_WEB_APP_URL}
           EOF
 
       - name: Copy env file to EC2
