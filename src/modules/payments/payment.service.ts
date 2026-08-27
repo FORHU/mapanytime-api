@@ -6,6 +6,7 @@ import { PayMongoProvider } from './providers/paymongo.provider';
 import { MockProvider } from './providers/mock.provider';
 import { XenditProvider } from './providers/xendit.provider';
 import PricingEngineService, { OrderPricingResult } from '../pricing/pricing-engine.service';
+import InventoryStockRepository from '../inventory/inventoryStock.repository';
 
 /** Peso amount for buyer-facing copy: `1500` -> `₱1,500`. */
 const formatPeso = (amount: number) => `₱${amount.toLocaleString('en-PH')}`;
@@ -607,11 +608,15 @@ export default class PaymentService {
           data: { status: 'PROCESSING' },
         });
 
-        // Finalize Inventory Reservations to CONSUMED
-        await tx.inventoryReservations.updateMany({
-          where: { orderId, status: 'RESERVED' },
-          data: { status: 'CONSUMED' },
-        });
+        // The reservations deliberately stay RESERVED here. Payment succeeding
+        // does not move any goods — they sit on the shelf, still held for this
+        // buyer, until pickup. `OrderService.completeOrder` is what takes them
+        // off the shelf, and it ends the hold in the same claim (F43).
+        //
+        // Marking them CONSUMED at this point ended the hold in name only: the
+        // rows said the stock was gone while `quantityReserved` still counted
+        // it, and the balancing decrement came from the order's items at
+        // completion, whether or not the hold was still there to give back.
 
         return { payment: updatedPayment, justCompleted: true };
       } else if (isFailure) {
@@ -624,24 +629,19 @@ export default class PaymentService {
           },
         });
 
-        // Release inventory reservation
-        await tx.inventoryReservations.updateMany({
-          where: { orderId, status: 'RESERVED' },
-          data: { status: 'RELEASED' },
-        });
+        // Give the hold back and mark the rows RELEASED in one claim (F43).
+        // These were two separate steps: the updateMany flipped the rows, then
+        // the loop below decremented from the order's items — so a hold the TTL
+        // sweeper had already released was subtracted a second time, and
+        // quantityReserved went negative.
+        await InventoryStockRepository.releaseOrderReservations(tx, orderId, 'RELEASED');
 
         const order = await tx.orders.findUnique({
           where: { id: orderId },
-          include: { orderitems: true },
+          select: { status: true },
         });
 
         if (order && order.status === 'PENDING') {
-          for (const item of order.orderitems) {
-            await tx.inventory.updateMany({
-              where: { productId: item.productId },
-              data: { quantityReserved: { decrement: item.quantity } },
-            });
-          }
           await tx.orders.update({
             where: { id: orderId },
             data: { status: 'FAILED' },
