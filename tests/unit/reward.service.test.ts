@@ -19,7 +19,12 @@ function buildMockClient() {
     rewardTransactions: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn() },
     rewardConfigurations: { findFirst: jest.fn().mockResolvedValue(null) },
     rewardVouchers: { findUnique: jest.fn(), update: jest.fn(), findMany: jest.fn() },
-    userVouchers: { findUnique: jest.fn(), create: jest.fn(), updateMany: jest.fn(), findMany: jest.fn() },
+    userVouchers: {
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      updateMany: jest.fn(),
+      findMany: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
 }
@@ -79,7 +84,9 @@ describe('RewardService.awardPointsForCompletedOrder', () => {
 
     // (1000 - 200) * 0.001 / 0.1 = 8 points.
     expect(client.rewardWallet.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { balance: { increment: 8 }, lifetimeEarned: { increment: 8 } } }),
+      expect.objectContaining({
+        data: { balance: { increment: 8 }, lifetimeEarned: { increment: 8 } },
+      }),
     );
   });
 
@@ -227,7 +234,12 @@ describe('RewardService.validateVoucherForOrder', () => {
     const client = buildMockClient();
     client.userVouchers.findUnique.mockResolvedValue(buildClaim());
 
-    const result = await RewardService.validateVoucherForOrder(client as never, 'buyer-1', 'claim-1', 1000);
+    const result = await RewardService.validateVoucherForOrder(
+      client as never,
+      'buyer-1',
+      'claim-1',
+      1000,
+    );
 
     expect(result.discountAmount).toBe(50);
   });
@@ -236,12 +248,22 @@ describe('RewardService.validateVoucherForOrder', () => {
     const client = buildMockClient();
     client.userVouchers.findUnique.mockResolvedValue(
       buildClaim({
-        voucher: { discountType: 'PERCENTAGE', discountValue: 20, minOrderAmount: null, maxDiscountAmount: 30 },
+        voucher: {
+          discountType: 'PERCENTAGE',
+          discountValue: 20,
+          minOrderAmount: null,
+          maxDiscountAmount: 30,
+        },
       }),
     );
 
     // 20% of 1,000 = 200, capped at 30.
-    const result = await RewardService.validateVoucherForOrder(client as never, 'buyer-1', 'claim-1', 1000);
+    const result = await RewardService.validateVoucherForOrder(
+      client as never,
+      'buyer-1',
+      'claim-1',
+      1000,
+    );
 
     expect(result.discountAmount).toBe(30);
   });
@@ -279,7 +301,12 @@ describe('RewardService.validateVoucherForOrder', () => {
     const client = buildMockClient();
     client.userVouchers.findUnique.mockResolvedValue(
       buildClaim({
-        voucher: { discountType: 'FIXED', discountValue: 50, minOrderAmount: 500, maxDiscountAmount: null },
+        voucher: {
+          discountType: 'FIXED',
+          discountValue: 50,
+          minOrderAmount: 500,
+          maxDiscountAmount: null,
+        },
       }),
     );
 
@@ -308,7 +335,9 @@ describe('RewardService.markVoucherUsed', () => {
     const client = buildMockClient();
     client.userVouchers.updateMany.mockResolvedValue({ count: 0 });
 
-    await expect(RewardService.markVoucherUsed(client as never, 'claim-1', 'order-1')).rejects.toMatchObject({
+    await expect(
+      RewardService.markVoucherUsed(client as never, 'claim-1', 'order-1'),
+    ).rejects.toMatchObject({
       status: 409,
     });
   });
@@ -328,7 +357,11 @@ describe('RewardService.expireOldPoints', () => {
       update: jest.fn().mockResolvedValue({ id: 'wallet-1', balance: 0 }),
     };
     const tx = { rewardTransactions, rewardWallet };
-    Object.assign(prisma, { rewardTransactions, rewardWallet, $transaction: jest.fn((cb) => cb(tx)) });
+    Object.assign(prisma, {
+      rewardTransactions,
+      rewardWallet,
+      $transaction: jest.fn((cb) => cb(tx)),
+    });
 
     const count = await RewardService.expireOldPoints();
 
@@ -340,7 +373,11 @@ describe('RewardService.expireOldPoints', () => {
     });
     expect(rewardTransactions.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ type: 'EXPIRED', amount: -4, referenceKey: 'EXPIRE:EARN:earn-1' }),
+        data: expect.objectContaining({
+          type: 'EXPIRED',
+          amount: -4,
+          referenceKey: 'EXPIRE:EARN:earn-1',
+        }),
       }),
     );
   });
@@ -355,7 +392,11 @@ describe('RewardService.expireOldPoints', () => {
     };
     const rewardWallet = { findUnique: jest.fn(), update: jest.fn() };
     const tx = { rewardTransactions, rewardWallet };
-    Object.assign(prisma, { rewardTransactions, rewardWallet, $transaction: jest.fn((cb) => cb(tx)) });
+    Object.assign(prisma, {
+      rewardTransactions,
+      rewardWallet,
+      $transaction: jest.fn((cb) => cb(tx)),
+    });
 
     const count = await RewardService.expireOldPoints();
 

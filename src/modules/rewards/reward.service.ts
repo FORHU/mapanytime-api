@@ -212,7 +212,10 @@ export default class RewardService {
 
       const decremented = await tx.rewardWallet.updateMany({
         where: { id: wallet.id, balance: { gte: voucher.pointCost } },
-        data: { balance: { decrement: voucher.pointCost }, lifetimeSpent: { increment: voucher.pointCost } },
+        data: {
+          balance: { decrement: voucher.pointCost },
+          lifetimeSpent: { increment: voucher.pointCost },
+        },
       });
       if (decremented.count === 0) {
         throw { status: 400, message: 'Insufficient MapPoints balance.' };
@@ -405,8 +408,10 @@ export default class RewardService {
         data: {
           version: (current?.version ?? 0) + 1,
           isActive: true,
-          earnPercentage: patch.earnPercentage ?? current?.earnPercentage ?? DEFAULT_EARN_PERCENTAGE,
-          pointValueInPhp: patch.pointValueInPhp ?? current?.pointValueInPhp ?? DEFAULT_POINT_VALUE_PHP,
+          earnPercentage:
+            patch.earnPercentage ?? current?.earnPercentage ?? DEFAULT_EARN_PERCENTAGE,
+          pointValueInPhp:
+            patch.pointValueInPhp ?? current?.pointValueInPhp ?? DEFAULT_POINT_VALUE_PHP,
           expirationMonths:
             patch.expirationMonths ?? current?.expirationMonths ?? DEFAULT_EXPIRATION_MONTHS,
           isEarningActive: patch.isEarningActive ?? current?.isEarningActive ?? true,

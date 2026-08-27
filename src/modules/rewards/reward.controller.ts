@@ -1,9 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { USERVOUCHERSTATUS, REWARDDISCOUNTTYPE } from '@prisma/client';
-import RewardService, {
-  DEFAULT_EARN_PERCENTAGE,
-  DEFAULT_POINT_VALUE_PHP,
-} from './reward.service';
+import RewardService, { DEFAULT_EARN_PERCENTAGE, DEFAULT_POINT_VALUE_PHP } from './reward.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
 import { parsePagination } from '../../helpers/pagination.helper';
 import { prisma } from '../../utils/prisma';
@@ -62,7 +59,11 @@ export default class RewardController {
       const buyerId = await resolveBuyerId(req);
       const status = req.query.status as USERVOUCHERSTATUS | undefined;
       if (status && !Object.values(USERVOUCHERSTATUS).includes(status)) {
-        return responseError(res, 400, `Invalid status. Must be one of: ${Object.values(USERVOUCHERSTATUS).join(', ')}`);
+        return responseError(
+          res,
+          400,
+          `Invalid status. Must be one of: ${Object.values(USERVOUCHERSTATUS).join(', ')}`,
+        );
       }
       const vouchers = await RewardService.getMyVouchers(buyerId, status);
       return responseSuccess(res, 200, vouchers, 'Claimed vouchers fetched successfully.');
