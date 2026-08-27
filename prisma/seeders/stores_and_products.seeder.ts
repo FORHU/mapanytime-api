@@ -137,7 +137,7 @@ const STORES_CATALOG: StoreSpec[] = [
     storeName: 'Cordillera Weaves & Crafts',
     description:
       'Authentic handwoven tribal fabrics, wooden carvings, and indigenous souvenirs from Benguet and Ifugao.',
-    categoryName: 'Shopping & Retail',
+    categoryName: 'Fashion & Cosmetics',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'seller@example.com',
     phone: '+639171113333',
@@ -727,7 +727,7 @@ const STORES_CATALOG: StoreSpec[] = [
     storeName: 'Urban Pulse Apparel',
     description:
       'Highland streetwear, oversized graphic hoodies, corduroy headwear, and weatherproof outerwear.',
-    categoryName: 'Shopping & Retail',
+    categoryName: 'Fashion & Cosmetics',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'dual@example.com',
     phone: '+639189877777',
@@ -901,7 +901,7 @@ const STORES_CATALOG: StoreSpec[] = [
     storeName: 'Benguet Artisan Crafts',
     description:
       'Eco-friendly sustainable crafts, handmade natural soaps, beeswax candles, and pottery.',
-    categoryName: 'Shopping & Retail',
+    categoryName: 'Fashion & Cosmetics',
     approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
     ownerEmail: 'support@mapanytime.test',
     phone: '+639176669999',

@@ -52,9 +52,9 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
       update: {},
       create: {
         categoryId: cat.id,
-        commissionRate: cat.name.includes('Tech')
+        commissionRate: cat.name.includes('Electronics')
           ? 0.05
-          : cat.name.includes('Fashion')
+          : cat.name.includes('Fashion & Cosmetics')
             ? 0.1
             : 0.08,
         fixedFee: 10.0,
