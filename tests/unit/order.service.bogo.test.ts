@@ -19,6 +19,11 @@ describe('OrderService.createOrder — BOGO discount', () => {
 
   function buildTx(bogoAd: { buyQuantity: number; freeQuantity: number } | null) {
     return {
+      // Stock is reserved with a conditional UPDATE and holds are ended with an
+      // UPDATE ... RETURNING, so a transaction client has to carry both raw
+      // escape hatches. 1 affected row = the reservation was taken.
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      $queryRaw: jest.fn().mockResolvedValue([]),
       stores: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'store-1',
@@ -58,7 +63,7 @@ describe('OrderService.createOrder — BOGO discount', () => {
       },
       inventory: { update: jest.fn().mockResolvedValue({}) },
       inventoryReservations: {
-        create: jest.fn().mockResolvedValue({}),
+        create: jest.fn().mockResolvedValue({ id: 'res-1' }),
         updateMany: jest.fn().mockResolvedValue({}),
       },
       payments: {
@@ -151,6 +156,11 @@ describe('OrderService.createOrder — percentage / fixed-amount discount', () =
 
   function buildTxWithAd(ad: Record<string, unknown> | null) {
     return {
+      // Stock is reserved with a conditional UPDATE and holds are ended with an
+      // UPDATE ... RETURNING, so a transaction client has to carry both raw
+      // escape hatches. 1 affected row = the reservation was taken.
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      $queryRaw: jest.fn().mockResolvedValue([]),
       stores: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'store-1',
@@ -178,7 +188,7 @@ describe('OrderService.createOrder — percentage / fixed-amount discount', () =
       },
       inventory: { update: jest.fn().mockResolvedValue({}) },
       inventoryReservations: {
-        create: jest.fn().mockResolvedValue({}),
+        create: jest.fn().mockResolvedValue({ id: 'res-1' }),
         updateMany: jest.fn().mockResolvedValue({}),
       },
       payments: {
