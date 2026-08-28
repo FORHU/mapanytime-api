@@ -15,7 +15,7 @@ import { PrismaClient } from '@prisma/client';
  *
  * Category names are the REAL seeded taxonomy from categories.seeder.ts. Note
  * there is no "Clothing", "Shoes" or "Furniture" ROOT — those live under
- * Shopping & Retail and Home & Living. Keyed by root because sub-category names
+ * Fashion & Cosmetics and Home & Living. Keyed by root because sub-category names
  * are only unique within a parent.
  */
 const SUGGESTIONS_BY_ROOT: {
@@ -25,10 +25,10 @@ const SUGGESTIONS_BY_ROOT: {
   subCategories?: Record<string, string[]>;
 }[] = [
   {
-    root: 'Shopping & Retail',
+    root: 'Fashion & Cosmetics',
     rootSuggestions: ['Color'],
     subCategories: {
-      Fashion: ['Size', 'Color', 'Fit', 'Material', 'Sleeve Length'],
+      Clothing: ['Size', 'Color', 'Fit', 'Material', 'Sleeve Length'],
       Shoes: ['Size', 'Color', 'Width', 'Material'],
       Bags: ['Size', 'Color', 'Material'],
       Accessories: ['Size', 'Color', 'Material'],
@@ -40,17 +40,11 @@ const SUGGESTIONS_BY_ROOT: {
     root: 'Food & Beverage',
     rootSuggestions: ['Size'],
     subCategories: {
-      Restaurant: ['Size', 'Flavor', 'Spice Level', 'Serving Size'],
-      Cafe: ['Size', 'Flavor', 'Temperature', 'Milk Type', 'Sweetness'],
-      'Fast Food': ['Size', 'Flavor', 'Meal Type', 'Serving Size'],
-      Grocery: ['Size', 'Flavor', 'Pack Size'],
-      Fruits: ['Size', 'Weight', 'Ripeness', 'Pack Size'],
-      Vegetables: ['Size', 'Weight', 'Freshness', 'Pack Size'],
-      Seafood: ['Size', 'Weight', 'Cut', 'Fresh/Frozen'],
-      Meat: ['Cut', 'Weight', 'Grade', 'Fresh/Frozen'],
-      Dairy: ['Flavor', 'Size', 'Fat Level', 'Pack Size'],
-      Beverages: ['Brand', 'Flavor', 'Size', 'Temperature', 'Pack Size'],
-      Liquor: ['Type', 'Volume', 'Alcohol Content'],
+      'Fresh Produce': ['Weight', 'Freshness', 'Pack Size'],
+      Prepared: ['Size', 'Flavor', 'Spice Level', 'Serving Size'],
+      Packaged: ['Flavor', 'Size', 'Pack Size'],
+      Beverage: ['Brand', 'Flavor', 'Size', 'Temperature', 'Pack Size'],
+      Ingredients: ['Weight', 'Pack Size'],
     },
   },
   {
@@ -58,7 +52,7 @@ const SUGGESTIONS_BY_ROOT: {
     // Electronics is itself a root here, so the template lives at root level.
     rootSuggestions: ['Storage', 'RAM', 'Color', 'Model', 'Version'],
     subCategories: {
-      'Mobile Phones': ['Storage', 'RAM', 'Color', 'Model'],
+      'Mobile Devices': ['Storage', 'RAM', 'Color', 'Model'],
       Computers: ['Storage', 'RAM', 'Processor', 'Screen Size'],
     },
   },
@@ -67,8 +61,8 @@ const SUGGESTIONS_BY_ROOT: {
     rootSuggestions: ['Color', 'Material'],
     subCategories: {
       Furniture: ['Material', 'Color', 'Size', 'Finish', 'Configuration', 'Fabric Type'],
-      Bedding: ['Size', 'Color', 'Material'],
-      Kitchen: ['Size', 'Color', 'Material'],
+      'Bedding & Bath': ['Size', 'Color', 'Material'],
+      'Kitchen & Dining': ['Size', 'Color', 'Material'],
     },
   },
 ];

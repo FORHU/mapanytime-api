@@ -134,7 +134,7 @@ const CATEGORY_SPECS: CategorySpec[] = [
     ],
   },
   {
-    categoryName: 'Shopping & Retail',
+    categoryName: 'Fashion & Cosmetics',
     businessSuffixes: ['Boutique', 'Fashion Shop', 'Trading', 'Variety Store', 'Gift Shop'],
     variants: ['Small', 'Medium', 'Large', 'Extra Large', 'One Size', 'Kids Size'],
     baseItems: [
@@ -271,19 +271,12 @@ const CATEGORY_SPECS: CategorySpec[] = [
       { name: 'Stuffed Toy', brand: 'ToyCo', basePrice: 280 },
     ],
   },
-  {
-    categoryName: 'Services',
-    businessSuffixes: ['Salon', 'Barbershop', 'Laundry Shop', 'Print Shop', 'Tailoring'],
-    variants: ['Basic', 'Premium', 'Express', 'Per Kilo', 'Per Page', 'Per Session'],
-    baseItems: [
-      { name: 'Haircut Service', brand: 'In-house', basePrice: 100 },
-      { name: 'Wash & Fold Laundry', brand: 'In-house', basePrice: 55 },
-      { name: 'Document Printing', brand: 'In-house', basePrice: 4 },
-      { name: 'Manicure & Pedicure', brand: 'In-house', basePrice: 250 },
-      { name: 'Dress Alteration', brand: 'In-house', basePrice: 180 },
-      { name: 'Photocopying', brand: 'In-house', basePrice: 2 },
-    ],
-  },
+  // NOTE: the former 'Services' CATEGORY_SPECS entry (Salon/Barbershop/Laundry/
+  // Print Shop/Tailoring, generating fake "Haircut Service"/"Document Printing"
+  // Products) was removed here rather than remapped — those are services, not
+  // products, and the whole point of this taxonomy refactor is to stop filing
+  // services as product-category rows. See the Service Entity Solution proposal
+  // for where merchants like these belong once that model ships.
   {
     categoryName: 'Agriculture',
     businessSuffixes: ['Farm Supply', 'Agrivet', 'Seedling Nursery'],
@@ -330,7 +323,7 @@ const WEEKLY_HOURS = [0, 1, 2, 3, 4, 5, 6].map((dayOfWeek) => ({
   isClosed: dayOfWeek === 0,
 }));
 
-const STORES_PER_CATEGORY = 4; // 13 categories x 4 = 52 stores
+const STORES_PER_CATEGORY = 4; // 12 categories x 4 = 48 stores
 const MIN_PRODUCTS = 20;
 const MAX_PRODUCTS = 50;
 

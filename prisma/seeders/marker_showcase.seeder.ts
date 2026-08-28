@@ -42,7 +42,10 @@ const MARKER_SHOWCASE_CATALOG: MarkerShowcaseSpec[] = [
     slug: 'pine-haven-transient-rooms',
     storeName: 'Pine Haven Transient Rooms',
     description: 'Cozy transient rooms near Session Road, walking distance to the night market.',
-    categoryName: 'Services',
+    // The 'Services' root was removed from the product taxonomy (see
+    // categories.seeder.ts) — room rentals have no product-type home until the
+    // separate Service entity model ships, so this placeholder uses 'Others'.
+    categoryName: 'Others',
     ownerEmail: 'seller@example.com',
     phone: '+639171234501',
     email: 'pinehaven@mapanytime.test',
@@ -61,7 +64,8 @@ const MARKER_SHOWCASE_CATALOG: MarkerShowcaseSpec[] = [
     slug: 'camp-john-hay-staycation-cabin',
     storeName: 'Camp John Hay Staycation Cabin',
     description: 'Pine-forest cabin rental inside Camp John Hay, sleeps up to 4.',
-    categoryName: 'Services',
+    // Same placeholder rationale as above — see comment on the previous entry.
+    categoryName: 'Others',
     ownerEmail: 'seller@example.com',
     phone: '+639171234502',
     email: 'cjhcabin@mapanytime.test',
