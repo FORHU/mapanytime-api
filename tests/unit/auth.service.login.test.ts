@@ -62,8 +62,9 @@ describe('AuthSvc.login', () => {
       passwordHash: `${SALT}:deadbeef`,
     } as never);
 
-    await expect(
-      AuthSvc.login({ email: USER.email, password: PASSWORD }),
-    ).rejects.toMatchObject({ status: 401, message: 'Invalid credentials' });
+    await expect(AuthSvc.login({ email: USER.email, password: PASSWORD })).rejects.toMatchObject({
+      status: 401,
+      message: 'Invalid credentials',
+    });
   });
 });

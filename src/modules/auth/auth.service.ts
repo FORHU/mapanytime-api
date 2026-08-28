@@ -35,6 +35,7 @@ export default class AuthSvc {
     password: string;
     firstName?: string;
     lastName?: string;
+    middleName?: string;
     phoneNumber?: string;
     roleName: string;
     countryCode?: string;
@@ -69,6 +70,7 @@ export default class AuthSvc {
           passwordHash: `${salt}:${hash}`,
           firstName: data.firstName,
           lastName: data.lastName,
+          middleName: data.middleName,
           phoneNumber: data.phoneNumber,
           countryCode: data.countryCode,
           isEmailVerified: true,
@@ -131,7 +133,8 @@ export default class AuthSvc {
       --- END ORIGINAL STRICT LOGIC --- */
 
       // --- START BYPASS LOGIC ---
-      const displayName = [data.firstName, data.lastName].filter(Boolean).join(' ') || 'New User';
+      const displayName =
+        [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' ') || 'New User';
 
       if (data.roleName === 'SELLER') {
         const seller = await tx.sellers.create({

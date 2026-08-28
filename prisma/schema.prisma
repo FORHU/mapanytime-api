@@ -18,6 +18,7 @@ model Users {
   activeSessionId String?
   firstName       String?
   lastName        String?
+  middleName      String?
   phoneNumber     String?
   avatarFileId    String?           @unique
   userReferralId  String?
