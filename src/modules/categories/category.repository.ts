@@ -21,10 +21,25 @@ export default class CategoryRepository {
     });
   }
 
+  /**
+   * `subCategories` is what clients use to decide whether a category can be drilled
+   * into, so it has to obey the same soft-delete rule as the rows themselves — an
+   * unfiltered include reports children that were deleted, and the category then
+   * looks like a branch that leads nowhere.
+   *
+   * This also keeps the endpoint agreeing with `assertCategoryIsLeaf` in the product
+   * service, which counts children with the same filter before accepting a product.
+   * Without it the two disagree on exactly the categories whose children are all
+   * soft-deleted: the picker refuses to let a seller stop there, while the API would
+   * have accepted it.
+   */
   static async getSubCategoriesByParentId(parentId: string) {
     return prisma.categories.findMany({
       where: { parentId, deletedAt: null },
-      include: { parent: true, subCategories: true },
+      include: {
+        parent: true,
+        subCategories: { where: { deletedAt: null } },
+      },
     });
   }
 
