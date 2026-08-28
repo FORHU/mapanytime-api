@@ -22,6 +22,26 @@ export interface CategoryTreeNode {
   children: CategoryTreeNode[];
 }
 
+async function assertCategoryIsLeaf(categoryId: string) {
+  const category = await prisma.categories.findFirst({
+    where: { id: categoryId, deletedAt: null },
+    include: {
+      _count: { select: { subCategories: { where: { deletedAt: null } } } },
+    },
+  });
+
+  if (!category) {
+    throw { status: 404, message: 'Category not found.' };
+  }
+
+  if (category._count.subCategories > 0) {
+    throw {
+      status: 400,
+      message: `Choose a more specific category — "${category.name}" has sub-categories.`,
+    };
+  }
+}
+
 export default class ProductService {
   static async createProduct(
     userId: string,
@@ -56,6 +76,8 @@ export default class ProductService {
     if (store.approvalStatus !== 'ACTIVE') {
       throw { status: 403, message: 'Store must be approved before adding products.' };
     }
+
+    await assertCategoryIsLeaf(payload.categoryId);
 
     // `options` MUST be destructured out: left in `...productFields` it reaches
     // Prisma as a raw array where a nested write is expected.
@@ -286,6 +308,10 @@ export default class ProductService {
     const store = await ProductRepository.getStoreById(product.storeId);
     if (!store || store.sellerId !== seller.id) {
       throw { status: 403, message: 'Unauthorized to update this product.' };
+    }
+
+    if (payload.categoryId !== undefined) {
+      await assertCategoryIsLeaf(payload.categoryId);
     }
 
     // `options`, like `tags`, MUST be destructured out — left in `...fields` it

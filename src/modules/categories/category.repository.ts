@@ -40,24 +40,26 @@ export default class CategoryRepository {
   }
 
   static async getAllCategoryTrees() {
-    return prisma.categories.findMany({
-      where: { parentId: null, deletedAt: null },
-      select: {
-        id: true,
-        name: true,
-        subCategories: {
-          where: { deletedAt: null },
-          select: {
-            id: true,
-            name: true,
-            subCategories: {
-              where: { deletedAt: null },
-              select: { id: true, name: true },
-            },
-          },
-        },
-      },
+    const rows = await prisma.categories.findMany({
+      where: { deletedAt: null },
+      select: { id: true, name: true, parentId: true },
+      orderBy: { name: 'asc' },
     });
+
+    type TreeNode = { id: string; name: string; subCategories: TreeNode[] };
+    const byId = new Map<string, TreeNode>(
+      rows.map((row) => [row.id, { id: row.id, name: row.name, subCategories: [] }]),
+    );
+
+    const roots: TreeNode[] = [];
+    for (const row of rows) {
+      const node = byId.get(row.id)!;
+      const parent = row.parentId ? byId.get(row.parentId) : undefined;
+      if (parent) parent.subCategories.push(node);
+      else roots.push(node);
+    }
+
+    return roots;
   }
 
   static async findById(id: string) {

@@ -20,10 +20,24 @@ const txMock = {
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
     $transaction: jest.fn(),
+    // create/update read the chosen category to enforce that products are filed on
+    // a leaf. These tests are about options, so the default below is a leaf and the
+    // check passes through.
+    categories: { findFirst: jest.fn() },
   },
 }));
 
-const mockedPrisma = prisma as unknown as { $transaction: jest.Mock };
+const mockedPrisma = prisma as unknown as {
+  $transaction: jest.Mock;
+  categories: { findFirst: jest.Mock };
+};
+
+/** A leaf: no live sub-categories, so it's a valid home for a product. */
+const LEAF_CATEGORY = {
+  id: 'cat-1',
+  name: 'Tropical Fruits',
+  _count: { subCategories: 0 },
+};
 const mockedRepo = ProductRepository as jest.Mocked<typeof ProductRepository>;
 
 const SELLER = { id: 'seller-1', applicationStatus: 'APPROVED' };
@@ -39,6 +53,7 @@ const BASE_CREATE = {
 beforeEach(() => {
   jest.clearAllMocks();
   mockedPrisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(txMock));
+  mockedPrisma.categories.findFirst.mockResolvedValue(LEAF_CATEGORY);
   (mockedRepo.getSellerByUserId as jest.Mock).mockResolvedValue(SELLER);
   (mockedRepo.getStoreById as jest.Mock).mockResolvedValue(STORE);
   (mockedRepo.getProductById as jest.Mock).mockResolvedValue(PRODUCT);
@@ -49,6 +64,61 @@ beforeEach(() => {
 
 const createArg = () => (mockedRepo.createProduct as jest.Mock).mock.calls[0][0];
 const updateArg = () => (mockedRepo.updateProduct as jest.Mock).mock.calls[0][1];
+
+describe('category must be a leaf', () => {
+  it('rejects a category that still has sub-categories', async () => {
+    mockedPrisma.categories.findFirst.mockResolvedValue({
+      id: 'cat-branch',
+      name: 'Clothing',
+      _count: { subCategories: 4 },
+    });
+
+    await expect(
+      ProductService.createProduct('user-1', 'store-1', {
+        ...BASE_CREATE,
+        categoryId: 'cat-branch',
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    // Rejected before any write — a branch category must not reach the transaction.
+    expect(mockedRepo.createProduct).not.toHaveBeenCalled();
+  });
+
+  it('rejects a category that does not exist, rather than leaving it to Prisma', async () => {
+    // Without this check a bad id surfaces as a P2025 that the error middleware
+    // flattens to a bare 404 "Resource not found", indistinguishable from a missing
+    // store or an expired session.
+    mockedPrisma.categories.findFirst.mockResolvedValue(null);
+
+    await expect(
+      ProductService.createProduct('user-1', 'store-1', BASE_CREATE),
+    ).rejects.toMatchObject({ status: 404, message: 'Category not found.' });
+  });
+
+  it('accepts a leaf', async () => {
+    await expect(
+      ProductService.createProduct('user-1', 'store-1', BASE_CREATE),
+    ).resolves.toBeDefined();
+  });
+
+  it('skips the check on update when the caller is not changing the category', async () => {
+    // A product filed before this rule existed must stay editable.
+    await ProductService.updateProduct('user-1', 'prod-1', { name: 'Renamed' });
+    expect(mockedPrisma.categories.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('enforces the check on update when the category IS changing', async () => {
+    mockedPrisma.categories.findFirst.mockResolvedValue({
+      id: 'cat-branch',
+      name: 'Clothing',
+      _count: { subCategories: 4 },
+    });
+
+    await expect(
+      ProductService.updateProduct('user-1', 'prod-1', { categoryId: 'cat-branch' }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+});
 
 describe('createProduct — option tier', () => {
   it('builds the nested option/value write tree', async () => {

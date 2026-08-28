@@ -28,8 +28,7 @@ const SUGGESTIONS_BY_ROOT: {
     root: 'Fashion & Cosmetics',
     rootSuggestions: ['Color'],
     subCategories: {
-      "Men's Clothing": ['Size', 'Color', 'Fit', 'Material', 'Sleeve Length'],
-      "Women's Clothing": ['Size', 'Color', 'Fit', 'Material', 'Sleeve Length'],
+      Clothing: ['Size', 'Color', 'Fit', 'Material', 'Sleeve Length'],
       Shoes: ['Size', 'Color', 'Width', 'Material'],
       Bags: ['Size', 'Color', 'Material'],
       Accessories: ['Size', 'Color', 'Material'],
