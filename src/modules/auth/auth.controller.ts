@@ -12,9 +12,10 @@ export default class AuthController {
       email: Joi.string()
         .email({ tlds: { allow: false } })
         .required(),
-      password: Joi.string().min(6).required(),
-      firstName: Joi.string().optional(),
-      lastName: Joi.string().optional(),
+      password: Joi.string().min(8).max(128).required(),
+      firstName: Joi.string().required(),
+      lastName: Joi.string().required(),
+      middleName: Joi.string().optional(),
       phoneNumber: Joi.string().optional(),
       roleName: Joi.string().required(),
       countryCode: Joi.string().max(3).optional(),
@@ -98,7 +99,7 @@ export default class AuthController {
         .pattern(/^\d{4}$/)
         .required()
         .messages({ 'string.pattern.base': 'The reset code must be 4 digits.' }),
-      newPassword: Joi.string().min(8).required(),
+      newPassword: Joi.string().min(8).max(128).required(),
     });
 
     const { error, value } = schema.validate(req.body);
