@@ -21,6 +21,14 @@ const PASSWORD_RESET_TTL_MINUTES = 15;
 /** Wrong guesses allowed against one code before it is burned. */
 const MAX_RESET_ATTEMPTS = 5;
 
+/**
+ * Fixed salt/hash used to run a real PBKDF2 pass for unknown-email login
+ * attempts, so "no such user" costs the same as "wrong password" and can't
+ * be timed apart.
+ */
+const DUMMY_SALT = 'ponytail-dummy-salt';
+const DUMMY_HASH_HEX = crypto.pbkdf2Sync('dummy', DUMMY_SALT, 1000, 64, 'sha512').toString('hex');
+
 export default class AuthSvc {
   static async register(data: {
     email: string;
@@ -189,16 +197,21 @@ export default class AuthSvc {
     logger.info(`[Auth] Login attempt for ${data.email} as ${data.roleName || 'any'}`);
 
     const user = await AuthRepo.findUserByEmail(data.email);
-    if (!user || !user.passwordHash) {
-      logger.warn(`[Auth] Login failed — unknown or invalid account: ${data.email}`);
-      throw { status: 401, message: 'Invalid credentials' };
-    }
 
-    const [salt, storedHash] = user.passwordHash.split(':');
-    const hash = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512').toString('hex');
+    // Always hash + compare, even for an unknown account, using a fixed dummy
+    // salt/hash — otherwise "no such user" returns faster than "wrong password"
+    // and leaks which emails are registered via response timing.
+    const [salt, storedHashHex] = user?.passwordHash
+      ? user.passwordHash.split(':')
+      : [DUMMY_SALT, DUMMY_HASH_HEX];
 
-    if (storedHash !== hash) {
-      logger.warn(`[Auth] Login failed — wrong password for ${data.email} (user: ${user.id})`);
+    const storedBuf = Buffer.from(storedHashHex, 'hex');
+    const computedBuf = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512');
+    const hashesMatch =
+      storedBuf.length === computedBuf.length && crypto.timingSafeEqual(storedBuf, computedBuf);
+
+    if (!user || !user.passwordHash || !hashesMatch) {
+      logger.warn(`[Auth] Login failed for ${data.email}`);
       throw { status: 401, message: 'Invalid credentials' };
     }
 
