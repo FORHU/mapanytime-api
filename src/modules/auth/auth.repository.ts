@@ -36,9 +36,21 @@ export default class AuthRepo {
     });
   }
 
+  /**
+   * Email addresses are not case-sensitive in practice, so neither is this lookup.
+   * A case-sensitive match meant someone who registered as `Bob@x.com` could not sign
+   * in as `bob@x.com`, and let registration mint a second account differing only by
+   * case — which the `@unique` constraint does not prevent.
+   *
+   * Callers should still normalise on the way in (the login schema lowercases); this
+   * is the safety net for rows written before that.
+   */
   static async findUserByEmail(email: string) {
     return prisma.users.findFirst({
-      where: { email: email, accountStatus: 'ACTIVE' },
+      where: {
+        email: { equals: email, mode: 'insensitive' },
+        accountStatus: 'ACTIVE',
+      },
       include: userInclude,
     });
   }

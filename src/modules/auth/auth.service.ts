@@ -21,6 +21,29 @@ const PASSWORD_RESET_TTL_MINUTES = 15;
 /** Wrong guesses allowed against one code before it is burned. */
 const MAX_RESET_ATTEMPTS = 5;
 
+/**
+ * One message for every credential failure — unknown address and wrong password alike.
+ * Distinguishing them turns the login form into an account-existence oracle, so the
+ * text must stay identical on both paths.
+ */
+const INVALID_CREDENTIALS = 'Incorrect email or password.';
+
+/**
+ * Constant-time comparison of two hex digests.
+ *
+ * `a !== b` returns as soon as it finds a differing byte, so how long it takes leaks
+ * how much of the hash the attacker guessed correctly — enough, over many samples, to
+ * reconstruct it byte by byte. `timingSafeEqual` always reads both buffers fully.
+ *
+ * It throws on length mismatch rather than returning false, so the lengths are checked
+ * first; that check is safe to short-circuit because the length of a digest is not a
+ * secret.
+ */
+function timingSafeEqualHex(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
+}
+
 export default class AuthSvc {
   static async register(data: {
     email: string;
@@ -191,15 +214,15 @@ export default class AuthSvc {
     const user = await AuthRepo.findUserByEmail(data.email);
     if (!user || !user.passwordHash) {
       logger.warn(`[Auth] Login failed — unknown or invalid account: ${data.email}`);
-      throw { status: 401, message: 'Invalid credentials' };
+      throw { status: 401, message: INVALID_CREDENTIALS };
     }
 
     const [salt, storedHash] = user.passwordHash.split(':');
     const hash = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512').toString('hex');
 
-    if (storedHash !== hash) {
+    if (!timingSafeEqualHex(storedHash, hash)) {
       logger.warn(`[Auth] Login failed — wrong password for ${data.email} (user: ${user.id})`);
-      throw { status: 401, message: 'Invalid credentials' };
+      throw { status: 401, message: INVALID_CREDENTIALS };
     }
 
     const updatedUser = await AuthRepo.updateUserLoginStatus(user.id);
@@ -395,11 +418,26 @@ export default class AuthSvc {
     return crypto.createHash('sha256').update(code.trim()).digest('hex');
   }
 
+  /**
+   * Revokes the caller's session. Safe to call repeatedly and safe to call with a
+   * refresh token that is missing, unknown, or already revoked — see the contract note
+   * on AuthController.logout for why that has to hold.
+   *
+   * Clearing `activeSessionId` is the authoritative kill: `authenticate` compares every
+   * access token's `sessionId` against it, so nulling it invalidates the access token
+   * immediately rather than waiting out its expiry. It therefore runs FIRST — if the
+   * refresh-row cleanup below fails, the session is already dead, whereas the old order
+   * left a fully live session behind whenever that delete errored.
+   */
   static async logout(userId: string, refreshToken?: string) {
-    if (refreshToken) await AuthRepo.deleteSession(refreshToken);
     await AuthRepo.updateActiveSession(userId, null);
+
+    // Best-effort tidy-up of the matching refresh row. `deleteMany` matches zero rows
+    // without throwing, so an unknown token is a no-op rather than an error.
+    if (refreshToken) await AuthRepo.deleteSession(refreshToken);
+
     await CacheUtil.del(`user:${userId}`);
-    logger.info(`[Auth] User ${userId} logged out (session revoked: ${Boolean(refreshToken)})`);
+    logger.info(`[Auth] User ${userId} logged out (refresh row dropped: ${Boolean(refreshToken)})`);
     return { message: 'Logged out successfully' };
   }
 

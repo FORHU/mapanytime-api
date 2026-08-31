@@ -2,15 +2,29 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import AuthRepo from '../modules/auth/auth.repository';
 import { ACCESS_TOKEN_SECRET } from '../config';
+import { responseError } from '../helpers/response.helper';
 import logger from '../utils/logger';
 
+/**
+ * Every rejection here is a 401, deliberately.
+ *
+ * Clients key their "sign the user out and route to login" behaviour off this status:
+ * the web `fetcher` and the Flutter `AuthInterceptor` both act on 401 and neither acts
+ * on 403 or 404. A deactivated account used to answer 404, which no client recognised
+ * as an auth failure — the web app compensates by sniffing the message text for
+ * "deactivated", and mobile just showed an error and stayed on a dead session.
+ *
+ * Routing through `responseError` also keeps these bodies on the `ApiError` contract
+ * (`status`/`statusCode`/`message`); they were hand-rolled `res.json({ message })`
+ * before, in three shapes, none of which matched what clients parse.
+ */
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   const route = `${req.method} ${req.originalUrl}`;
   const token = req.headers.authorization?.split(' ')[1];
 
   if (!token) {
     logger.warn(`[Auth] Rejected ${route} — no token provided`);
-    return res.status(401).json({ message: 'No token provided' });
+    return responseError(res, 401, 'No token provided');
   }
 
   try {
@@ -23,7 +37,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     // Check the raw database field 'accountStatus'
     if (!user || user.accountStatus !== 'ACTIVE') {
       logger.warn(`[Auth] Rejected ${route} — user not found or deactivated (${decoded.userId})`);
-      return res.status(404).json({ message: 'User not found or deactivated' });
+      return responseError(res, 401, 'User not found or deactivated');
     }
 
     // Single Active Device Policy. A token is only good while its sessionId is still the user's
@@ -33,15 +47,13 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     // The null case must reject too: treating "no active session" as "allow" would let every
     // previously-issued token work again for the rest of its 7-day life the moment anyone logs out.
     //
-    // NOTE: tokens minted before this policy shipped carry no sessionId and are let through, so
-    // they bypass single-device enforcement until they expire (up to ACCESS_TOKEN_EXPIRY = 7d).
-    // Drop the `decoded.sessionId &&` guard to close that window at the cost of logging everyone out.
-    if (decoded.sessionId && decoded.sessionId !== user.activeSessionId) {
+    // A token carrying no sessionId at all is rejected for the same reason. Those predate the
+    // policy and used to be waved through, which meant logging out did not actually stop them —
+    // the one hole in "logout destroys the session". Closing it signs out anyone still holding
+    // such a token; they were already past ACCESS_TOKEN_EXPIRY of being issued one.
+    if (decoded.sessionId !== user.activeSessionId) {
       logger.warn(`[Auth] Rejected ${route} — session no longer active (${decoded.userId})`);
-      return res.status(401).json({
-        status: 401,
-        message: 'Session expired — please sign in again.',
-      });
+      return responseError(res, 401, 'Session expired — please sign in again.');
     }
 
     logger.debug(`[Auth] Authenticated ${route} (user: ${user.id})`);
@@ -49,7 +61,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     next();
   } catch {
     logger.warn(`[Auth] Rejected ${route} — invalid or expired token`);
-    return res.status(401).json({ message: 'Invalid token' });
+    return responseError(res, 401, 'Invalid token');
   }
 };
 
@@ -77,7 +89,7 @@ export const optionalAuthenticate = async (req: Request, _res: Response, next: N
     const user = await AuthRepo.findUserById(decoded.userId);
 
     if (!user || user.accountStatus !== 'ACTIVE') return next();
-    if (decoded.sessionId && decoded.sessionId !== user.activeSessionId) return next();
+    if (decoded.sessionId !== user.activeSessionId) return next();
 
     req.user = user;
   } catch {
