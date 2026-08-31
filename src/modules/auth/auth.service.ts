@@ -29,19 +29,31 @@ const MAX_RESET_ATTEMPTS = 5;
 const INVALID_CREDENTIALS = 'Incorrect email or password.';
 
 /**
- * Constant-time comparison of two hex digests.
+ * Fixed salt/hash used to run a real PBKDF2 pass for unknown-email login attempts, so
+ * "no such user" costs the same as "wrong password" and can't be timed apart.
+ */
+const DUMMY_SALT = 'ponytail-dummy-salt';
+const DUMMY_HASH_HEX = crypto.pbkdf2Sync('dummy', DUMMY_SALT, 1000, 64, 'sha512').toString('hex');
+
+/**
+ * Constant-time comparison of a stored hex digest against a freshly computed one.
  *
- * `a !== b` returns as soon as it finds a differing byte, so how long it takes leaks
- * how much of the hash the attacker guessed correctly — enough, over many samples, to
+ * `a !== b` returns as soon as it finds a differing byte, so how long it takes leaks how
+ * much of the digest the attacker guessed correctly — enough, over many samples, to
  * reconstruct it byte by byte. `timingSafeEqual` always reads both buffers fully.
  *
- * It throws on length mismatch rather than returning false, so the lengths are checked
+ * It throws on length mismatch rather than returning false, so the lengths are compared
  * first; that check is safe to short-circuit because the length of a digest is not a
  * secret.
+ *
+ * The stored value is decoded *before* that check: `Buffer.from` stops at the first
+ * non-hex character, so a corrupt column can pass a string-length check and still decode
+ * short, turning a clean 401 into a 500.
  */
-function timingSafeEqualHex(a: string, b: string): boolean {
-  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
+function timingSafeEqualHex(storedHex: string, computed: Buffer): boolean {
+  if (typeof storedHex !== 'string') return false;
+  const stored = Buffer.from(storedHex, 'hex');
+  return stored.length === computed.length && crypto.timingSafeEqual(stored, computed);
 }
 
 export default class AuthSvc {
@@ -50,6 +62,7 @@ export default class AuthSvc {
     password: string;
     firstName?: string;
     lastName?: string;
+    middleName?: string;
     phoneNumber?: string;
     roleName: string;
     countryCode?: string;
@@ -84,6 +97,7 @@ export default class AuthSvc {
           passwordHash: `${salt}:${hash}`,
           firstName: data.firstName,
           lastName: data.lastName,
+          middleName: data.middleName,
           phoneNumber: data.phoneNumber,
           countryCode: data.countryCode,
           isEmailVerified: true,
@@ -146,7 +160,8 @@ export default class AuthSvc {
       --- END ORIGINAL STRICT LOGIC --- */
 
       // --- START BYPASS LOGIC ---
-      const displayName = [data.firstName, data.lastName].filter(Boolean).join(' ') || 'New User';
+      const displayName =
+        [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' ') || 'New User';
 
       if (data.roleName === 'SELLER') {
         const seller = await tx.sellers.create({
@@ -212,16 +227,22 @@ export default class AuthSvc {
     logger.info(`[Auth] Login attempt for ${data.email} as ${data.roleName || 'any'}`);
 
     const user = await AuthRepo.findUserByEmail(data.email);
-    if (!user || !user.passwordHash) {
-      logger.warn(`[Auth] Login failed — unknown or invalid account: ${data.email}`);
-      throw { status: 401, message: INVALID_CREDENTIALS };
-    }
 
-    const [salt, storedHash] = user.passwordHash.split(':');
-    const hash = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512').toString('hex');
+    // Always hash + compare, even for an unknown account, using a fixed dummy
+    // salt/hash — otherwise "no such user" returns faster than "wrong password"
+    // and leaks which emails are registered via response timing. The defaults also
+    // cover a stored hash with no ':' separator, which would otherwise leave `salt`
+    // undefined and make pbkdf2Sync throw a 500.
+    const [salt = DUMMY_SALT, storedHashHex = DUMMY_HASH_HEX] = user?.passwordHash
+      ? user.passwordHash.split(':')
+      : [DUMMY_SALT, DUMMY_HASH_HEX];
 
-    if (!timingSafeEqualHex(storedHash, hash)) {
-      logger.warn(`[Auth] Login failed — wrong password for ${data.email} (user: ${user.id})`);
+    const computed = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512');
+
+    // One branch for every failure — unknown account, social-only account, wrong
+    // password. Splitting them apart is what reopens the enumeration oracle.
+    if (!user || !user.passwordHash || !timingSafeEqualHex(storedHashHex, computed)) {
+      logger.warn(`[Auth] Login failed for ${data.email}`);
       throw { status: 401, message: INVALID_CREDENTIALS };
     }
 

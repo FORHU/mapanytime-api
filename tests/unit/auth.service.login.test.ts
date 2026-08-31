@@ -104,6 +104,18 @@ describe('AuthSvc.login', () => {
     spy.mockRestore();
   });
 
+  it('runs the KDF even for an unknown address', async () => {
+    // The whole point of the dummy salt/hash: bailing out before the PBKDF2 pass
+    // would make "no such user" measurably faster than "wrong password".
+    const spy = jest.spyOn(crypto, 'pbkdf2Sync');
+    mockRepo.findUserByEmail.mockResolvedValue(null as never);
+
+    await loginWith().catch(() => undefined);
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   it('revokes other sessions so only one device stays signed in', async () => {
     mockRepo.findUserByEmail.mockResolvedValue(USER as never);
 
@@ -112,5 +124,46 @@ describe('AuthSvc.login', () => {
     expect(mockRepo.rotateSession).toHaveBeenCalledWith(
       expect.objectContaining({ revokeOtherSessions: true }),
     );
+  });
+
+  // Guards the crypto.timingSafeEqual call: a corrupt/short stored hash must
+  // not throw past the length check and 500 instead of cleanly 401ing.
+  it('rejects a truncated stored hash instead of throwing', async () => {
+    mockRepo.findUserByEmail.mockResolvedValue({
+      ...USER,
+      passwordHash: `${SALT}:deadbeef`,
+    } as never);
+
+    await expect(loginWith()).rejects.toMatchObject({
+      status: 401,
+      message: 'Incorrect email or password.',
+    });
+  });
+
+  // The nastier shape of the same bug: `Buffer.from` stops at the first non-hex
+  // character, so this decodes to nothing while still being digest-length as a
+  // string. A length check done before decoding would wave it through and let
+  // timingSafeEqual throw.
+  it('rejects a digest-length non-hex stored hash instead of throwing', async () => {
+    mockRepo.findUserByEmail.mockResolvedValue({
+      ...USER,
+      passwordHash: `${SALT}:${'z'.repeat(128)}`,
+    } as never);
+
+    await expect(loginWith()).rejects.toMatchObject({
+      status: 401,
+      message: 'Incorrect email or password.',
+    });
+  });
+
+  // A hash with no ':' separator leaves the salt undefined; pbkdf2Sync throws a
+  // TypeError on that, which would surface as a 500.
+  it('rejects a stored hash with no salt separator instead of throwing', async () => {
+    mockRepo.findUserByEmail.mockResolvedValue({ ...USER, passwordHash: 'no-separator' } as never);
+
+    await expect(loginWith()).rejects.toMatchObject({
+      status: 401,
+      message: 'Incorrect email or password.',
+    });
   });
 });
