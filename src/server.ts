@@ -4,7 +4,7 @@ dotenv.config();
 import http from 'http';
 import app from './app';
 import logger from './utils/logger';
-import { PORT, NODE_ENV } from './config';
+import { PORT, NODE_ENV, assertCheckoutReturnUrl } from './config';
 import { prisma } from './utils/prisma';
 import { redis } from './infrastructure/redis';
 import { rabbitmq } from './infrastructure/rabbitmq';
@@ -19,6 +19,10 @@ initSocket(server);
 // Wrap the server startup in an async function to await infrastructure initialization
 const startServer = async () => {
   try {
+    // Fails the boot in production, warns in development. A bad FRONTEND_URL
+    // is invisible until a buyer presses Pay, so it is worth one check here.
+    assertCheckoutReturnUrl();
+
     // Initialize infrastructure before opening the port to traffic
     await RedisUtil.initialize();
     await rabbitmq.connect();

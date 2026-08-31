@@ -34,6 +34,7 @@ export default class OrderController {
         .required(),
       paymentMethod: Joi.string().optional(),
       paymentMethodId: Joi.string().optional(),
+      userVoucherId: Joi.string().optional(),
       productIds: Joi.array().items(Joi.string()).min(1).optional(),
       pickupAt: Joi.date()
         .iso()
@@ -82,8 +83,14 @@ export default class OrderController {
         storeId: cart.storeId,
         type: value.type,
         paymentMethod: value.paymentMethod,
+        // Was validated by the schema above and then dropped here, so a client
+        // sending only `paymentMethodId` — the id the /payments/methods
+        // response hands out — got "A paymentMethodId or paymentMethod is
+        // required" from PaymentService for a field it had actually supplied.
+        // Only the `paymentMethod` code path ever worked.
         paymentMethodId: value.paymentMethodId,
         pickupAt: value.pickupAt as Date | undefined,
+        userVoucherId: value.userVoucherId as string | undefined,
         items: itemsToOrder,
       };
 

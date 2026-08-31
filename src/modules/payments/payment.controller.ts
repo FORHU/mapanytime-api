@@ -119,10 +119,18 @@ export const handleProviderWebhook = async (req: Request, res: Response, next: N
  * route is an unauthenticated "mark any order paid" endpoint if it is ever
  * reachable in production — hence both the guard here and the mount-time guard
  * in payment.route.ts. See FLAGS.md.
+ *
+ * The guard below refuses production outright. It previously allowed a caller
+ * to pass by sending any `x-mock-secret` header at all: the header's presence
+ * was the whole check, its value never compared against a configured secret,
+ * and no such secret exists anywhere in the codebase. Unreachable in practice,
+ * because the route is not mounted in production — but it would have become an
+ * open endpoint the moment anyone moved the mount out of its `!isProduction`
+ * block, trusting the guard here to hold. Do not reintroduce an escape hatch.
  */
 export const mockWebhook = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (process.env.NODE_ENV === 'production' && !req.headers['x-mock-secret']) {
+    if (process.env.NODE_ENV === 'production') {
       return res
         .status(403)
         .json({ success: false, message: 'Mock payment webhook is disabled in production' });

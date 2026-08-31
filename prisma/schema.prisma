@@ -298,15 +298,17 @@ model Buyers {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
 
-  users          Users                   @relation(fields: [userId], references: [id])
-  review         StoreReviews[]
-  orders         Orders[]
-  addresses      BuyerAddresses[]
-  reviews        ProductReviews[]
-  cart           Carts?
-  wishlist       Wishlists?
-  returnRequests ReturnRequests[]
-  reservations   InventoryReservations[]
+  users           Users                   @relation(fields: [userId], references: [id])
+  review          StoreReviews[]
+  orders          Orders[]
+  addresses       BuyerAddresses[]
+  reviews         ProductReviews[]
+  cart            Carts?
+  wishlist        Wishlists?
+  returnRequests  ReturnRequests[]
+  reservations    InventoryReservations[]
+  rewardWallet    RewardWallet?
+  claimedVouchers UserVouchers[]
 }
 
 model DocumentVerifications {
@@ -881,6 +883,10 @@ model Orders {
   totalAmount          Decimal @db.Decimal(12, 2)
   subtotalAmount       Decimal @default(0) @db.Decimal(12, 2)
   discountAmount       Decimal @default(0) @db.Decimal(12, 2)
+  // MapPoints voucher redemption, kept separate from discountAmount: unlike a
+  // seller discount it does not reduce commission, and it must not shrink the
+  // points-earning base (which reads subtotalAmount - discountAmount only).
+  voucherAmount        Decimal @default(0) @db.Decimal(12, 2)
   taxAmount            Decimal @default(0) @db.Decimal(12, 2)
   marketplaceFeeAmount Decimal @default(0) @db.Decimal(12, 2)
   sellerNetAmount      Decimal @default(0) @db.Decimal(12, 2)
@@ -917,6 +923,7 @@ model Orders {
   returnRequests ReturnRequests[]
   reservations   InventoryReservations[]
   charges        OrderCharges[]
+  userVouchers   UserVouchers[]
 
   @@index([buyerId])
   @@index([storeId])
@@ -970,6 +977,137 @@ model OrderItems {
   @@index([productId])
   @@index([variantId])
   @@index([appliedAdId])
+}
+
+/// MapPoints — buyer loyalty points, earned automatically on every completed
+/// purchase and spent by claiming vouchers from RewardVouchers. Buyer-facing
+/// only; no seller-campaign or agent-commission ledgers. See
+/// docs/specs/MAP_POINTS_FEATURE_SPEC.md and docs/specs/OPEN-FLAGS.md
+/// (F39-F54) for the design history this schema follows.
+model RewardWallet {
+  id             String @id @default(cuid())
+  buyerId        String @unique
+  balance        Int    @default(0)
+  lifetimeEarned Int    @default(0)
+  lifetimeSpent  Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  buyer        Buyers               @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  transactions RewardTransactions[]
+
+  @@index([buyerId])
+}
+
+model RewardTransactions {
+  id           String                @id @default(cuid())
+  walletId     String
+  type         REWARDTRANSACTIONTYPE
+  amount       Int
+  balanceAfter Int
+
+  orderId       String?
+  userVoucherId String?
+  referenceKey  String? @unique
+  source        String?
+  description   String?
+
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+
+  wallet RewardWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, createdAt])
+  @@index([orderId])
+  @@index([type])
+  @@index([expiresAt])
+}
+
+enum REWARDTRANSACTIONTYPE {
+  EARN
+  SPEND
+  BONUS
+  REFUND
+  EXPIRED
+  REVERSAL
+  ADJUSTMENT
+}
+
+/// Admin-editable earn rate, versioned like PricingConfigurations. Only one
+/// row is isActive at a time.
+model RewardConfigurations {
+  id       String  @id @default(cuid())
+  version  Int     @default(1)
+  isActive Boolean @default(true)
+
+  earnPercentage  Decimal @default(0.0010) @db.Decimal(7, 6) // fraction of eligible spend, 0.0010 = 0.1%
+  pointValueInPhp Decimal @default(0.10) @db.Decimal(10, 4) // 1 pt = ₱0.10
+  expirationMonths    Int     @default(12)
+  isEarningActive     Boolean @default(true)
+
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  updatedById   String?
+  changeReason  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([isActive])
+}
+
+model RewardVouchers {
+  id                String             @id @default(cuid())
+  title             String
+  description       String?
+  pointCost         Int
+  discountType      REWARDDISCOUNTTYPE
+  discountValue     Decimal            @db.Decimal(12, 2) // ₱ off if FIXED, % (0-100) if PERCENTAGE
+  minOrderAmount    Decimal?           @db.Decimal(12, 2)
+  maxDiscountAmount Decimal?           @db.Decimal(12, 2) // caps a PERCENTAGE voucher's peso value
+  validityDays      Int                @default(30) // window from claimedAt to expiresAt
+  totalStock        Int? // null = unlimited
+  claimedCount      Int                @default(0)
+  isActive          Boolean            @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  claims UserVouchers[]
+
+  @@index([isActive])
+}
+
+enum REWARDDISCOUNTTYPE {
+  FIXED
+  PERCENTAGE
+}
+
+model UserVouchers {
+  id          String            @id @default(cuid())
+  buyerId     String
+  voucherId   String
+  status      USERVOUCHERSTATUS @default(ACTIVE)
+  pointsSpent Int
+  claimedAt   DateTime          @default(now())
+  expiresAt   DateTime
+  usedAt      DateTime?
+  orderId     String?
+
+  buyer   Buyers         @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  voucher RewardVouchers @relation(fields: [voucherId], references: [id])
+  order   Orders?        @relation(fields: [orderId], references: [id])
+
+  @@index([buyerId, status])
+  @@index([voucherId])
+  @@index([orderId])
+  @@index([status, expiresAt])
+}
+
+enum USERVOUCHERSTATUS {
+  ACTIVE
+  USED
+  EXPIRED
 }
 
 enum ORDERCHARGETYPE {

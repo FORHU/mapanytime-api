@@ -31,6 +31,13 @@ interface ResolvedPricingConfiguration {
 export interface PricingCalculationInput {
   subtotalAmount: number;
   discountAmount?: number;
+  /**
+   * A MapPoints voucher redemption. Reduces the buyer-fee base and
+   * `buyerTotalAmount` exactly like `discountAmount` does, but — unlike a
+   * seller discount — must NOT reduce the seller commission base: the
+   * platform funds it, the seller is paid in full. See OPEN-FLAGS.md F39/F40.
+   */
+  voucherAmount?: number;
   storeId?: string;
   sellerId?: string;
   sellerPlan?: string;
@@ -89,7 +96,8 @@ export interface OrderPricingResult {
   // 1. Order Core
   subtotalAmount: number;
   discountAmount: number;
-  orderAmount: number; // Subtotal - Discount
+  voucherAmount: number; // MapPoints redemption. Kept out of discountAmount — see PricingCalculationInput.
+  orderAmount: number; // Subtotal - Discount - Voucher
 
   // 2. Gateway Processing Cost
   paymentProcessingCost: PaymentProcessingCostBreakdown;
@@ -204,10 +212,18 @@ export class PricingEngineService {
   ): OrderPricingResult {
     const subtotal = Math.max(0, Number(input.subtotalAmount) || 0);
     const discount = Math.max(0, Number(input.discountAmount) || 0);
+    const voucher = Math.max(0, Number(input.voucherAmount) || 0);
     // Eligible transaction base amount. No tax term: the platform is a
     // marketplace intermediary and collects no VAT on the seller's goods.
     // See FLAGS.md.
-    const orderAmount = Math.max(0, subtotal - discount);
+    //
+    // `voucher` is subtracted here — reducing the buyer-fee base and
+    // `buyerTotalAmount` below, which both derive from `orderAmount` — but
+    // deliberately NOT from `commissionBase`/`sellerNetAmount` further down,
+    // which read `subtotal - discount` directly rather than from
+    // `orderAmount`. That's what keeps a MapPoints redemption from touching
+    // seller commission. See OPEN-FLAGS.md F39/F40.
+    const orderAmount = Math.max(0, subtotal - discount - voucher);
 
     // ── STEP 1: Active Pricing Configuration Container ────────────────
     const activePricingConfig = resolved.config;
@@ -305,6 +321,7 @@ export class PricingEngineService {
     return {
       subtotalAmount: Number(subtotal.toFixed(2)),
       discountAmount: Number(discount.toFixed(2)),
+      voucherAmount: Number(voucher.toFixed(2)),
       orderAmount: Number(orderAmount.toFixed(2)),
       paymentProcessingCost,
       buyerPlatformFee,
@@ -352,6 +369,35 @@ export class PricingEngineService {
       '[Pricing] No ACTIVE PricingConfigurations row matched. Every order is ' +
         'pricing off built-in fallback rates, which understate the real ' +
         'PayMongo rates — the platform absorbs the difference. See FLAGS.md F2.',
+    );
+  }
+
+  /**
+   * The per-method twin of the warning above, and the gap it left. An ACTIVE
+   * configuration can match the order while an individual method still has no
+   * `PAYMENT_PROCESSING_FEE` component of its own — so `warnNoConfiguration`
+   * stays quiet and the method prices off the fallback in total silence.
+   *
+   * Four methods are in that state today: PayMongo's `QRPH` and `GRAB_PAY`,
+   * and both of Xendit's (`GCASH`, `MAYA`), which have no rate card on file.
+   * Every order paid through one of them is billed the fallback rate rather
+   * than the provider's real one, and where the real rate is higher the
+   * platform absorbs the difference out of its commission.
+   *
+   * Keyed per provider+method, so a newly added gateway cannot hide behind a
+   * warning some other method already tripped.
+   */
+  private static warnedMissingRate = new Set<string>();
+  private static warnMissingMethodRate(providerId?: string, paymentMethodId?: string) {
+    const key = `${providerId ?? 'unknown'}:${paymentMethodId ?? 'unknown'}`;
+    if (this.warnedMissingRate.has(key)) return;
+    this.warnedMissingRate.add(key);
+    logger.warn(
+      `[Pricing] No PAYMENT_PROCESSING_FEE component for provider=${providerId ?? 'unknown'} ` +
+        `method=${paymentMethodId ?? 'unknown'} — pricing off the ` +
+        `${(DEFAULT_PAYMENT_GATEWAY_RATE * 100).toFixed(2)}% fallback. If this ` +
+        'provider bills more than that, the platform absorbs the difference on ' +
+        'every order paid this way. See FLAGS.md F2.',
     );
   }
 
@@ -457,7 +503,10 @@ export class PricingEngineService {
 
     // No configured component matched. This is the state an environment is in
     // until a PricingConfigurations row exists, and it understates every real
-    // rate — see FLAGS.md F2.
+    // rate — see FLAGS.md F2. It is also the state a single method sits in when
+    // the configuration exists but that method has no rate on file, which is
+    // why the warning below is keyed per method rather than per process.
+    this.warnMissingMethodRate(context?.providerId, context?.paymentMethodId);
     const rate = DEFAULT_PAYMENT_GATEWAY_RATE;
     const cost = this.grossUp(amount, rate, 0, buyerShare);
 

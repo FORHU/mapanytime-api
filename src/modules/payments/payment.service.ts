@@ -6,6 +6,7 @@ import { PayMongoProvider } from './providers/paymongo.provider';
 import { MockProvider } from './providers/mock.provider';
 import { XenditProvider } from './providers/xendit.provider';
 import PricingEngineService, { OrderPricingResult } from '../pricing/pricing-engine.service';
+import InventoryStockRepository from '../inventory/inventoryStock.repository';
 
 /** Peso amount for buyer-facing copy: `1500` -> `₱1,500`. */
 const formatPeso = (amount: number) => `₱${amount.toLocaleString('en-PH')}`;
@@ -43,19 +44,13 @@ export default class PaymentService {
     switch (providerCode.toUpperCase()) {
       case 'PAYMONGO':
         if (!process.env.PAYMONGO_SECRET_KEY) {
-          console.warn(
-            '[payments] PAYMONGO_SECRET_KEY is not set — falling back to MockProvider. ' +
-              'Real checkout sessions will not be created.',
-          );
+          this.warnUnconfigured('PAYMONGO', 'PAYMONGO_SECRET_KEY');
           return new MockProvider();
         }
         return new PayMongoProvider();
       case 'XENDIT':
         if (!process.env.XENDIT_SECRET_KEY) {
-          console.warn(
-            '[payments] XENDIT_SECRET_KEY is not set — falling back to MockProvider. ' +
-              'Real checkout sessions will not be created.',
-          );
+          this.warnUnconfigured('XENDIT', 'XENDIT_SECRET_KEY');
           return new MockProvider();
         }
         return new XenditProvider();
@@ -63,6 +58,24 @@ export default class PaymentService {
       default:
         return new MockProvider();
     }
+  }
+
+  /**
+   * Warn once per provider that it is running on the mock.
+   *
+   * `getActivePaymentMethods` calls `getProviderAdapter` to decide what to
+   * offer (F83), and that endpoint is public and unauthenticated — so warning
+   * on every fallback meant a line per unconfigured provider per checkout page
+   * load. Once per process keeps the state visible without burying the log.
+   */
+  private static warnedUnconfigured = new Set<string>();
+  private static warnUnconfigured(providerCode: string, envVar: string) {
+    if (this.warnedUnconfigured.has(providerCode)) return;
+    this.warnedUnconfigured.add(providerCode);
+    console.warn(
+      `[payments] ${envVar} is not set — ${providerCode} falls back to MockProvider and is ` +
+        'hidden from checkout. Real checkout sessions will not be created.',
+    );
   }
 
   /**
@@ -160,9 +173,29 @@ export default class PaymentService {
     // the webhook, but the *method* was still offered in the picker, so a
     // production checkout could list "Mock Sandbox" as a way to pay.
     // See FLAGS.md F33.
-    const offerable = providers.filter(
-      (provider) => provider.code !== 'MOCK' || process.env.NODE_ENV !== 'production',
-    );
+    //
+    // Hiding the MOCK row alone was not enough. `getProviderAdapter` falls back
+    // to MockProvider for any provider whose secret key is unset, and
+    // MockProvider returns a null checkoutUrl — so an unconfigured gateway was
+    // still offered, the buyer picked GCash, an order and a PENDING payment
+    // were created, and nothing could ever pay it. Offering a way to pay that
+    // cannot take money is worse than offering nothing: the buyer has
+    // committed before finding out. A provider is listed only if its real
+    // adapter resolves. See FLAGS.md F83.
+    const offerable = providers.filter((provider) => {
+      if (provider.code === 'MOCK') return process.env.NODE_ENV !== 'production';
+
+      // Cash never reaches a gateway — `isCashPayment` short-circuits pricing
+      // and no checkout session is created — so it has no adapter and must not
+      // be judged by one. `getProviderAdapter` has no CASH case and falls
+      // through to its default, which is MockProvider, so testing it here
+      // would delete Pay on Pickup from the picker.
+      if (provider.methods.every((method) => method.type === PAYMENTMETHODTYPE.CASH)) {
+        return true;
+      }
+
+      return !(this.getProviderAdapter(provider.code) instanceof MockProvider);
+    });
 
     // Price every method against one read of the pricing configuration. A call
     // per method re-read the configuration and its components each time —
@@ -451,11 +484,18 @@ export default class PaymentService {
     // processor, and payments.seeder.ts activates the MOCK provider row
     // unconditionally. Enforced here so every route in is covered.
     // See FLAGS.md.
-    if (providerRecord.code === 'MOCK' && process.env.NODE_ENV === 'production') {
+    const adapter = this.getProviderAdapter(providerRecord.code);
+
+    // Test the adapter actually in use, not the row's code. `getProviderAdapter`
+    // falls back to MockProvider whenever a provider's secret key is missing, so
+    // an unset XENDIT_SECRET_KEY in production left `providerRecord.code` as
+    // 'XENDIT' — the old check passed — while the adapter verifying the webhook
+    // was the mock, which returns true for any signature. A missing environment
+    // variable was one step from an open "mark any order paid" endpoint on
+    // /webhook/xendit and /webhook/paymongo alike.
+    if (adapter instanceof MockProvider && process.env.NODE_ENV === 'production') {
       throw { status: 403, message: 'Mock payment webhooks are disabled in production.' };
     }
-
-    const adapter = this.getProviderAdapter(providerRecord.code);
 
     // 1. Signature validation
     const isValid = adapter.verifyWebhook(rawBody, signatureHeader);
@@ -568,11 +608,15 @@ export default class PaymentService {
           data: { status: 'PROCESSING' },
         });
 
-        // Finalize Inventory Reservations to CONSUMED
-        await tx.inventoryReservations.updateMany({
-          where: { orderId, status: 'RESERVED' },
-          data: { status: 'CONSUMED' },
-        });
+        // The reservations deliberately stay RESERVED here. Payment succeeding
+        // does not move any goods — they sit on the shelf, still held for this
+        // buyer, until pickup. `OrderService.completeOrder` is what takes them
+        // off the shelf, and it ends the hold in the same claim (F43).
+        //
+        // Marking them CONSUMED at this point ended the hold in name only: the
+        // rows said the stock was gone while `quantityReserved` still counted
+        // it, and the balancing decrement came from the order's items at
+        // completion, whether or not the hold was still there to give back.
 
         return { payment: updatedPayment, justCompleted: true };
       } else if (isFailure) {
@@ -585,24 +629,19 @@ export default class PaymentService {
           },
         });
 
-        // Release inventory reservation
-        await tx.inventoryReservations.updateMany({
-          where: { orderId, status: 'RESERVED' },
-          data: { status: 'RELEASED' },
-        });
+        // Give the hold back and mark the rows RELEASED in one claim (F43).
+        // These were two separate steps: the updateMany flipped the rows, then
+        // the loop below decremented from the order's items — so a hold the TTL
+        // sweeper had already released was subtracted a second time, and
+        // quantityReserved went negative.
+        await InventoryStockRepository.releaseOrderReservations(tx, orderId, 'RELEASED');
 
         const order = await tx.orders.findUnique({
           where: { id: orderId },
-          include: { orderitems: true },
+          select: { status: true },
         });
 
         if (order && order.status === 'PENDING') {
-          for (const item of order.orderitems) {
-            await tx.inventory.updateMany({
-              where: { productId: item.productId },
-              data: { quantityReserved: { decrement: item.quantity } },
-            });
-          }
           await tx.orders.update({
             where: { id: orderId },
             data: { status: 'FAILED' },

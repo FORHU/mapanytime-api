@@ -20,6 +20,8 @@ import {
 import PaymentService from '../payments/payment.service';
 import PricingEngineService from '../pricing/pricing-engine.service';
 import SettlementService from '../settlements/settlement.service';
+import RewardService from '../rewards/reward.service';
+import InventoryStockRepository from '../inventory/inventoryStock.repository';
 import NotificationService from '../notifications/notification.service';
 import logger from '../../utils/logger';
 
@@ -74,6 +76,7 @@ export default class OrderService {
     paymentMethod?: string;
     paymentMethodId?: string;
     pickupAt?: Date;
+    userVoucherId?: string;
     items: { productId: string; quantity: number }[];
   }) {
     const order = await prisma.$transaction(async (tx) => {
@@ -106,6 +109,7 @@ export default class OrderService {
       let subtotalAmount = 0;
       let totalDiscount = 0;
       const orderItemsData = [];
+      const reservationIds: string[] = [];
       let primaryCategoryId: string | undefined;
 
       for (const item of payload.items) {
@@ -157,14 +161,15 @@ export default class OrderService {
           appliedAdId,
         });
 
-        await tx.inventory.update({
-          where: { id: inventory.id },
-          data: {
-            quantityReserved: { increment: item.quantity },
-          },
-        });
+        // The availableStock read above is advisory only — another checkout
+        // can take the last unit between that read and this line. The
+        // conditional UPDATE inside tryReserve is the actual guard (F75).
+        const reserved = await InventoryStockRepository.tryReserve(tx, inventory.id, item.quantity);
+        if (!reserved) {
+          throw new Error(`Insufficient stock for ${product.name}. It sold out during checkout.`);
+        }
 
-        await tx.inventoryReservations.create({
+        const reservation = await tx.inventoryReservations.create({
           data: {
             inventoryId: inventory.id,
             buyerId: payload.buyerId,
@@ -173,6 +178,23 @@ export default class OrderService {
             expiresAt: resolveReservationExpiry(payload.pickupAt),
           },
         });
+        reservationIds.push(reservation.id);
+      }
+
+      // A claimed MapPoints voucher, validated but not yet marked used —
+      // that happens after the order row exists, so a phantom spend can
+      // never outlive a failed order creation.
+      let voucherAmount = 0;
+      let userVoucherId: string | undefined;
+      if (payload.userVoucherId) {
+        const validated = await RewardService.validateVoucherForOrder(
+          tx,
+          payload.buyerId,
+          payload.userVoucherId,
+          Math.max(0, subtotalAmount - totalDiscount),
+        );
+        userVoucherId = validated.userVoucher.id;
+        voucherAmount = validated.discountAmount;
       }
 
       // 1. Resolve payment provider and method
@@ -187,6 +209,7 @@ export default class OrderService {
       const pricingResult = await PricingEngineService.calculateOrderPricing({
         subtotalAmount,
         discountAmount: totalDiscount,
+        voucherAmount,
         storeId: payload.storeId,
         sellerId: store.sellerId,
         categoryId: primaryCategoryId,
@@ -211,6 +234,20 @@ export default class OrderService {
                 source: 'Store / Item Promotion',
                 amount: pricingResult.discountAmount,
                 payer: CHARGEPAYER.SELLER,
+                beneficiary: CHARGEBENEFICIARY.BUYER,
+              },
+            ]
+          : []),
+        // MapPoints voucher redemption. Payer PLATFORM, not SELLER — the
+        // platform absorbs it and the seller is still paid in full, so it
+        // must never fold into the DISCOUNT row above. See F39/F40.
+        ...(pricingResult.voucherAmount > 0
+          ? [
+              {
+                type: ORDERCHARGETYPE.PLATFORM_SUBSIDY,
+                source: 'MapPoints Voucher Redemption',
+                amount: pricingResult.voucherAmount,
+                payer: CHARGEPAYER.PLATFORM,
                 beneficiary: CHARGEBENEFICIARY.BUYER,
               },
             ]
@@ -251,6 +288,7 @@ export default class OrderService {
         totalAmount: pricingResult.buyerTotalAmount,
         subtotalAmount: pricingResult.subtotalAmount,
         discountAmount: pricingResult.discountAmount,
+        voucherAmount: pricingResult.voucherAmount,
         marketplaceFeeAmount: pricingResult.sellerMarketplaceCommission.amount,
         sellerNetAmount: pricingResult.sellerNetAmount,
 
@@ -288,6 +326,12 @@ export default class OrderService {
 
       const createdOrder = await OrderRepository.insertOrder(orderData, tx);
 
+      if (userVoucherId) {
+        // Inside the same transaction: a voucher marked used for an order
+        // that then failed to create would be a phantom spend.
+        await RewardService.markVoucherUsed(tx, userVoucherId, createdOrder.id);
+      }
+
       const providerCode = method.provider.code;
       const provider = PaymentService.getProviderAdapter(providerCode);
 
@@ -317,16 +361,14 @@ export default class OrderService {
         },
       });
 
-      // Link newly created reservations to the order
+      // Link this checkout's own reservations to the order, by id. Matching on
+      // (buyerId, orderId: null) instead also swept up the same buyer's
+      // unrelated holds — a cart reservation, or a concurrent checkout at
+      // another store — and attached them here, after which this order's
+      // release paths would hand back stock it never held.
       await tx.inventoryReservations.updateMany({
-        where: {
-          buyerId: payload.buyerId,
-          orderId: null,
-          status: 'RESERVED',
-        },
-        data: {
-          orderId: createdOrder.id,
-        },
+        where: { id: { in: reservationIds } },
+        data: { orderId: createdOrder.id },
       });
 
       return {
@@ -435,11 +477,13 @@ export default class OrderService {
 
         const newOnHand = inventory.quantityOnHand - item.quantity;
 
+        // Only the on-hand count moves here. The matching quantityReserved
+        // release is claimed from the reservation rows once, below.
         await tx.inventory.update({
           where: { id: inventory.id },
           data: {
             quantityOnHand: { decrement: item.quantity },
-            quantityReserved: { decrement: item.quantity },
+            version: { increment: 1 },
           },
         });
 
@@ -462,10 +506,12 @@ export default class OrderService {
         });
       }
 
-      await tx.inventoryReservations.updateMany({
-        where: { orderId: orderId, status: 'RESERVED' },
-        data: { status: 'CONSUMED' },
-      });
+      // Releases the hold and flips the rows to CONSUMED in one claim. The
+      // quantity comes from the reservation rows rather than the order's items:
+      // if the TTL sweeper already expired this order's hold there is nothing
+      // left to give back, and decrementing per item drove quantityReserved
+      // negative (F43).
+      await InventoryStockRepository.releaseOrderReservations(tx, orderId, 'CONSUMED');
 
       const completed = await OrderRepository.updateOrderStatus(
         orderId,
@@ -480,6 +526,11 @@ export default class OrderService {
       // transaction as the completion, so the ledger cannot record a debt for
       // an order that did not finish completing. See FLAGS.md LED-3.
       await SettlementService.createForCompletedOrder(tx, orderId);
+
+      // Credit MapPoints in the same transaction as completion, for the same
+      // reason the settlement is booked here: a ledger row for an order that
+      // then failed to complete would be a phantom credit.
+      await RewardService.awardPointsForCompletedOrder(tx, orderId);
 
       return completed;
     });
@@ -664,7 +715,8 @@ export default class OrderService {
     // Cancelling a PENDING order (buyer never finished paying) just releases the
     // hold. Cancelling a PROCESSING order means the gateway already captured
     // real money — that must go back through the provider, not just be
-    // stamped FAILED. See PICKUP-NEXT.md S3.
+    // stamped FAILED. Raised as S3 in the since-deleted PICKUP-NEXT.md; the
+    // register now lives in mapanytime-api/docs/specs/OPEN-FLAGS.md.
     const payment = await prisma.payments.findFirst({
       where: { orderId },
       orderBy: { createdAt: 'desc' },
@@ -747,26 +799,9 @@ export default class OrderService {
           );
         }
 
-        for (const item of order.orderitems) {
-          const inventory = await tx.inventory.findFirst({
-            where: { productId: item.productId },
-          });
-
-          if (!inventory)
-            throw new Error(`Inventory tracking ledger missing for product ID ${item.productId}.`);
-
-          await tx.inventory.update({
-            where: { id: inventory.id },
-            data: {
-              quantityReserved: { decrement: item.quantity },
-            },
-          });
-        }
-
-        await tx.inventoryReservations.updateMany({
-          where: { orderId: orderId, status: 'RESERVED' },
-          data: { status: 'RELEASED' },
-        });
+        // One claim, idempotent: a hold the TTL sweeper already released is no
+        // longer RESERVED, so it is not given back a second time (F43).
+        await InventoryStockRepository.releaseOrderReservations(tx, orderId, 'RELEASED');
 
         if (needsRefund && payment) {
           await tx.payments.update({

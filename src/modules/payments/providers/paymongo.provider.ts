@@ -1,5 +1,6 @@
 import axios from 'axios';
 import crypto from 'crypto';
+import { MAPANYTIME_WEB_APP_URL } from '../../../config';
 import {
   CreateCheckoutInput,
   CheckoutResult,
@@ -143,12 +144,16 @@ export class PayMongoProvider implements PaymentProvider {
           line_items: formattedLineItems,
           payment_method_types: resolvePaymentMethodTypes(input.paymentMethodCode),
           reference_number: input.orderId,
+          // Read from config rather than the environment so the configured
+          // name is the one that reaches here. Unlike Xendit, PayMongo accepts
+          // a plain-HTTP localhost URL, so this keeps the raw value and its
+          // localhost default instead of the strict https-only base.
           success_url:
             input.successUrl ||
-            `${process.env.FRONTEND_URL || 'http://localhost:3000'}/orders/${input.orderId}?status=success`,
+            `${MAPANYTIME_WEB_APP_URL || 'http://localhost:3000'}/orders/${input.orderId}?status=success`,
           cancel_url:
             input.cancelUrl ||
-            `${process.env.FRONTEND_URL || 'http://localhost:3000'}/orders/${input.orderId}?status=cancelled`,
+            `${MAPANYTIME_WEB_APP_URL || 'http://localhost:3000'}/orders/${input.orderId}?status=cancelled`,
           metadata: {
             orderId: input.orderId,
             ...(input.metadata || {}),

@@ -1,6 +1,7 @@
 import { Server as HttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import logger from '../../utils/logger';
+import { allowedOrigins, isOriginAllowed, rejectOrigin } from '../../middleware/cors.middleware';
 
 /**
  * Realtime store updates over Socket.IO.
@@ -97,25 +98,19 @@ function isViewport(v: unknown): v is Viewport {
 }
 
 /**
- * Reflecting every origin while `credentials: true` is set lets any site open an
- * authenticated socket on a signed-in user's behalf, so the allowlist wins
- * wherever CORS_ORIGIN is configured. It is intentionally left open when the var
- * is unset: local dev and the mobile client send no usable Origin header.
- * Staging and production must set CORS_ORIGIN.
+ * The allowlist is shared with the HTTP app — see middleware/cors.middleware.ts.
+ * Both surfaces parsed CORS_ORIGIN for themselves until F94; a socket that
+ * disagreed with HTTP about a valid origin was one env-var typo away.
  */
-const allowedOrigins = (process.env.CORS_ORIGIN ?? '')
-  .split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
 
 export function initSocket(server: HttpServer): Server {
   io = new Server(server, {
     cors: {
       origin: (origin, callback) => {
-        if (allowedOrigins.length === 0 || !origin || allowedOrigins.includes(origin)) {
+        if (isOriginAllowed(origin, allowedOrigins)) {
           return callback(null, true);
         }
-        return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+        return callback(rejectOrigin(origin as string));
       },
       credentials: true,
       methods: ['GET', 'POST'],

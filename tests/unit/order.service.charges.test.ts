@@ -27,6 +27,11 @@ describe('OrderService.createOrder — OrderCharges ledger', () => {
 
   function buildTx() {
     return {
+      // Stock is reserved with a conditional UPDATE and holds are ended with an
+      // UPDATE ... RETURNING, so a transaction client has to carry both raw
+      // escape hatches. 1 affected row = the reservation was taken.
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      $queryRaw: jest.fn().mockResolvedValue([]),
       stores: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'store-1',
@@ -52,7 +57,7 @@ describe('OrderService.createOrder — OrderCharges ledger', () => {
       merchantAdProducts: { findMany: jest.fn().mockResolvedValue([]) },
       inventory: { update: jest.fn().mockResolvedValue({}) },
       inventoryReservations: {
-        create: jest.fn().mockResolvedValue({}),
+        create: jest.fn().mockResolvedValue({ id: 'res-1' }),
         updateMany: jest.fn().mockResolvedValue({}),
       },
       payments: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },

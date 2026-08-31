@@ -31,9 +31,13 @@ const ORDER_ID = 'order-1';
 const makeTx = () => ({
   payments: { findFirst: jest.fn(), update: jest.fn(), create: jest.fn() },
   orders: { updateMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
-  inventory: { updateMany: jest.fn() },
+  inventory: { updateMany: jest.fn(), update: jest.fn() },
   inventoryReservations: { updateMany: jest.fn() },
   paymentWebhookEvents: { upsert: jest.fn() },
+  // Ending a hold is an UPDATE ... RETURNING of the rows still RESERVED.
+  // Default: nothing left to claim.
+  $queryRaw: jest.fn().mockResolvedValue([]),
+  $executeRaw: jest.fn().mockResolvedValue(1),
 });
 
 let tx: ReturnType<typeof makeTx>;
@@ -47,24 +51,69 @@ beforeEach(() => {
 
 describe('PaymentService — Dynamic Payment Architecture', () => {
   describe('getActivePaymentMethods', () => {
+    const paymongoRow = {
+      id: 'prov-1',
+      code: 'PAYMONGO',
+      name: 'PayMongo',
+      description: 'Gateway',
+      methods: [
+        { id: 'meth-1', code: 'GCASH', name: 'GCash', type: 'E_WALLET', description: null },
+      ],
+    };
+
+    const cashRow = {
+      id: 'prov-cash',
+      code: 'CASH',
+      name: 'Cash',
+      description: 'Physical cash paid on pickup',
+      methods: [
+        { id: 'meth-cod', code: 'COD', name: 'Pay on Pickup', type: 'CASH', description: null },
+      ],
+    };
+
+    const previousKey = process.env.PAYMONGO_SECRET_KEY;
+    afterEach(() => {
+      if (previousKey === undefined) delete process.env.PAYMONGO_SECRET_KEY;
+      else process.env.PAYMONGO_SECRET_KEY = previousKey;
+    });
+
     it('returns active providers and their active methods', async () => {
-      (prisma.paymentProviders.findMany as jest.Mock).mockResolvedValue([
-        {
-          id: 'prov-1',
-          code: 'PAYMONGO',
-          name: 'PayMongo',
-          description: 'Gateway',
-          methods: [
-            { id: 'meth-1', code: 'GCASH', name: 'GCash', type: 'E_WALLET', description: null },
-          ],
-        },
-      ]);
+      process.env.PAYMONGO_SECRET_KEY = 'sk_test_configured';
+      (prisma.paymentProviders.findMany as jest.Mock).mockResolvedValue([paymongoRow]);
 
       const result = await PaymentService.getActivePaymentMethods();
       expect(result).toHaveLength(1);
       expect(result[0].code).toBe('PAYMONGO');
       expect(result[0].methods).toHaveLength(1);
       expect(result[0].methods[0].code).toBe('GCASH');
+    });
+
+    /**
+     * Without a secret key `getProviderAdapter` hands back MockProvider, whose
+     * checkoutUrl is null. Offering the method anyway let a buyer pick GCash,
+     * create an order and a PENDING payment, and then have no way to pay it —
+     * worse than offering nothing, because they have already committed.
+     * See FLAGS.md F83.
+     */
+    it('hides a gateway whose secret key is not configured', async () => {
+      delete process.env.PAYMONGO_SECRET_KEY;
+      (prisma.paymentProviders.findMany as jest.Mock).mockResolvedValue([paymongoRow]);
+
+      await expect(PaymentService.getActivePaymentMethods()).resolves.toEqual([]);
+    });
+
+    /**
+     * Cash reaches no gateway, so it has no adapter to judge. `getProviderAdapter`
+     * has no CASH case and falls through to MockProvider — testing it the same
+     * way as a gateway would delete Pay on Pickup from the picker.
+     */
+    it('still offers cash on pickup, which needs no gateway at all', async () => {
+      delete process.env.PAYMONGO_SECRET_KEY;
+      (prisma.paymentProviders.findMany as jest.Mock).mockResolvedValue([paymongoRow, cashRow]);
+
+      const result = await PaymentService.getActivePaymentMethods();
+      expect(result.map((p) => p.code)).toEqual(['CASH']);
+      expect(result[0].methods[0].code).toBe('COD');
     });
   });
 
@@ -161,10 +210,10 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
         where: { id: ORDER_ID, status: 'PENDING' },
         data: { status: 'PROCESSING' },
       });
-      expect(tx.inventoryReservations.updateMany).toHaveBeenCalledWith({
-        where: { orderId: ORDER_ID, status: 'RESERVED' },
-        data: { status: 'CONSUMED' },
-      });
+      // Payment succeeding moves no goods — they stay on the shelf, held for
+      // this buyer, until pickup. completeOrder is what consumes the hold, in
+      // the same claim that takes the stock down (F43).
+      expect(tx.inventoryReservations.updateMany).not.toHaveBeenCalled();
       expect(mockEmit).toHaveBeenCalledTimes(2);
     });
 
@@ -172,11 +221,8 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
       const pendingPayment = { id: 'pay-1', orderId: ORDER_ID, status: 'PENDING', amount: 500 };
       tx.payments.findFirst.mockResolvedValue(pendingPayment);
       tx.payments.update.mockResolvedValue({ ...pendingPayment, status: 'FAILED' });
-      tx.orders.findUnique.mockResolvedValue({
-        id: ORDER_ID,
-        status: 'PENDING',
-        orderitems: [{ productId: 'prod-1', quantity: 2 }],
-      });
+      tx.orders.findUnique.mockResolvedValue({ id: ORDER_ID, status: 'PENDING' });
+      tx.$queryRaw.mockResolvedValue([{ inventoryId: 'inv-1', quantity: 2 }]);
 
       const payload = {
         data: {
@@ -206,14 +252,14 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
           data: expect.objectContaining({ status: 'FAILED' }),
         }),
       );
-      expect(tx.inventoryReservations.updateMany).toHaveBeenCalledWith({
-        where: { orderId: ORDER_ID, status: 'RESERVED' },
-        data: { status: 'RELEASED' },
-      });
-      expect(tx.inventory.updateMany).toHaveBeenCalledWith({
-        where: { productId: 'prod-1' },
-        data: { quantityReserved: { decrement: 2 } },
-      });
+      // The hold is given back by claiming the rows still RESERVED and
+      // decrementing what that claim returned — never by walking the order's
+      // items, which handed the stock back a second time when the TTL sweeper
+      // had already released it (F43).
+      const claim = tx.$queryRaw.mock.calls[0];
+      expect((claim[0] as string[]).join('?')).toContain(`"status" = 'RESERVED'`);
+      expect(claim.slice(1)).toEqual(['RELEASED', ORDER_ID]);
+      expect(tx.inventory.updateMany).not.toHaveBeenCalled();
     });
   });
   describe('COMPLETED is terminal', () => {

@@ -2,6 +2,7 @@ import SettlementService, {
   SETTLEMENT_HOLD_DAYS,
 } from '../../src/modules/settlements/settlement.service';
 import { prisma } from '../../src/utils/prisma';
+import logger from '../../src/utils/logger';
 
 jest.mock('../../src/utils/logger', () => ({
   __esModule: true,
@@ -185,6 +186,57 @@ describe('SettlementService.releaseMaturedSettlements', () => {
 
     expect(await SettlementService.releaseMaturedSettlements()).toBe(0);
     expect(mockPrisma.settlements.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The old `markRefundedForOrder` was an unfiltered `updateMany`, so a refund on
+ * an order whose settlement had already been swept into a payout flipped the
+ * row to REFUNDED and erased the only record that the seller was ever paid.
+ * See OPEN-FLAGS F84.
+ */
+describe('SettlementService.markRefundedForOrder', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('marks a settlement refunded and owes nothing back when it was never paid out', async () => {
+    mockPrisma.settlements.findUnique.mockResolvedValue({
+      id: 'set-1',
+      sellerId: 'seller-1',
+      payoutItem: null,
+    });
+
+    const result = await SettlementService.markRefundedForOrder(prisma as never, 'order-1');
+
+    expect(result).toMatchObject({ clawbackOwed: 0, payoutNumber: null });
+    expect(mockPrisma.settlements.update).toHaveBeenCalledWith({
+      where: { orderId: 'order-1' },
+      data: expect.objectContaining({ status: 'REFUNDED' }),
+    });
+  });
+
+  it('reports the clawback when the seller was already paid for the returned sale', async () => {
+    mockPrisma.settlements.findUnique.mockResolvedValue({
+      id: 'set-1',
+      sellerId: 'seller-1',
+      payoutItem: {
+        amount: 980,
+        payout: { payoutNumber: 'PO-123-4567', status: 'COMPLETED' },
+      },
+    });
+
+    const result = await SettlementService.markRefundedForOrder(prisma as never, 'order-1');
+
+    expect(result).toMatchObject({ clawbackOwed: 980, payoutNumber: 'PO-123-4567' });
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('PO-123-4567'));
+  });
+
+  it('does nothing for an order that has no settlement', async () => {
+    mockPrisma.settlements.findUnique.mockResolvedValue(null);
+
+    const result = await SettlementService.markRefundedForOrder(prisma as never, 'order-1');
+
+    expect(result).toMatchObject({ count: 0, clawbackOwed: 0 });
+    expect(mockPrisma.settlements.update).not.toHaveBeenCalled();
   });
 });
 
