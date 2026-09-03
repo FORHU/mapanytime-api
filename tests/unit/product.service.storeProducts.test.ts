@@ -1,5 +1,7 @@
 import ProductService from '../../src/modules/products/product.service';
 import ProductRepository from '../../src/modules/products/product.repository';
+import type { OrgContext } from '../../src/modules/organization/orgContext';
+import { ALL_SELLER_FEATURES } from '../../src/modules/organization/sellerPermissions.constant';
 
 jest.mock('../../src/modules/products/product.repository');
 
@@ -25,6 +27,23 @@ const mockedRepo = ProductRepository as unknown as {
 const SELLER = { id: 'seller-1' };
 const STORE = { id: 'store-1', sellerId: 'seller-1' };
 
+/** The service takes a resolved org context now, not a user id. */
+const admin: OrgContext = {
+  organizationId: 'org-1',
+  role: 'SELLER_ADMIN',
+  isAdmin: true,
+  assignedStoreIds: null,
+  permissions: [...ALL_SELLER_FEATURES],
+};
+
+/**
+ * What `resolveStoreScope(admin, 'store-1')` produces: the caller's whole scope
+ * intersected with the requested store, never replaced by it.
+ */
+const SCOPE_FOR_STORE_1 = {
+  AND: [{ sellerOrganizationId: 'org-1' }, { id: 'store-1' }],
+};
+
 describe('ProductService.getMyProducts — server-side sorting', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -36,30 +55,32 @@ describe('ProductService.getMyProducts — server-side sorting', () => {
   const base = { page: 1, limit: 10, skip: 0 };
 
   it('forwards sortBy/sortOrder to the repository', async () => {
-    await ProductService.getMyProducts('user-1', 'store-1', {
+    await ProductService.getMyProducts(admin, 'store-1', {
       ...base,
       sortBy: 'price',
       sortOrder: 'asc',
     });
 
-    expect(mockedRepo.getMyProducts).toHaveBeenCalledWith('store-1', 'seller-1', {
+    // The repository takes (storeScope, opts) now, and the service resolves
+    // `categoryId` into a `categoryIds` list before handing it over.
+    expect(mockedRepo.getMyProducts).toHaveBeenCalledWith(SCOPE_FOR_STORE_1, {
       skip: 0,
       take: 10,
       search: undefined,
-      categoryId: undefined,
+      categoryIds: undefined,
       sortBy: 'price',
       sortOrder: 'asc',
     });
   });
 
   it('omits sort params when not requested (defaults to createdAt desc in repo)', async () => {
-    await ProductService.getMyProducts('user-1', 'store-1', base);
+    await ProductService.getMyProducts(admin, 'store-1', base);
 
-    expect(mockedRepo.getMyProducts).toHaveBeenCalledWith('store-1', 'seller-1', {
+    expect(mockedRepo.getMyProducts).toHaveBeenCalledWith(SCOPE_FOR_STORE_1, {
       skip: 0,
       take: 10,
       search: undefined,
-      categoryId: undefined,
+      categoryIds: undefined,
       sortBy: undefined,
       sortOrder: undefined,
     });
@@ -68,7 +89,7 @@ describe('ProductService.getMyProducts — server-side sorting', () => {
   it('returns the page envelope built from repo results', async () => {
     mockedRepo.getMyProducts.mockResolvedValue({ items: [{ id: 'p1' }], total: 1 });
 
-    const result = await ProductService.getMyProducts('user-1', 'store-1', base);
+    const result = await ProductService.getMyProducts(admin, 'store-1', base);
 
     expect(result).toMatchObject({
       items: [{ id: 'p1' }],
@@ -79,15 +100,31 @@ describe('ProductService.getMyProducts — server-side sorting', () => {
     });
   });
 
-  it('rejects with 403 when the seller does not own the store', async () => {
-    mockedRepo.getStoreById.mockResolvedValue({
-      id: 'store-2',
-      sellerId: 'seller-2',
-    });
+  it('intersects a requested store with the caller scope rather than trusting it', async () => {
+    // Replaces the old "rejects with 403 when the seller does not own the
+    // store" case. The service no longer performs an ownership check —
+    // `requireStoreInScope` refuses an out-of-scope id first (with a 404).
+    // What the service still owes us is that a supplied storeId narrows the
+    // caller's scope instead of replacing it, so a member cannot read a
+    // sibling store's catalogue by naming it.
+    const member: OrgContext = {
+      organizationId: 'org-1',
+      role: 'SELLER_USER',
+      isAdmin: false,
+      assignedStoreIds: ['store-assigned'],
+      permissions: ['products'],
+    };
 
-    await expect(ProductService.getMyProducts('user-1', 'store-1', base)).rejects.toMatchObject({
-      status: 403,
-    });
-    expect(mockedRepo.getMyProducts).not.toHaveBeenCalled();
+    await ProductService.getMyProducts(member, 'store-not-assigned', base);
+
+    expect(mockedRepo.getMyProducts).toHaveBeenCalledWith(
+      {
+        AND: [
+          { sellerOrganizationId: 'org-1', id: { in: ['store-assigned'] } },
+          { id: 'store-not-assigned' },
+        ],
+      },
+      expect.anything(),
+    );
   });
 });

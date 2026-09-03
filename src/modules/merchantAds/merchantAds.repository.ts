@@ -3,14 +3,6 @@ import { prisma } from '../../utils/prisma';
 import { liveWindowFilter, overlappingWindowFilter } from './adWindow';
 
 export default class MerchantAdsRepository {
-  static async getSellerByUserId(userId: string) {
-    return prisma.sellers.findUnique({ where: { userId } });
-  }
-
-  static async getStoreById(storeId: string) {
-    return prisma.stores.findUnique({ where: { id: storeId } });
-  }
-
   static async listActiveBadges() {
     return prisma.promotionBadges.findMany({
       where: { isActive: true },
@@ -96,14 +88,28 @@ export default class MerchantAdsRepository {
     });
   }
 
-  static async getAdsBySellerId(sellerId: string) {
+  /**
+   * Every ad across a resolved set of stores.
+   *
+   * Takes the caller's store scope rather than a `sellerId`: organization staff
+   * own no stores of their own, so a `store: { sellerId }` filter returned
+   * nothing for stores they had been explicitly assigned.
+   */
+  static async getAdsByStoreIds(storeIds: string[]) {
     return prisma.merchantAds.findMany({
-      where: { store: { sellerId } },
+      where: { storeId: { in: storeIds } },
       orderBy: { createdAt: 'desc' },
       include: {
         store: { select: { id: true, storeName: true } },
         products: { select: { productId: true, variantId: true } },
       },
+    });
+  }
+
+  /** How many of `productIds` actually belong to `storeId`. */
+  static async countProductsInStore(storeId: string, productIds: string[]) {
+    return prisma.products.count({
+      where: { storeId, id: { in: productIds } },
     });
   }
 

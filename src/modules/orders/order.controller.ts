@@ -135,10 +135,12 @@ export default class OrderController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+      // The whole user, not just the id: store scoping resolves the caller's
+      // seller-organization context from the memberships already loaded on it.
+      const user = req.user;
+      if (!user) return responseError(res, 401, 'Unauthorized access.');
 
-      const data = await OrderService.completeOrder(userId, value.orderId, value.storeId);
+      const data = await OrderService.completeOrder(user, value.orderId, value.storeId);
       return responseSuccess(res, 200, data, 'Order marked as completed');
     } catch (error) {
       const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
@@ -160,10 +162,12 @@ export default class OrderController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+      // The whole user, not just the id: store scoping resolves the caller's
+      // seller-organization context from the memberships already loaded on it.
+      const user = req.user;
+      if (!user) return responseError(res, 401, 'Unauthorized access.');
 
-      const data = await OrderService.generateCashPickupCode(userId, value.orderId, value.storeId);
+      const data = await OrderService.generateCashPickupCode(user, value.orderId, value.storeId);
       return responseSuccess(res, 200, data, 'Pickup confirmation code generated');
     } catch (error) {
       const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
@@ -282,12 +286,14 @@ export default class OrderController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+      // The whole user, not just the id: the service resolves seller-org
+      // context from the memberships `authenticate` already loaded onto it.
+      const user = req.user;
+      if (!user) return responseError(res, 401, 'Unauthorized access.');
 
       const { page, limit, skip } = parsePagination(req.query as Record<string, unknown>);
 
-      const data = await OrderService.getStoreOrders(userId, value.storeId, {
+      const data = await OrderService.getStoreOrders(user, value.storeId, {
         status: value.status,
         search: value.search,
         sortOrder: value.sortOrder,
@@ -307,12 +313,12 @@ export default class OrderController {
 
   static async storeOrderStats(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+      const user = req.user;
+      if (!user) return responseError(res, 401, 'Unauthorized access.');
 
       const storeId = req.query.storeId as string | undefined;
 
-      const data = await OrderService.getStoreOrderStats(userId, storeId);
+      const data = await OrderService.getStoreOrderStats(user, storeId);
       return responseSuccess(res, 200, data, 'Store order stats retrieved successfully');
     } catch (error) {
       const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
@@ -333,10 +339,12 @@ export default class OrderController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+      // The whole user, not just the id: store scoping resolves the caller's
+      // seller-organization context from the memberships already loaded on it.
+      const user = req.user;
+      if (!user) return responseError(res, 401, 'Unauthorized access.');
 
-      const data = await OrderService.updateFulfillmentStatus(userId, value.orderId, value.status);
+      const data = await OrderService.updateFulfillmentStatus(user, value.orderId, value.status);
       return responseSuccess(res, 200, data, 'Fulfillment status updated successfully');
     } catch (error) {
       const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };

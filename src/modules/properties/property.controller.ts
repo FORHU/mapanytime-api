@@ -4,6 +4,8 @@ import { sellerCapacityMap, propertyTypeMap } from './constant/property.constant
 import { mapMetadata, assertMetadataRules } from './helpers/property.helper';
 import { responseError, responseSuccess } from '../../helpers/response.helper';
 import PropertyService from './property.service';
+import { resolveAccessibleStoreIds } from '../organization/storeAccess';
+import type { AuthUser } from '../auth/auth.repository';
 
 export default class PropertyController {
   static async create(req: Request, res: Response, next: NextFunction) {
@@ -41,12 +43,14 @@ export default class PropertyController {
 
   static async getMine(req: Request, res: Response, next: NextFunction) {
     try {
-      const sellerId = req.user?.seller?.id;
-      if (!sellerId) {
+      const { storeIds, hasOrg, hasSellerRow } = await resolveAccessibleStoreIds(
+        req.user as AuthUser,
+      );
+      if (!hasOrg && !hasSellerRow) {
         return responseError(res, 403, 'User is not registered as a seller.');
       }
 
-      const properties = await PropertyService.getMyProperties(sellerId);
+      const properties = await PropertyService.getMyProperties(storeIds);
       return responseSuccess(res, 200, properties);
     } catch (error) {
       next(error);
@@ -55,12 +59,14 @@ export default class PropertyController {
 
   static async getById(req: Request, res: Response, next: NextFunction) {
     try {
-      const sellerId = req.user?.seller?.id;
-      if (!sellerId) {
+      const { storeIds, hasOrg, hasSellerRow } = await resolveAccessibleStoreIds(
+        req.user as AuthUser,
+      );
+      if (!hasOrg && !hasSellerRow) {
         return responseError(res, 403, 'User is not registered as a seller.');
       }
 
-      const property = await PropertyService.getPropertyById(sellerId, req.params.id);
+      const property = await PropertyService.getPropertyById(storeIds, req.params.id);
       return responseSuccess(res, 200, property);
     } catch (error) {
       const err = error as { status?: 404; message?: string };
@@ -73,12 +79,14 @@ export default class PropertyController {
 
   static async getDashboard(req: Request, res: Response, next: NextFunction) {
     try {
-      const sellerId = req.user?.seller?.id;
-      if (!sellerId) {
+      const { storeIds, hasOrg, hasSellerRow } = await resolveAccessibleStoreIds(
+        req.user as AuthUser,
+      );
+      if (!hasOrg && !hasSellerRow) {
         return responseError(res, 403, 'User is not registered as a seller.');
       }
 
-      const property = await PropertyService.getVerifiedPropertyDashboard(sellerId, req.params.id);
+      const property = await PropertyService.getVerifiedPropertyDashboard(storeIds, req.params.id);
 
       return responseSuccess(res, 200, property);
     } catch (error) {

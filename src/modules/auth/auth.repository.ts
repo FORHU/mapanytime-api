@@ -7,7 +7,14 @@ const userInclude = {
   seller: {
     include: { stores: true },
   },
+  orgMemberships: {
+    include: {
+      assignedStores: true,
+    },
+  },
 } satisfies Prisma.UsersInclude;
+
+export type AuthUser = Prisma.UsersGetPayload<{ include: typeof userInclude }>;
 
 export default class AuthRepo {
   static async createUser(data: Prisma.UsersCreateInput) {

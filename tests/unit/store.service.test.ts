@@ -2,6 +2,8 @@ import StoreService from '../../src/modules/stores/store.service';
 import StoreRepository from '../../src/modules/stores/store.repository';
 import CategoryRepository from '../../src/modules/categories/category.repository';
 import { prisma } from '../../src/utils/prisma';
+import type { OrgContext } from '../../src/modules/organization/orgContext';
+import { ALL_SELLER_FEATURES } from '../../src/modules/organization/sellerPermissions.constant';
 
 jest.mock('../../src/modules/stores/store.repository');
 
@@ -187,9 +189,22 @@ describe('StoreService', () => {
   });
 
   describe('updateStore', () => {
+    // `updateStore(context, storeId, input)` now — the old second argument was a
+    // `sellerId` compared against `store.sellerId`; ownership moved to the
+    // caller's organization, so the store carries `sellerOrganizationId` and the
+    // seller id no longer participates.
+    const admin: OrgContext = {
+      organizationId: 'org-1',
+      role: 'SELLER_ADMIN',
+      isAdmin: true,
+      assignedStoreIds: null,
+      permissions: [...ALL_SELLER_FEATURES],
+    };
+
     const existingStore = {
       id: 'store-1',
       sellerId: 'seller-1',
+      sellerOrganizationId: 'org-1',
       storeName: 'Test Store',
       storeLocations: null,
     };
@@ -219,7 +234,7 @@ describe('StoreService', () => {
     it('writes both the primary scalar and the M2M set so they cannot drift', async () => {
       (CategoryRepository.findById as jest.Mock).mockResolvedValue({ id: 'cat-B' });
 
-      await StoreService.updateStore('store-1', 'seller-1', { categoryId: 'cat-B' });
+      await StoreService.updateStore(admin, 'store-1', { categoryId: 'cat-B' });
 
       expect(tx.stores.update).toHaveBeenCalledWith({
         where: { id: 'store-1' },
@@ -233,7 +248,7 @@ describe('StoreService', () => {
     it('replaces the M2M set rather than adding to it, so no stale row survives', async () => {
       (CategoryRepository.findById as jest.Mock).mockResolvedValue({ id: 'cat-B' });
 
-      await StoreService.updateStore('store-1', 'seller-1', { categoryId: 'cat-B' });
+      await StoreService.updateStore(admin, 'store-1', { categoryId: 'cat-B' });
 
       const { data } = (tx.stores.update as jest.Mock).mock.calls[0][0];
       expect(data.categories).toEqual({ set: [{ id: 'cat-B' }] });
@@ -244,14 +259,14 @@ describe('StoreService', () => {
       (CategoryRepository.findById as jest.Mock).mockResolvedValue(null);
 
       await expect(
-        StoreService.updateStore('store-1', 'seller-1', { categoryId: 'missing' }),
+        StoreService.updateStore(admin, 'store-1', { categoryId: 'missing' }),
       ).rejects.toEqual({ status: 404, message: 'Category not found.' });
 
       expect(tx.stores.update).not.toHaveBeenCalled();
     });
 
     it('leaves categories untouched when categoryId is absent from the patch', async () => {
-      await StoreService.updateStore('store-1', 'seller-1', { storeName: 'Renamed' });
+      await StoreService.updateStore(admin, 'store-1', { storeName: 'Renamed' });
 
       expect(CategoryRepository.findById).not.toHaveBeenCalled();
       const { data } = (tx.stores.update as jest.Mock).mock.calls[0][0];

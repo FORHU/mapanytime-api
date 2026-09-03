@@ -3,6 +3,7 @@ import Joi from 'joi';
 import StoreService from './store.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
 import { Users } from '@prisma/client';
+import { storeScopeWhere } from '../organization/orgContext';
 
 export default class StoreController {
   static async createStore(req: Request, res: Response, next: NextFunction) {
@@ -56,13 +57,18 @@ export default class StoreController {
 
       const user = req.user as Users & { seller?: { id: string } };
       const sellerId = user.seller?.id;
+      const orgId = req.orgContext?.organizationId;
 
       if (!sellerId) {
         return responseError(res, 403, 'User is not registered as a seller.');
       }
+      if (!orgId) {
+        return responseError(res, 403, 'User is not a member of a seller organization.');
+      }
 
       const newStore = await StoreService.createStoreWithDocuments(
         sellerId,
+        orgId,
         value.storeData,
         value.locationData,
         value.hoursData,
@@ -118,14 +124,10 @@ export default class StoreController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const user = req.user as Users & { seller?: { id: string } };
-      const sellerId = user.seller?.id;
+      const context = req.orgContext;
+      if (!context) return responseError(res, 403, 'Not a member of a seller organization.');
 
-      if (!sellerId) {
-        return responseError(res, 403, 'User is not registered as a seller.');
-      }
-
-      const updated = await StoreService.updateStore(id, sellerId, value);
+      const updated = await StoreService.updateStore(context, id, value);
       return responseSuccess(res, 200, updated, 'Store updated successfully.');
     } catch (error) {
       const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
@@ -174,14 +176,10 @@ export default class StoreController {
 
   static async getMyStores(req: Request, res: Response, next: NextFunction) {
     try {
-      const user = req.user as Users & { seller?: { id: string } };
-      const sellerId = user.seller?.id;
+      const context = req.orgContext;
+      if (!context) return responseError(res, 403, 'Not a member of a seller organization.');
 
-      if (!sellerId) {
-        return responseError(res, 403, 'User is not registered as a seller.');
-      }
-
-      const stores = await StoreService.getMyStores(sellerId);
+      const stores = await StoreService.getMyStores(storeScopeWhere(context));
 
       return responseSuccess(res, 200, stores);
     } catch (error) {

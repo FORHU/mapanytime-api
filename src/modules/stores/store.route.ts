@@ -1,22 +1,41 @@
 import express from 'express';
 import StoreController from './store.controller';
 import { authenticate } from '../../middleware/auth.middleware';
+import {
+  requireSellerOrg,
+  requireSellerOrgAdmin,
+  requireStoreInScope,
+} from '../../middleware/sellerOrg.middleware';
 
 const router = express.Router();
 
 // Specific named routes MUST come before the /:id wildcard
 router.get('/nearby', StoreController.getNearby);
-router.get('/my-stores', authenticate, StoreController.getMyStores);
+router.get('/my-stores', authenticate, requireSellerOrg, StoreController.getMyStores);
 
 // Public storefront — buyer views a store by id (no auth required)
 router.get('/:id', StoreController.getById);
 router.get('/:id/products', StoreController.getStoreProducts);
 
-router.post('/', authenticate, StoreController.createStore);
+// Managing the organization's stores is an admin-only action.
+router.post(
+  '/',
+  authenticate,
+  requireSellerOrg,
+  requireSellerOrgAdmin,
+  StoreController.createStore,
+);
 
-// Seller edits their own store profile. Ownership is enforced in the service
-// against req.user.seller.id, so this needs no extra middleware — a seller
-// holding a valid token still cannot patch a store they do not own.
-router.patch('/:id', authenticate, StoreController.updateStore);
+// Seller edits a store profile — admin-only. Access is scoped to the caller's
+// organization and (for staff) their assigned stores via the middleware +
+// service check.
+router.patch(
+  '/:id',
+  authenticate,
+  requireSellerOrg,
+  requireSellerOrgAdmin,
+  requireStoreInScope,
+  StoreController.updateStore,
+);
 
 export default router;

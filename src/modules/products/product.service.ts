@@ -1,10 +1,11 @@
-import { Prisma } from '@prisma/client';
+﻿import { Prisma } from '@prisma/client';
 import ProductRepository from './product.repository';
 import InventoryRepository from '../inventory/inventory.repository';
 import CategoryService from '../categories/category.service';
 import { prisma } from '../../utils/prisma';
 import { buildPage } from '../../helpers/pagination.helper';
 import { AllowedProductTag } from '../../helpers/product-tags';
+import { storeScopeWhere, type OrgContext } from '../organization/orgContext';
 import {
   normalizeProductOptions,
   toOptionsCreateInput,
@@ -17,7 +18,7 @@ export interface CategoryTreeNode {
   parentId: string | null;
   /** Products filed directly on this category. */
   directCount: number;
-  /** `directCount` plus every descendant's — what the filter displays. */
+  /** `directCount` plus every descendant's â€” what the filter displays. */
   totalCount: number;
   children: CategoryTreeNode[];
 }
@@ -37,14 +38,14 @@ async function assertCategoryIsLeaf(categoryId: string) {
   if (category._count.subCategories > 0) {
     throw {
       status: 400,
-      message: `Choose a more specific category — "${category.name}" has sub-categories.`,
+      message: `Choose a more specific category â€” "${category.name}" has sub-categories.`,
     };
   }
 }
 
 export default class ProductService {
   static async createProduct(
-    userId: string,
+    context: OrgContext,
     storeId: string,
     payload: {
       name: string;
@@ -59,9 +60,8 @@ export default class ProductService {
       options?: RawProductOption[];
     },
   ) {
-    const seller = await ProductRepository.getSellerByUserId(userId);
-    if (!seller || seller.applicationStatus !== 'APPROVED') {
-      throw { status: 403, message: 'Only approved sellers can create products.' };
+    if (!context.organizationId) {
+      throw { status: 403, message: 'Not a member of a seller organization.' };
     }
 
     const store = await ProductRepository.getStoreById(storeId);
@@ -69,8 +69,8 @@ export default class ProductService {
       throw { status: 404, message: 'Store not found.' };
     }
 
-    if (store.sellerId !== seller.id) {
-      throw { status: 403, message: 'You do not own this store.' };
+    if (store.sellerOrganizationId !== context.organizationId) {
+      throw { status: 404, message: 'Store not found.' };
     }
 
     if (store.approvalStatus !== 'ACTIVE') {
@@ -86,7 +86,7 @@ export default class ProductService {
     const tagsInput =
       tags && tags.length > 0
         ? {
-            // Only connect to existing tags — they must be seeded beforehand.
+            // Only connect to existing tags â€” they must be seeded beforehand.
             // The controller validates `tags` against ALLOWED_PRODUCT_TAGS.
             create: tags.map((name) => ({
               tag: { connect: { name } },
@@ -141,31 +141,27 @@ export default class ProductService {
   }
 
   /**
-   * Resolves the seller behind a request and, when the request is scoped to one
-   * store, asserts they own it. Omitting `storeId` means "every store I own".
+   * Resolve the `StoreWhereInput` scope for a request against the caller's org
+   * context: every store the context allows (all org stores for an admin,
+   * assigned stores for a member), narrowed to `storeId` when one is supplied.
+   *
+   * The narrowing is an intersection, never a replacement. Trusting a supplied
+   * `storeId` once it matched the organization let a `seller_user` read any
+   * sibling store's products by passing its id — `assignedStoreIds` was never
+   * consulted. The router's `requireStoreInScopeIfPresent` rejects those ids
+   * first; this keeps the query itself scoped if a route ever forgets it.
    */
-  private static async resolveSellerScope(userId: string, storeId: string | undefined) {
-    const seller = await ProductRepository.getSellerByUserId(userId);
-    if (!seller) {
-      throw { status: 403, message: 'Only sellers can view store products.' };
-    }
-
-    if (storeId) {
-      const store = await ProductRepository.getStoreById(storeId);
-      if (!store) {
-        throw { status: 404, message: 'Store not found.' };
-      }
-
-      if (store.sellerId !== seller.id) {
-        throw { status: 403, message: 'You do not own this store.' };
-      }
-    }
-
-    return seller;
+  private static resolveStoreScope(
+    context: OrgContext,
+    storeId: string | undefined,
+  ): Prisma.StoresWhereInput {
+    const scope = storeScopeWhere(context);
+    if (!storeId) return scope;
+    return { AND: [scope, { id: storeId }] };
   }
 
   static async getMyProducts(
-    userId: string,
+    context: OrgContext,
     storeId: string | undefined,
     opts: {
       page: number;
@@ -177,14 +173,14 @@ export default class ProductService {
       sortOrder?: 'asc' | 'desc';
     },
   ) {
-    const seller = await ProductService.resolveSellerScope(userId, storeId);
+    const storeScope = ProductService.resolveStoreScope(context, storeId);
 
     let categoryIds: string[] | undefined;
     if (opts.categoryId) {
       categoryIds = await CategoryService.getCategoryDescendantIds(opts.categoryId);
     }
 
-    const { items, total } = await ProductRepository.getMyProducts(storeId, seller.id, {
+    const { items, total } = await ProductRepository.getMyProducts(storeScope, {
       skip: opts.skip,
       take: opts.limit,
       search: opts.search,
@@ -202,10 +198,10 @@ export default class ProductService {
    * category filter, which must work in All-Stores mode (no `storeId`) where
    * there is no single store category tree to read from.
    */
-  static async getMyCategories(userId: string, storeId: string | undefined) {
-    const seller = await ProductService.resolveSellerScope(userId, storeId);
+  static async getMyCategories(context: OrgContext, storeId: string | undefined) {
+    const storeScope = ProductService.resolveStoreScope(context, storeId);
 
-    const used = await ProductRepository.getUsedCategoryCounts(storeId, seller.id);
+    const used = await ProductRepository.getUsedCategoryCounts(storeScope);
     if (used.length === 0) return [];
 
     const directCounts = new Map<string, number>();
@@ -216,7 +212,7 @@ export default class ProductService {
 
     const nodes = await CategoryService.getAncestorClosure([...directCounts.keys()]);
 
-    // Link by parentId so depth is unbounded — the tree is whatever the data is,
+    // Link by parentId so depth is unbounded â€” the tree is whatever the data is,
     // never a fixed number of nesting levels.
     const byId = new Map(
       nodes
@@ -280,8 +276,30 @@ export default class ProductService {
     return buildPage(items, total, { page: filters.page, limit: filters.limit });
   }
 
+  /**
+   * Assert a store belongs to the caller's organization and (for members) to
+   * their assigned set. Throws 404 so ids outside scope are indistinguishable
+   * from nonexistent stores.
+   */
+  private static async assertStoreInOrgScope(context: OrgContext, storeId: string) {
+    if (!context.organizationId) {
+      throw { status: 403, message: 'Not a member of a seller organization.' };
+    }
+    const store = await ProductRepository.getStoreById(storeId);
+    if (!store || store.sellerOrganizationId !== context.organizationId) {
+      throw { status: 404, message: 'Store not found.' };
+    }
+    if (!context.isAdmin && context.assignedStoreIds) {
+      if (!context.assignedStoreIds.includes(storeId)) {
+        throw { status: 404, message: 'Store not found.' };
+      }
+    }
+    return store;
+  }
+
   static async updateProduct(
-    userId: string,
+    context: OrgContext,
+    actorUserId: string,
     productId: string,
     payload: {
       name?: string;
@@ -295,26 +313,18 @@ export default class ProductService {
       options?: RawProductOption[];
     },
   ) {
-    const seller = await ProductRepository.getSellerByUserId(userId);
-    if (!seller || seller.applicationStatus !== 'APPROVED') {
-      throw { status: 403, message: 'User is not an approved seller profile.' };
-    }
-
     const product = await ProductRepository.getProductById(productId);
     if (!product) {
       throw { status: 404, message: 'Product not found.' };
     }
 
-    const store = await ProductRepository.getStoreById(product.storeId);
-    if (!store || store.sellerId !== seller.id) {
-      throw { status: 403, message: 'Unauthorized to update this product.' };
-    }
+    await ProductService.assertStoreInOrgScope(context, product.storeId);
 
     if (payload.categoryId !== undefined) {
       await assertCategoryIsLeaf(payload.categoryId);
     }
 
-    // `options`, like `tags`, MUST be destructured out — left in `...fields` it
+    // `options`, like `tags`, MUST be destructured out â€” left in `...fields` it
     // reaches Prisma as a raw array where a nested write is expected.
     const { tags, categoryId, brand, description, stock, options, ...fields } = payload;
 
@@ -360,7 +370,7 @@ export default class ProductService {
     // field changes already saved, with no rollback and no way to tell.
     return prisma.$transaction(async (tx) => {
       if (stock !== undefined) {
-        await InventoryRepository.adjustWithin(tx, productId, stock, userId);
+        await InventoryRepository.adjustWithin(tx, productId, stock, actorUserId);
       }
 
       // Updated after the adjustment so the returned `inventory` is current.
@@ -368,21 +378,13 @@ export default class ProductService {
     });
   }
 
-  static async deleteProduct(userId: string, productId: string) {
-    const seller = await ProductRepository.getSellerByUserId(userId);
-    if (!seller || seller.applicationStatus !== 'APPROVED') {
-      throw { status: 403, message: 'User is not an approved seller profile.' };
-    }
-
+  static async deleteProduct(context: OrgContext, productId: string) {
     const product = await ProductRepository.getProductById(productId);
     if (!product) {
       throw { status: 404, message: 'Product not found.' };
     }
 
-    const store = await ProductRepository.getStoreById(product.storeId);
-    if (!store || store.sellerId !== seller.id) {
-      throw { status: 403, message: 'Unauthorized to delete this product.' };
-    }
+    await ProductService.assertStoreInOrgScope(context, product.storeId);
 
     return ProductRepository.deleteProduct(productId);
   }

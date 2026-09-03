@@ -147,11 +147,13 @@ export default class AuthController {
       email: Joi.string()
         .email({ tlds: { allow: false } })
         .required(),
-      // 4 digits, matching the client's OTP field.
+
       code: Joi.string()
-        .pattern(/^\d{4}$/)
+        .pattern(/^(\d{4}|[0-9a-f]{24})$/)
         .required()
-        .messages({ 'string.pattern.base': 'The reset code must be 4 digits.' }),
+        .messages({
+          'string.pattern.base': 'That code is not in a recognised format.',
+        }),
       newPassword: Joi.string().min(8).max(128).required(),
     });
 

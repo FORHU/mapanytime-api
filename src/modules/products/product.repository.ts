@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+﻿import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 
 export const PRODUCT_OPTIONS_INCLUDE = {
@@ -40,7 +40,7 @@ export default class ProductRepository {
   }
 
   /**
-   * `client` lets a caller run this inside an existing transaction — product
+   * `client` lets a caller run this inside an existing transaction â€” product
    * creation writes the product, its inventory row and its images together, and
    * a partial result leaves a product whose stock can never be edited.
    * Same signature shape as `updateProduct` below.
@@ -55,8 +55,7 @@ export default class ProductRepository {
   }
 
   static async getMyProducts(
-    storeId: string | undefined,
-    sellerId: string,
+    storeScope: Prisma.StoresWhereInput,
     opts: {
       skip: number;
       take: number;
@@ -69,7 +68,7 @@ export default class ProductRepository {
     const term = opts.search?.trim();
 
     const where: Prisma.ProductsWhereInput = {
-      ...(storeId ? { storeId } : { store: { sellerId } }),
+      store: { is: storeScope },
       isActive: true,
       // Selecting a parent category must also match everything filed beneath it,
       // so the caller passes the pre-expanded descendant set rather than one id.
@@ -133,14 +132,15 @@ export default class ProductRepository {
 
   /**
    * Which categories the seller actually has products in, with per-category
-   * counts. Scoped to one store when `storeId` is given, otherwise across every
-   * store the seller owns — mirroring `getMyProducts`.
+   * counts. Scoped by the org store-scope â€” for an admin that is every store in
+   * the organization, for a staff member only their assigned stores â€” mirroring
+   * `getMyProducts`.
    */
-  static async getUsedCategoryCounts(storeId: string | undefined, sellerId: string) {
+  static async getUsedCategoryCounts(storeScope: Prisma.StoresWhereInput) {
     return prisma.products.groupBy({
       by: ['categoryId'],
       where: {
-        ...(storeId ? { storeId } : { store: { sellerId } }),
+        store: { is: storeScope },
         isActive: true,
         categoryId: { not: null },
       },
@@ -155,7 +155,7 @@ export default class ProductRepository {
   }
 
   /**
-   * `client` lets a caller run this inside an existing transaction — a product
+   * `client` lets a caller run this inside an existing transaction â€” a product
    * edit changes fields and stock together, and both must land or neither.
    *
    * The include matches what the list endpoint returns so the PUT response is
@@ -243,7 +243,7 @@ export default class ProductRepository {
               ad: {
                 discountType: { not: null },
                 // A scheduled promotion must not badge a product as discounted
-                // before it starts — same window test as checkout pricing.
+                // before it starts â€” same window test as checkout pricing.
                 ...liveWindowFilter(),
               },
             },

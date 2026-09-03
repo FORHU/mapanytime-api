@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { seedUsers } from './seeders/users.seeder';
 import { seedRoles } from './seeders/roles.seeder';
+import { seedSellerOrganizations } from './seeders/organization.seeder';
 import { seedCategories } from './seeders/categories.seeder';
 import { seedCategoryVariantSuggestions } from './seeders/category_variant_suggestions.seeder';
 import { seedPaymentProviders } from './seeders/payments.seeder';
@@ -34,6 +35,8 @@ async function main() {
     await seedMarketplaceData(prisma);
     await seedMultiStoreSeller(prisma);
     await seedBulkMapStores(prisma);
+
+    await seedSellerOrganizations(prisma);
 
     console.log('All seeder modules executed successfully!');
   } catch (error) {

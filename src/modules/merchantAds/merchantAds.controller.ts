@@ -4,6 +4,7 @@ import MerchantAdsService from './merchantAds.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
 import { money, MAX_MONEY } from '../../helpers/money.helper';
 import { MIN_WINDOW_MS, MAX_HORIZON_MS } from './adWindow';
+import type { AuthUser } from '../auth/auth.repository';
 
 const productLinkSchema = Joi.object({
   productId: Joi.string().required(),
@@ -150,16 +151,17 @@ export default class MerchantAdsController {
     const storeId = req.query.storeId as string;
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized');
+      const user = req.user as AuthUser;
+      if (!user) return responseError(res, 401, 'Unauthorized');
 
       if (!storeId) {
-        // Return all ads across all stores owned by seller
-        const data = await MerchantAdsService.listAllMyAds(userId);
+        // Every store the caller can reach — all of the organization's for an
+        // admin, only the assigned ones for staff.
+        const data = await MerchantAdsService.listAllMyAds(user);
         return responseSuccess(res, 200, data);
       }
 
-      const data = await MerchantAdsService.listMyAds(userId, storeId);
+      const data = await MerchantAdsService.listMyAds(user, storeId);
       return responseSuccess(res, 200, data);
     } catch (error) {
       next(error);
@@ -176,10 +178,10 @@ export default class MerchantAdsController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized');
+      const user = req.user as AuthUser;
+      if (!user) return responseError(res, 401, 'Unauthorized');
 
-      const data = await MerchantAdsService.createAd(userId, value);
+      const data = await MerchantAdsService.createAd(user, value);
       return responseSuccess(res, 201, data, 'Merchant promotion/ad created successfully');
     } catch (error) {
       next(error);
@@ -193,10 +195,10 @@ export default class MerchantAdsController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized');
+      const user = req.user as AuthUser;
+      if (!user) return responseError(res, 401, 'Unauthorized');
 
-      const data = await MerchantAdsService.updateAd(userId, req.params.id, value);
+      const data = await MerchantAdsService.updateAd(user, req.params.id, value);
       return responseSuccess(res, 200, data, 'Merchant promotion/ad updated successfully');
     } catch (error) {
       next(error);
@@ -205,10 +207,10 @@ export default class MerchantAdsController {
 
   static async destroy(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized');
+      const user = req.user as AuthUser;
+      if (!user) return responseError(res, 401, 'Unauthorized');
 
-      await MerchantAdsService.deleteAd(userId, req.params.id);
+      await MerchantAdsService.deleteAd(user, req.params.id);
       return responseSuccess(res, 200, null, 'Merchant promotion/ad deleted successfully');
     } catch (error) {
       next(error);
@@ -221,10 +223,10 @@ export default class MerchantAdsController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized');
+      const user = req.user as AuthUser;
+      if (!user) return responseError(res, 401, 'Unauthorized');
 
-      const data = await MerchantAdsService.setActive(userId, req.params.id, value.isActive);
+      const data = await MerchantAdsService.setActive(user, req.params.id, value.isActive);
       return responseSuccess(
         res,
         200,
@@ -238,10 +240,10 @@ export default class MerchantAdsController {
 
   static async analytics(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized');
+      const user = req.user as AuthUser;
+      if (!user) return responseError(res, 401, 'Unauthorized');
 
-      const data = await MerchantAdsService.getAnalytics(userId, req.params.id);
+      const data = await MerchantAdsService.getAnalytics(user, req.params.id);
       return responseSuccess(res, 200, data);
     } catch (error) {
       next(error);

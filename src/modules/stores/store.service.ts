@@ -1,4 +1,4 @@
-import CategoryRepository from '../categories/category.repository';
+﻿import CategoryRepository from '../categories/category.repository';
 import StoreRepository from './store.repository';
 import { redisConnection } from '../../infrastructure/redis/connection';
 import { emitStoreUpserted } from '../../infrastructure/socket';
@@ -7,6 +7,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import { S3_CDN_URL } from '../../config';
 import S3Util from '../../utils/s3.util';
+import type { OrgContext } from '../organization/orgContext';
 
 async function resolveImageUrl(file: { path: string; bucket?: string | null }): Promise<string> {
   if (S3_CDN_URL) return `${S3_CDN_URL}/${file.path}`;
@@ -39,7 +40,7 @@ export type MerchantAdWithProducts = Prisma.MerchantAdsGetPayload<{
 
 // EVENT (or any stock-linked) ads end when their linked stock sells out.
 // quantityOnHand - quantityReserved, not raw quantityOnHand, since Inventory
-// only decrements quantityOnHand at fulfillment — pending orders already
+// only decrements quantityOnHand at fulfillment â€” pending orders already
 // reserved units shouldn't still count as available here.
 export function filterLiveAds(ads: MerchantAdWithProducts[]) {
   return ads.filter((ad) => {
@@ -55,6 +56,7 @@ export function filterLiveAds(ads: MerchantAdWithProducts[]) {
 export default class StoreService {
   static async createStoreWithDocuments(
     sellerId: string,
+    orgId: string,
     storeData: {
       storeName: string;
       description?: string;
@@ -121,6 +123,7 @@ export default class StoreService {
       const newStore = await tx.stores.create({
         data: {
           sellerId,
+          sellerOrganizationId: orgId,
           storeName: storeData.storeName,
           description: storeData.description,
           email: storeData.email,
@@ -290,21 +293,21 @@ export default class StoreService {
     return result;
   }
 
-  static async getMyStores(sellerId: string) {
-    return StoreRepository.getStoresBySellerId(sellerId);
+  static async getMyStores(scope: Prisma.StoresWhereInput) {
+    return StoreRepository.getStoresByScope(scope);
   }
 
   /**
    * Partial update of a store the given seller owns.
    *
-   * Deliberately does NOT go through getStoreById — that helper 404s on an
+   * Deliberately does NOT go through getStoreById â€” that helper 404s on an
    * inactive store, which would make a deactivated store impossible to edit
    * back into shape. Ownership is checked here rather than in the controller so
    * every future caller inherits it.
    */
   static async updateStore(
+    context: OrgContext,
     storeId: string,
-    sellerId: string,
     input: {
       storeName?: string;
       description?: string | null;
@@ -322,10 +325,17 @@ export default class StoreService {
   ) {
     const existing = await StoreRepository.getStoreById(storeId);
     if (!existing) throw { status: 404, message: 'Store not found.' };
-    if (existing.sellerId !== sellerId) {
-      // 404 rather than 403: a seller has no business learning which store ids
-      // belong to other sellers.
+
+    // Org-scoped ownership: the store must belong to the caller's organization
+    // and (for staff) to their assigned set. 404 rather than 403 so a caller
+    // cannot probe which store ids exist outside their scope.
+    if (!context.organizationId || existing.sellerOrganizationId !== context.organizationId) {
       throw { status: 404, message: 'Store not found.' };
+    }
+    if (!context.isAdmin && context.assignedStoreIds) {
+      if (!context.assignedStoreIds.includes(storeId)) {
+        throw { status: 404, message: 'Store not found.' };
+      }
     }
 
     const storeData: Prisma.StoresUpdateInput = {};
@@ -366,7 +376,7 @@ export default class StoreService {
       }
 
       // StoreLocations is optional on Stores, so a store onboarded without one
-      // has nothing to update. Skip rather than throwing — the store fields
+      // has nothing to update. Skip rather than throwing â€” the store fields
       // above are still a legitimate edit on their own.
       if (hasLocationChanges && existing.storeLocations) {
         await tx.storeLocations.update({

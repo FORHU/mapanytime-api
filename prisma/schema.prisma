@@ -30,20 +30,22 @@ model Users {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  roles              Roles[]                 @relation("UserRoles")
-  avatarFile         Files?                  @relation("UserAvatar", fields: [avatarFileId], references: [id])
+  roles              Roles[]                     @relation("UserRoles")
+  avatarFile         Files?                      @relation("UserAvatar", fields: [avatarFileId], references: [id])
   session            Session[]
   passwordResets     PasswordResetTokens[]
   seller             Sellers?
-  reviewedSellers    Sellers[]               @relation("SellerReviewer")
+  reviewedSellers    Sellers[]                   @relation("SellerReviewer")
   buyer              Buyers?
   verifiedDocuments  DocumentVerifications[]
   sentAdminInvites   AdminInvites[]
   notifications      Notifications[]
-  reviewedProperties ProductProperties[]     @relation("PropertyReviewers")
-  reviewedStores     Stores[]                @relation("StoreReviewers")
-  userReferral       Users?                  @relation("UserReferrals", fields: [userReferralId], references: [id])
-  userReferrals      Users[]                 @relation("UserReferrals")
+  reviewedProperties ProductProperties[]         @relation("PropertyReviewers")
+  reviewedStores     Stores[]                    @relation("StoreReviewers")
+  userReferral       Users?                      @relation("UserReferrals", fields: [userReferralId], references: [id])
+  userReferrals      Users[]                     @relation("UserReferrals")
+  ownedOrganizations SellerOrganizations[]       @relation("OrganizationOwner")
+  orgMemberships     SellerOrganizationMembers[]
 
   @@unique([userReferralId, id])
   @@index([userReferralId])
@@ -62,13 +64,13 @@ model Roles {
 }
 
 model Permissions {
-  id          String            @id @default(cuid())
-  code        String            @unique
-  name        String
-  description String?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  roles       RolePermissions[]
+  id                                String                              @id @default(cuid())
+  code                              String                              @unique
+  name                              String
+  description                       String?
+  createdAt                         DateTime                            @default(now())
+  updatedAt                         DateTime                            @updatedAt
+  roles RolePermissions[]
 }
 
 model RolePermissions {
@@ -79,6 +81,54 @@ model RolePermissions {
   createdAt    DateTime    @default(now())
 
   @@id([roleId, permissionId])
+}
+
+model SellerOrganizations {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner   Users                       @relation("OrganizationOwner", fields: [ownerId], references: [id])
+  members SellerOrganizationMembers[]
+  stores  Stores[]
+  sellers Sellers[]
+
+  @@index([ownerId])
+}
+
+model SellerOrganizationMembers {
+  id                   String        @id @default(cuid())
+  sellerOrganizationId String
+  userId               String
+  role                 SellerOrgRole
+  permissions          String[]      @default([])
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  organization   SellerOrganizations              @relation(fields: [sellerOrganizationId], references: [id], onDelete: Cascade)
+  user           Users                            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedStores SellerOrganizationMemberStores[]
+
+  @@unique([sellerOrganizationId, userId])
+  @@index([userId])
+}
+
+model SellerOrganizationMemberStores {
+  memberId  String
+  storeId   String
+  member    SellerOrganizationMembers @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  store     Stores                    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  createdAt DateTime                  @default(now())
+
+  @@id([memberId, storeId])
+}
+
+enum SellerOrgRole {
+  SELLER_ADMIN
+  MANAGER
+  SELLER_USER
 }
 
 enum USERACCOUNTSTATUS {
@@ -159,6 +209,7 @@ model Files {
 model Sellers {
   id                    String                  @id @default(cuid())
   userId                String                  @unique
+  sellerOrganizationId  String?
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
   deletedAt             DateTime?
@@ -179,6 +230,7 @@ model Sellers {
   settlements           Settlements[]
   payouts               SellerPayouts[]
   returnRequests        ReturnRequests[]
+  organization          SellerOrganizations?    @relation(fields: [sellerOrganizationId], references: [id])
 
   @@index([applicationStatus])
   @@index([reviewedAt])
@@ -370,51 +422,54 @@ enum INVITESTATUS {
 // =========================================================================
 
 model Stores {
-  id                String              @id @default(cuid())
-  sellerId          String
-  storeName         String
-  description       String?
-  logoId            String?
-  bannerId          String?
-  markerDisplayMode MARKERDISPLAYMODE   @default(PHOTO_CARD)
-  markerPrice       Decimal?            @db.Decimal(12, 2)
-  markerSubtitle    String?
-  slug              String?             @unique
-  phone             String?
-  email             String?
-  returnPolicy      String?
-  shippingPolicy    String?
-  socialLinks       Json?
-  ratingAverage     Float               @default(0)
-  ratingCount       Int                 @default(0)
-  followersCount    Int                 @default(0)
-  primaryCategoryId String?
-  vacationMode      Boolean             @default(false)
-  isActive          Boolean             @default(false)
-  approvalStatus    STOREAPPROVALSTATUS @default(PENDING)
-  rejectionReason   String?
-  reviewedAt        DateTime?
-  reviewedById      String?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  deletedAt         DateTime?
+  id                   String              @id @default(cuid())
+  sellerId             String
+  sellerOrganizationId String?
+  storeName            String
+  description          String?
+  logoId               String?
+  bannerId             String?
+  markerDisplayMode    MARKERDISPLAYMODE   @default(PHOTO_CARD)
+  markerPrice          Decimal?            @db.Decimal(12, 2)
+  markerSubtitle       String?
+  slug                 String?             @unique
+  phone                String?
+  email                String?
+  returnPolicy         String?
+  shippingPolicy       String?
+  socialLinks          Json?
+  ratingAverage        Float               @default(0)
+  ratingCount          Int                 @default(0)
+  followersCount       Int                 @default(0)
+  primaryCategoryId    String?
+  vacationMode         Boolean             @default(false)
+  isActive             Boolean             @default(false)
+  approvalStatus       STOREAPPROVALSTATUS @default(PENDING)
+  rejectionReason      String?
+  reviewedAt           DateTime?
+  reviewedById         String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  deletedAt            DateTime?
 
-  logoFile              Files?                  @relation("StoreLogo", fields: [logoId], references: [id])
-  bannerFile            Files?                  @relation("StoreBanner", fields: [bannerId], references: [id])
-  primaryCategory       Categories?             @relation("StorePrimaryCategory", fields: [primaryCategoryId], references: [id])
+  logoFile              Files?                           @relation("StoreLogo", fields: [logoId], references: [id])
+  bannerFile            Files?                           @relation("StoreBanner", fields: [bannerId], references: [id])
+  primaryCategory       Categories?                      @relation("StorePrimaryCategory", fields: [primaryCategoryId], references: [id])
   documentVerifications DocumentVerifications[]
   products              Products[]
   storeHours            StoreHours[]
   storeLocations        StoreLocations?
   storeReviews          StoreReviews[]
-  seller                Sellers                 @relation(fields: [sellerId], references: [id])
-  reviewedBy            Users?                  @relation("StoreReviewers", fields: [reviewedById], references: [id])
-  categories            Categories[]            @relation("CategoriesToStores")
+  seller                Sellers                          @relation(fields: [sellerId], references: [id])
+  reviewedBy            Users?                           @relation("StoreReviewers", fields: [reviewedById], references: [id])
+  categories            Categories[]                     @relation("CategoriesToStores")
   orders                Orders[]
   inventory             Inventory[]
   inventoryMovements    InventoryMovements[]
-  productProperties     ProductProperties[]     @relation("StoreProperties")
+  productProperties     ProductProperties[]              @relation("StoreProperties")
   merchantAds           MerchantAds[]
+  organization          SellerOrganizations?             @relation(fields: [sellerOrganizationId], references: [id])
+  memberAssignments     SellerOrganizationMemberStores[]
 
   @@index([sellerId])
   @@index([isActive])
@@ -789,22 +844,22 @@ model SupplierProducts {
   @@index([productId])
 }
 
-model   Categories {
-  id                String              @id @default(cuid())
-  parentId          String?
-  name              String
-  description       String?
-  status            CategoryStatus      @default(APPROVED)
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  deletedAt         DateTime?
-  parent            Categories?         @relation("CategoryToParent", fields: [parentId], references: [id])
-  subCategories     Categories[]        @relation("CategoryToParent")
-  products          Products[]
-  stores            Stores[]            @relation("CategoriesToStores")
-  primaryForStores  Stores[]            @relation("StorePrimaryCategory")
-  commissionRules   CommissionRules?
-  pricingComponents PricingComponents[]
+model Categories {
+  id                 String                       @id @default(cuid())
+  parentId           String?
+  name               String
+  description        String?
+  status             CategoryStatus               @default(APPROVED)
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+  deletedAt          DateTime?
+  parent             Categories?                  @relation("CategoryToParent", fields: [parentId], references: [id])
+  subCategories      Categories[]                 @relation("CategoryToParent")
+  products           Products[]
+  stores             Stores[]                     @relation("CategoriesToStores")
+  primaryForStores   Stores[]                     @relation("StorePrimaryCategory")
+  commissionRules    CommissionRules?
+  pricingComponents  PricingComponents[]
   /// Suggested product-option names, inherited by sub-categories at read time.
   variantSuggestions CategoryVariantSuggestions[]
 
@@ -1042,10 +1097,10 @@ model RewardConfigurations {
   version  Int     @default(1)
   isActive Boolean @default(true)
 
-  earnPercentage  Decimal @default(0.0010) @db.Decimal(7, 6) // fraction of eligible spend, 0.0010 = 0.1%
-  pointValueInPhp Decimal @default(0.10) @db.Decimal(10, 4) // 1 pt = ₱0.10
-  expirationMonths    Int     @default(12)
-  isEarningActive     Boolean @default(true)
+  earnPercentage   Decimal @default(0.0010) @db.Decimal(7, 6) // fraction of eligible spend, 0.0010 = 0.1%
+  pointValueInPhp  Decimal @default(0.10) @db.Decimal(10, 4) // 1 pt = ₱0.10
+  expirationMonths Int     @default(12)
+  isEarningActive  Boolean @default(true)
 
   effectiveFrom DateTime  @default(now())
   effectiveTo   DateTime?

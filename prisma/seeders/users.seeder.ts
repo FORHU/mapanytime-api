@@ -56,6 +56,16 @@ export async function seedUsers(prisma: PrismaClient) {
       countryCode: 'PH',
     },
     {
+      email: 'sellerManager@example.com',
+      firstName: 'Rico',
+      lastName: 'Bautista',
+      roles: ['SELLER', 'BUYER'],
+      passwordRaw: 'Seller123',
+      isEmailVerified: true,
+      countryCode: 'PH',
+      isOrgStaff: true,
+    },
+    {
       email: 'seller.electrical@mapanytime.test',
       firstName: 'Jose',
       lastName: 'Electrico',
@@ -112,7 +122,10 @@ export async function seedUsers(prisma: PrismaClient) {
   ];
 
   for (const userData of usersToCreate) {
-    const { passwordRaw, roles, ...rest } = userData;
+    const { passwordRaw, roles, isOrgStaff, ...rest } =
+      userData as (typeof usersToCreate)[number] & {
+        isOrgStaff?: boolean;
+      };
 
     let user = await prisma.users.findUnique({
       where: { email: rest.email },
@@ -147,10 +160,16 @@ export async function seedUsers(prisma: PrismaClient) {
       },
     });
 
-    // Ensure Seller record exists for seller/admin roles
-    const isSeller = roles.some((r) =>
-      ['SELLER', 'ADMIN', 'SUPER_ADMIN', 'SUPPORT_AGENT'].includes(r),
-    );
+    // Ensure Seller record exists for seller/admin roles.
+    //
+    // Organization staff are excluded: they hold the platform SELLER role only
+    // so the seller dashboard will render, and a `Sellers` row would give them
+    // nothing (every owner check compares its id against `store.sellerId`,
+    // which staff never match) while unlocking merchant onboarding. This
+    // mirrors what `createStaffAccount` produces at runtime.
+    const isSeller =
+      !isOrgStaff &&
+      roles.some((r) => ['SELLER', 'ADMIN', 'SUPER_ADMIN', 'SUPPORT_AGENT'].includes(r));
     if (isSeller) {
       await prisma.sellers.upsert({
         where: { userId: user.id },
