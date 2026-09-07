@@ -1,4 +1,4 @@
-import ProductService from '../../src/modules/products/product.service';
+﻿import ProductService from '../../src/modules/products/product.service';
 import ProductRepository from '../../src/modules/products/product.repository';
 import CategoryService from '../../src/modules/categories/category.service';
 import type { OrgContext } from '../../src/modules/organization/orgContext';
@@ -29,7 +29,7 @@ const counts = (rows: Array<[string, number]>) =>
   rows.map(([categoryId, n]) => ({ categoryId, _count: { _all: n } }));
 
 /**
- * The service takes a resolved org context now, not a user id — it no longer
+ * The service takes a resolved org context now, not a user id â€” it no longer
  * looks a seller up itself. An admin context stands in for "every store in the
  * organization", which is what these tree-shape cases assume.
  */
@@ -37,6 +37,7 @@ const admin: OrgContext = {
   organizationId: 'org-1',
   role: 'SELLER_ADMIN',
   isAdmin: true,
+  isOwner: true,
   assignedStoreIds: null,
   permissions: [...ALL_SELLER_FEATURES],
 };
@@ -150,29 +151,30 @@ describe('ProductService.getMyCategories', () => {
     await ProductService.getMyCategories(admin, undefined);
 
     // The repository takes a resolved StoresWhereInput now, not (storeId, sellerId).
-    expect(getUsedCounts).toHaveBeenCalledWith({ sellerOrganizationId: 'org-1' });
+    expect(getUsedCounts).toHaveBeenCalledWith({ sellerId: 'org-1' });
     expect(getStore).not.toHaveBeenCalled();
   });
 
   it('scopes a member to their assigned stores only', async () => {
     // Replaces the old "rejects a store the seller does not own" case. The
-    // service no longer performs an ownership check at all — refusing a store
+    // service no longer performs an ownership check at all â€” refusing a store
     // outside the caller's scope moved to `requireStoreInScope`, which 404s
     // rather than 403s. What the service still owes us is that the query it
     // builds cannot reach an unassigned store, which is what this asserts.
     const member: OrgContext = {
       organizationId: 'org-1',
-      role: 'SELLER_USER',
+      role: 'SELLER_MEMBER',
       isAdmin: false,
+      isOwner: false,
       assignedStoreIds: ['store-assigned'],
-      permissions: ['products'],
+      permissions: ['products.view'],
     };
     getUsedCounts.mockResolvedValue([]);
 
     await ProductService.getMyCategories(member, undefined);
 
     expect(getUsedCounts).toHaveBeenCalledWith({
-      sellerOrganizationId: 'org-1',
+      sellerId: 'org-1',
       id: { in: ['store-assigned'] },
     });
   });
@@ -185,6 +187,7 @@ describe('ProductService.getMyCategories', () => {
       organizationId: null,
       role: null,
       isAdmin: false,
+      isOwner: false,
       assignedStoreIds: null,
       permissions: [],
     };

@@ -1,8 +1,8 @@
 import crypto from 'crypto';
-import { SellerOrgRole } from '@prisma/client';
-import OrganizationRepository from './organization.repository';
+import OrganizationRepository, { toMemberResponse } from './organization.repository';
 import { storeScopeWhere, type OrgContext } from './orgContext';
 import { normalizePermissions } from './sellerPermissions.constant';
+import { SYSTEM_ROLES, type SellerOrgRoleName } from '../../constants/roles.constant';
 import { prisma } from '../../utils/prisma';
 import AuthService from '../auth/auth.service';
 import { publish } from '../../infrastructure/rabbitmq/publisher';
@@ -30,6 +30,10 @@ export default class OrganizationService {
       organizationId: orgId,
       role: ctx.role,
       isAdmin: ctx.isAdmin,
+      // Distinct from isAdmin, and the onboarding guard depends on the
+      // difference: a hired SELLER_ADMIN is an admin who owns nothing, and must
+      // not be offered the create-your-own-store flow.
+      isOwner: ctx.isOwner,
       assignedStoreIds: ctx.isAdmin ? null : (ctx.assignedStoreIds ?? []),
       // Resolved, not raw: admins come back holding every feature so the web
       // nav does not have to re-implement the implicit-admin rule.
@@ -48,21 +52,25 @@ export default class OrganizationService {
 
   // --- Members -------------------------------------------------------------
 
-  static listMembers(orgId: string) {
-    return OrganizationRepository.getMembers(orgId);
+  static async listMembers(orgId: string) {
+    const [members, ownerUserId] = await Promise.all([
+      OrganizationRepository.getMembers(orgId),
+      OrganizationRepository.getOwnerUserId(orgId),
+    ]);
+    return members.map((member) => toMemberResponse(member, ownerUserId));
   }
 
   /**
    * Reject any store that does not belong to the organization. Without this the
    * `storeIds` array is written straight through, so an admin could point a
    * member's assignments at another organization's stores. Nothing reads those
-   * rows without re-asserting `sellerOrganizationId`, so it was never directly
+   * ids without re-asserting the store's `sellerId`, so it was never directly
    * exploitable — but it is cross-tenant data one filter away from being so.
    */
   private static async assertStoresInOrg(orgId: string, storeIds: string[]) {
     if (storeIds.length === 0) return;
     const found = await OrganizationRepository.getOrgStores({
-      sellerOrganizationId: orgId,
+      sellerId: orgId,
       id: { in: storeIds },
     });
     if (found.length !== new Set(storeIds).size) {
@@ -73,7 +81,7 @@ export default class OrganizationService {
   static async createMember(
     orgId: string,
     userId: string,
-    role: SellerOrgRole,
+    role: SellerOrgRoleName,
     storeIds: string[],
     permissions?: string[],
   ) {
@@ -81,18 +89,18 @@ export default class OrganizationService {
     if (existing) throw { status: 409, message: 'User is already a member of this organization' };
 
     // Only non-admin roles take store assignments; admins see all stores.
-    const isAdminRole = role === SellerOrgRole.SELLER_ADMIN;
+    const isAdminRole = role === SYSTEM_ROLES.SELLER_ADMIN;
     const normalizedStores = isAdminRole ? [] : storeIds;
     await OrganizationService.assertStoresInOrg(orgId, normalizedStores);
 
     const member = await OrganizationRepository.createMember({
-      sellerOrganizationId: orgId,
+      sellerId: orgId,
       userId,
       role,
       storeIds: normalizedStores,
       permissions: normalizePermissions(role, permissions),
     });
-    return member;
+    return toMemberResponse(member);
   }
 
   /**
@@ -117,7 +125,7 @@ export default class OrganizationService {
       firstName: string;
       lastName: string;
       email: string;
-      role: SellerOrgRole;
+      role: SellerOrgRoleName;
       storeIds: string[];
       permissions?: string[];
     },
@@ -134,7 +142,7 @@ export default class OrganizationService {
       };
     }
 
-    const isAdminRole = input.role === SellerOrgRole.SELLER_ADMIN;
+    const isAdminRole = input.role === SYSTEM_ROLES.SELLER_ADMIN;
     const storeIds = isAdminRole ? [] : input.storeIds;
     await OrganizationService.assertStoresInOrg(orgId, storeIds);
 
@@ -164,21 +172,17 @@ export default class OrganizationService {
         },
       });
 
+      // One insert: store assignments are a column on the member now, so the
+      // read-back that used to be needed to get the member id is gone.
       await tx.sellerOrganizationMembers.create({
-        data: { sellerOrganizationId: orgId, userId: created.id, role: input.role, permissions },
+        data: {
+          sellerId: orgId,
+          userId: created.id,
+          role: input.role,
+          permissions,
+          assignedStoreIds: storeIds,
+        },
       });
-
-      if (storeIds.length > 0) {
-        const member = await tx.sellerOrganizationMembers.findUnique({
-          where: {
-            sellerOrganizationId_userId: { sellerOrganizationId: orgId, userId: created.id },
-          },
-          select: { id: true },
-        });
-        await tx.sellerOrganizationMemberStores.createMany({
-          data: storeIds.map((storeId) => ({ memberId: member!.id, storeId })),
-        });
-      }
 
       return created;
     });
@@ -226,23 +230,49 @@ export default class OrganizationService {
       expiresInMinutes: STAFF_SETUP_TTL_MINUTES,
     };
   }
+  /**
+   * Loads a staff member for management actions, ensuring:
+   * 1. The member belongs to the caller's org (returns 404 to prevent ID probing).
+   * 2. The member is not the org owner, preventing staff from deleting or
+   *    demoting the owner (and locking out everyone else).
+   */
+  private static async loadManagedMember(
+    orgId: string,
+    memberId: string,
+    action: 'update' | 'remove',
+  ) {
+    const member = await OrganizationRepository.getMemberById(memberId);
+    if (!member || member.sellerId !== orgId) {
+      throw { status: 404, message: 'Member not found' };
+    }
+
+    const ownerUserId = await OrganizationRepository.getOwnerUserId(orgId);
+    if (ownerUserId !== null && member.userId === ownerUserId) {
+      throw {
+        status: 403,
+        message:
+          action === 'remove'
+            ? 'The organization owner cannot be removed from the organization'
+            : "The organization owner's role and permissions cannot be changed",
+      };
+    }
+
+    return member;
+  }
 
   static async updateMember(
     orgId: string,
     memberId: string,
-    role?: SellerOrgRole,
+    role?: SellerOrgRoleName,
     storeIds?: string[],
     permissions?: string[],
   ) {
-    const member = await OrganizationRepository.getMemberById(memberId);
-    if (!member || member.sellerOrganizationId !== orgId) {
-      throw { status: 404, message: 'Member not found' };
-    }
+    const member = await OrganizationService.loadManagedMember(orgId, memberId, 'update');
 
     let normalizedStores = storeIds;
 
     // Switching a member to an admin role clears their store assignments.
-    if (role === SellerOrgRole.SELLER_ADMIN) {
+    if (role === SYSTEM_ROLES.SELLER_ADMIN) {
       normalizedStores = [];
     }
 
@@ -251,28 +281,27 @@ export default class OrganizationService {
     }
 
     // Rewrite the permission list when the caller sent one, and also when the
-    // role changed without one — a member promoted to MANAGER should pick up
+    // role changed without one — a member promoted to SELLER_MANAGER should pick up
     // the manager default rather than keep the narrower list they had, and one
     // demoted to admin must be reset to the empty implicit-all list.
-    const roleChanged = role !== undefined && role !== member.role;
-    const effectiveRole = role ?? member.role;
+    const currentRole = member.role as SellerOrgRoleName;
+    const roleChanged = role !== undefined && role !== currentRole;
+    const effectiveRole = role ?? currentRole;
     const normalizedPermissions =
       permissions !== undefined || roleChanged
         ? normalizePermissions(effectiveRole, permissions)
         : undefined;
 
-    return OrganizationRepository.updateMember(memberId, {
+    const updated = await OrganizationRepository.updateMember(memberId, {
       ...(role !== undefined ? { role } : {}),
       ...(normalizedStores !== undefined ? { storeIds: normalizedStores } : {}),
       ...(normalizedPermissions !== undefined ? { permissions: normalizedPermissions } : {}),
     });
+    return toMemberResponse(updated);
   }
 
   static async deleteMember(orgId: string, memberId: string, requestingUserId: string) {
-    const member = await OrganizationRepository.getMemberById(memberId);
-    if (!member || member.sellerOrganizationId !== orgId) {
-      throw { status: 404, message: 'Member not found' };
-    }
+    const member = await OrganizationService.loadManagedMember(orgId, memberId, 'remove');
     if (member.userId === requestingUserId) {
       throw { status: 400, message: 'You cannot remove yourself from the organization' };
     }

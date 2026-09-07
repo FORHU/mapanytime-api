@@ -1,10 +1,14 @@
-import type { Request, Response, NextFunction } from 'express';
+﻿import type { Request, Response, NextFunction } from 'express';
 import {
   requireSellerFeature,
   requireSellerOrgAdmin,
 } from '../../src/middleware/sellerOrg.middleware';
 import type { OrgContext } from '../../src/modules/organization/orgContext';
-import { ALL_SELLER_FEATURES } from '../../src/modules/organization/sellerPermissions.constant';
+import {
+  ALL_SELLER_FEATURES,
+  type SellerFeature,
+} from '../../src/modules/organization/sellerPermissions.constant';
+import { PERMISSIONS } from '../../src/constants/permissions.constant';
 
 jest.mock('../../src/utils/prisma', () => ({ prisma: { stores: { findUnique: jest.fn() } } }));
 
@@ -28,22 +32,25 @@ const ADMIN: OrgContext = {
   organizationId: 'org-1',
   role: 'SELLER_ADMIN',
   isAdmin: true,
+  isOwner: true,
   assignedStoreIds: null,
   permissions: [...ALL_SELLER_FEATURES],
 };
 
 const MEMBER: OrgContext = {
   organizationId: 'org-1',
-  role: 'SELLER_USER',
+  role: 'SELLER_MEMBER',
   isAdmin: false,
+  isOwner: false,
   assignedStoreIds: ['store-1'],
-  permissions: ['orders', 'products'],
+  permissions: ['orders.process', 'products.view'],
 };
 
 /**
- * `requireSellerOrgAdmin` replaced six permission codes across eleven routes —
- * store create/update and every member/invite endpoint — when org roles became
- * a fixed enum. It had no test, so the only evidence a SELLER_USER could not
+ * `requireSellerOrgAdmin` replaced six permission codes across eleven routes â€”
+ * store create/update and every member/invite endpoint â€” when org roles became
+ * rows in the shared Roles table. It had no test, so the only evidence a
+ * SELLER_MEMBER could not
  * create a store or add members was reading the route files.
  */
 describe('requireSellerOrgAdmin', () => {
@@ -85,7 +92,13 @@ describe('requireSellerOrgAdmin', () => {
   it('refuses a context whose organizationId is null even if isAdmin is true', () => {
     // Guards the fallback shape: isAdmin without an org must not pass.
     const req = {
-      orgContext: { organizationId: null, role: null, isAdmin: true, assignedStoreIds: null },
+      orgContext: {
+        organizationId: null,
+        role: null,
+        isAdmin: true,
+        isOwner: true,
+        assignedStoreIds: null,
+      },
     } as unknown as Request;
     const res = makeRes();
     const next = jest.fn() as NextFunction;
@@ -103,7 +116,7 @@ describe('requireSellerOrgAdmin', () => {
  * These cases pin both paths: a pre-resolved context, and a bare `req.user`.
  */
 describe('requireSellerFeature', () => {
-  const run = (req: Partial<Request>, code: 'orders' | 'promotions' = 'promotions') => {
+  const run = (req: Partial<Request>, code: SellerFeature = PERMISSIONS.PROMOTIONS_ADD) => {
     const res = makeRes();
     const next = jest.fn() as NextFunction;
     requireSellerFeature(code)(req as Request, res, next);
@@ -120,7 +133,7 @@ describe('requireSellerFeature', () => {
   it('admits a member holding the code', () => {
     const { res, next } = run(
       { orgContext: MEMBER, user: { id: 'u1' } } as unknown as Request,
-      'orders',
+      PERMISSIONS.ORDERS_PROCESS,
     );
 
     expect(next).toHaveBeenCalledTimes(1);
@@ -141,7 +154,7 @@ describe('requireSellerFeature', () => {
     const stripped: OrgContext = { ...MEMBER, permissions: [] };
     const { res, next } = run(
       { orgContext: stripped, user: { id: 'u1' } } as unknown as Request,
-      'orders',
+      PERMISSIONS.ORDERS_PROCESS,
     );
 
     expect(next).not.toHaveBeenCalled();
@@ -149,23 +162,23 @@ describe('requireSellerFeature', () => {
   });
 
   it('resolves context from req.user when no middleware populated it', () => {
-    // The orders/inventory/merchantAds path — no requireSellerOrg upstream.
+    // The orders/inventory/merchantAds path â€” no requireSellerOrg upstream.
     const req = {
       user: {
         id: 'u1',
         orgMemberships: [
           {
-            sellerOrganizationId: 'org-1',
-            role: 'SELLER_USER',
-            assignedStores: [{ storeId: 'store-1' }],
-            permissions: ['orders'],
+            sellerId: 'org-1',
+            role: 'SELLER_MEMBER',
+            assignedStoreIds: ['store-1'],
+            permissions: [PERMISSIONS.ORDERS_PROCESS],
           },
         ],
       },
     } as unknown as Request;
 
-    expect(run(req, 'orders').next).toHaveBeenCalledTimes(1);
-    expect(run(req, 'promotions').res.statusCode).toBe(403);
+    expect(run(req, PERMISSIONS.ORDERS_PROCESS).next).toHaveBeenCalledTimes(1);
+    expect(run(req, PERMISSIONS.PROMOTIONS_ADD).res.statusCode).toBe(403);
   });
 
   it('admits a pre-organization seller who has a Sellers row but no membership', () => {

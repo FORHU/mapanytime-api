@@ -1,4 +1,4 @@
-import StoreService from '../../src/modules/stores/store.service';
+﻿import StoreService from '../../src/modules/stores/store.service';
 import StoreRepository from '../../src/modules/stores/store.repository';
 import CategoryRepository from '../../src/modules/categories/category.repository';
 import { prisma } from '../../src/utils/prisma';
@@ -124,7 +124,7 @@ describe('StoreService', () => {
           id: 'store-pending',
           storeName: 'Pending Store',
           // isActive:true simulates a seller self-toggling their own PATCH
-          // /stores/:id "open for business" flag before admin review — the
+          // /stores/:id "open for business" flag before admin review â€” the
           // approvalStatus check must reject regardless.
           isActive: true,
           approvalStatus,
@@ -189,22 +189,23 @@ describe('StoreService', () => {
   });
 
   describe('updateStore', () => {
-    // `updateStore(context, storeId, input)` now — the old second argument was a
-    // `sellerId` compared against `store.sellerId`; ownership moved to the
-    // caller's organization, so the store carries `sellerOrganizationId` and the
-    // seller id no longer participates.
+    // `updateStore(context, storeId, input)` now â€” the old second argument was a
+    // `sellerId` compared against `store.sellerId`. Ownership moved to the
+    // caller's organization, and since a seller *is* an organization, the check
+    // is back to comparing `store.sellerId` â€” against `context.organizationId`,
+    // which is a `Sellers.id`.
     const admin: OrgContext = {
       organizationId: 'org-1',
       role: 'SELLER_ADMIN',
       isAdmin: true,
+      isOwner: true,
       assignedStoreIds: null,
       permissions: [...ALL_SELLER_FEATURES],
     };
 
     const existingStore = {
       id: 'store-1',
-      sellerId: 'seller-1',
-      sellerOrganizationId: 'org-1',
+      sellerId: 'org-1',
       storeName: 'Test Store',
       storeLocations: null,
     };

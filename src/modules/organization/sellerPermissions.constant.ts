@@ -1,30 +1,18 @@
-import { SellerOrgRole } from '@prisma/client';
+import {
+  SELLER_ORG_PERMISSIONS,
+  NON_ADMIN_ROLE_PERMISSIONS,
+  type SellerOrgPermissionCode,
+} from '../../constants/permissions.constant';
+import { type SellerOrgRoleName } from '../../constants/roles.constant';
 
 /**
- * Feature codes a seller-organization member can be granted.
- *
- * Deliberately separate from the platform `Permissions` table, which is rows in
- * the database and belongs to admin RBAC (`middleware/permission.middleware.ts`).
- * These are an application constant stored as a scalar `String[]` on
- * `SellerOrganizationMembers` — the granular seller-org permission *tables* were
- * dropped in `20260901000000_simplify_seller_org_roles`, and reintroducing them
- * would rebuild exactly what that migration removed.
- *
- * `returns` and `payouts` are absent on purpose. `/v1/returns/seller/*` and
- * `/v1/settlements/me` both resolve the caller's own `Sellers` row, which
- * organization staff never have, so those endpoints 403 for every member
- * regardless of role. Offering a checkbox for them would promise access the API
- * refuses — they belong here only once those two modules are org-scoped.
+ * Seller-organization member feature codes, sourced from the global platform
+ * catalogue and stored as a `String[]` on members for query-free permission checks.
+ * Defaults are seeded from `NON_ADMIN_ROLE_PERMISSIONS` to prevent drift.
  */
-export const SELLER_FEATURES = [
-  'orders',
-  'products',
-  'promotions',
-  'sales_review',
-  'customer_review',
-] as const;
+export const SELLER_FEATURES = SELLER_ORG_PERMISSIONS;
 
-export type SellerFeature = (typeof SELLER_FEATURES)[number];
+export type SellerFeature = SellerOrgPermissionCode;
 
 export const ALL_SELLER_FEATURES: readonly SellerFeature[] = SELLER_FEATURES;
 
@@ -35,18 +23,18 @@ export const ALL_SELLER_FEATURES: readonly SellerFeature[] = SELLER_FEATURES;
  * never read — `resolveOrgContext` gives them every feature implicitly, so
  * persisting a list for them would go stale the moment a new code is added.
  */
-export const DEFAULT_PERMISSIONS_BY_ROLE: Record<SellerOrgRole, readonly SellerFeature[]> = {
-  [SellerOrgRole.SELLER_ADMIN]: [],
-  [SellerOrgRole.MANAGER]: SELLER_FEATURES,
-  [SellerOrgRole.SELLER_USER]: ['orders', 'products'],
+export const DEFAULT_PERMISSIONS_BY_ROLE: Record<SellerOrgRoleName, readonly SellerFeature[]> = {
+  SELLER_ADMIN: [],
+  SELLER_MANAGER: (NON_ADMIN_ROLE_PERMISSIONS.SELLER_MANAGER ?? []) as SellerFeature[],
+  SELLER_MEMBER: (NON_ADMIN_ROLE_PERMISSIONS.SELLER_MEMBER ?? []) as SellerFeature[],
 };
 
 export function isSellerFeature(code: string): code is SellerFeature {
   return (SELLER_FEATURES as readonly string[]).includes(code);
 }
 
-export function defaultPermissionsForRole(role: SellerOrgRole): SellerFeature[] {
-  return [...DEFAULT_PERMISSIONS_BY_ROLE[role]];
+export function defaultPermissionsForRole(role: SellerOrgRoleName): SellerFeature[] {
+  return [...(DEFAULT_PERMISSIONS_BY_ROLE[role] ?? [])];
 }
 
 /**
@@ -60,10 +48,13 @@ export function defaultPermissionsForRole(role: SellerOrgRole): SellerFeature[] 
  * `requested` being undefined means the caller did not express an opinion, so
  * the role default applies. An explicit empty array is honoured as empty.
  */
-export function normalizePermissions(role: SellerOrgRole, requested?: string[]): SellerFeature[] {
+export function normalizePermissions(
+  role: SellerOrgRoleName,
+  requested?: string[],
+): SellerFeature[] {
   // Admins hold everything implicitly; storing a list for them would be a lie
   // that goes stale as soon as a feature is added.
-  if (role === SellerOrgRole.SELLER_ADMIN) return [];
+  if (role === 'SELLER_ADMIN') return [];
 
   if (requested === undefined) return defaultPermissionsForRole(role);
 

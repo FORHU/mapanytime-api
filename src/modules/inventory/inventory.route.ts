@@ -3,6 +3,7 @@ import InventoryController from './inventory.controller';
 import InventoryReservationController from './inventoryReservation.controller';
 import { authenticate } from '../../middleware/auth.middleware';
 import { requireSellerFeature } from '../../middleware/sellerOrg.middleware';
+import { PERMISSIONS } from '../../constants/permissions.constant';
 
 const router = Router();
 
@@ -13,21 +14,21 @@ const router = Router();
 router.get(
   '/:productId',
   authenticate,
-  requireSellerFeature('products'),
+  requireSellerFeature(PERMISSIONS.PRODUCTS_VIEW),
   InventoryController.getInventory,
 );
 // Endpoint for sellers to add physical stock to their product
 router.patch(
   '/:productId/restock',
   authenticate,
-  requireSellerFeature('products'),
+  requireSellerFeature(PERMISSIONS.PRODUCTS_EDIT),
   InventoryController.restock,
 );
 // Endpoint for sellers to set an absolute stock level (increase or decrease)
 router.patch(
   '/:productId/adjust',
   authenticate,
-  requireSellerFeature('products'),
+  requireSellerFeature(PERMISSIONS.PRODUCTS_EDIT),
   InventoryController.adjust,
 );
 

@@ -1,14 +1,20 @@
-import { PrismaClient, SellerOrgRole } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import OrganizationRepository from '../../src/modules/organization/organization.repository';
+import { SYSTEM_ROLES, type SellerOrgRoleName } from '../../src/constants/roles.constant';
+import { defaultPermissionsForRole } from '../../src/modules/organization/sellerPermissions.constant';
 
-const DEMO_ORGANIZATIONS = [
+const DEMO_ORGANIZATIONS: {
+  name: string;
+  ownerEmail: string;
+  members: { email: string; role: SellerOrgRoleName; storeSlugs: string[] }[];
+}[] = [
   {
     name: 'Piatos Family Trading',
     ownerEmail: 'seller@example.com',
     members: [
       {
         email: 'sellerManager@example.com',
-        role: SellerOrgRole.SELLER_USER,
+        role: SYSTEM_ROLES.SELLER_MANAGER,
         storeSlugs: ['baguio-fresh-harvest', 'pine-view-bakehouse'],
       },
     ],
@@ -52,19 +58,14 @@ async function seedDemoOrganizations(prisma: PrismaClient) {
       }),
     );
 
-    await prisma.sellerOrganizations.updateMany({
-      where: { id: orgId, name: { not: spec.name } },
-      data: { name: spec.name },
+    await prisma.sellers.updateMany({
+      where: { id: orgId, organizationName: { not: spec.name } },
+      data: { organizationName: spec.name },
     });
 
-    const { count } = await prisma.stores.updateMany({
-      where: { sellerId: seller.id, sellerOrganizationId: null },
-      data: { sellerOrganizationId: orgId },
-    });
+    const bound = await prisma.stores.count({ where: { sellerId: orgId } });
 
-    const bound = await prisma.stores.count({ where: { sellerOrganizationId: orgId } });
-
-    console.log(`✅ Organization '${spec.name}' ready (${bound} store(s) bound, ${count} newly).`);
+    console.log(`✅ Organization '${spec.name}' ready (${bound} store(s)).`);
   }
 }
 
@@ -72,11 +73,11 @@ async function seedDemoMembers(prisma: PrismaClient) {
   for (const spec of DEMO_ORGANIZATIONS) {
     if (spec.members.length === 0) continue;
 
-    const org = await prisma.sellerOrganizations.findFirst({
-      where: { owner: { email: { equals: spec.ownerEmail, mode: 'insensitive' } } },
-      select: { id: true, name: true },
+    const seller = await prisma.sellers.findFirst({
+      where: { users: { email: { equals: spec.ownerEmail, mode: 'insensitive' } } },
+      select: { id: true },
     });
-    if (!org) {
+    if (!seller) {
       console.warn(
         `⚠️  No organization owned by ${spec.ownerEmail}; skipping '${spec.name}' members.`,
       );
@@ -93,17 +94,8 @@ async function seedDemoMembers(prisma: PrismaClient) {
         continue;
       }
 
-      const member = await prisma.sellerOrganizationMembers.upsert({
-        where: {
-          sellerOrganizationId_userId: { sellerOrganizationId: org.id, userId: user.id },
-        },
-        update: { role: memberSpec.role },
-        create: { sellerOrganizationId: org.id, userId: user.id, role: memberSpec.role },
-        select: { id: true },
-      });
-
       const stores = await prisma.stores.findMany({
-        where: { slug: { in: memberSpec.storeSlugs }, sellerOrganizationId: org.id },
+        where: { slug: { in: memberSpec.storeSlugs }, sellerId: seller.id },
         select: { id: true },
       });
 
@@ -116,15 +108,19 @@ async function seedDemoMembers(prisma: PrismaClient) {
       }
 
       const storeIds = stores.map((store) => store.id);
+      const role = memberSpec.role;
+      const permissions = defaultPermissionsForRole(role);
 
-      // Reconcile rather than append: the spec is the source of truth, so a
-      // store dropped from `storeSlugs` should lose its assignment on re-seed.
-      await prisma.sellerOrganizationMemberStores.deleteMany({
-        where: { memberId: member.id, storeId: { notIn: storeIds } },
-      });
-      await prisma.sellerOrganizationMemberStores.createMany({
-        data: storeIds.map((storeId) => ({ memberId: member.id, storeId })),
-        skipDuplicates: true,
+      await prisma.sellerOrganizationMembers.upsert({
+        where: { sellerId_userId: { sellerId: seller.id, userId: user.id } },
+        update: { role, permissions, assignedStoreIds: storeIds },
+        create: {
+          sellerId: seller.id,
+          userId: user.id,
+          role,
+          permissions,
+          assignedStoreIds: storeIds,
+        },
       });
 
       console.log(

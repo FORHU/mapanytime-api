@@ -54,9 +54,13 @@ export function filterLiveAds(ads: MerchantAdWithProducts[]) {
 }
 
 export default class StoreService {
+  /**
+   * `orgId` is gone from this signature: a store's organization is its seller,
+   * so `sellerId` carries both and a second argument could only ever disagree
+   * with it.
+   */
   static async createStoreWithDocuments(
     sellerId: string,
-    orgId: string,
     storeData: {
       storeName: string;
       description?: string;
@@ -123,7 +127,6 @@ export default class StoreService {
       const newStore = await tx.stores.create({
         data: {
           sellerId,
-          sellerOrganizationId: orgId,
           storeName: storeData.storeName,
           description: storeData.description,
           email: storeData.email,
@@ -329,7 +332,7 @@ export default class StoreService {
     // Org-scoped ownership: the store must belong to the caller's organization
     // and (for staff) to their assigned set. 404 rather than 403 so a caller
     // cannot probe which store ids exist outside their scope.
-    if (!context.organizationId || existing.sellerOrganizationId !== context.organizationId) {
+    if (!context.organizationId || existing.sellerId !== context.organizationId) {
       throw { status: 404, message: 'Store not found.' };
     }
     if (!context.isAdmin && context.assignedStoreIds) {

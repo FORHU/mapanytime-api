@@ -582,6 +582,9 @@ export default class AuthSvc {
           organizationId: orgCtx.organizationId,
           role: orgCtx.role,
           isAdmin: orgCtx.isAdmin,
+          // Decides the post-login destination: staff never belong in merchant
+          // onboarding, whatever their org role.
+          isOwner: orgCtx.isOwner,
           assignedStoreIds: orgCtx.isAdmin ? null : (orgCtx.assignedStoreIds ?? []),
         }
       : null;

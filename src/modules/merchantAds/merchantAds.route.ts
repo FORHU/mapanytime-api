@@ -2,6 +2,7 @@ import express from 'express';
 import MerchantAdsController from './merchantAds.controller';
 import { authenticate } from '../../middleware/auth.middleware';
 import { requireSellerFeature } from '../../middleware/sellerOrg.middleware';
+import { PERMISSIONS } from '../../constants/permissions.constant';
 
 const router = express.Router();
 
@@ -14,32 +15,47 @@ router.post('/:id/events', MerchantAdsController.recordEvent);
 // MerchantAdsService, so a member still reaches only their assigned stores.
 // No `requireSellerOrg` here on purpose: it would 403 a pre-organization seller
 // who owns their stores outright, and the gate resolves its own context.
-router.get('/', authenticate, requireSellerFeature('promotions'), MerchantAdsController.index);
+router.get(
+  '/',
+  authenticate,
+  requireSellerFeature(PERMISSIONS.PROMOTIONS_ADD),
+  MerchantAdsController.index,
+);
 // Above /:id/* so 'badges' isn't swallowed as an ad id.
 router.get(
   '/badges',
   authenticate,
-  requireSellerFeature('promotions'),
+  requireSellerFeature(PERMISSIONS.PROMOTIONS_ADD),
   MerchantAdsController.badges,
 );
 router.get(
   '/:id/analytics',
   authenticate,
-  requireSellerFeature('promotions'),
+  requireSellerFeature(PERMISSIONS.PROMOTIONS_ADD),
   MerchantAdsController.analytics,
 );
-router.post('/', authenticate, requireSellerFeature('promotions'), MerchantAdsController.create);
-router.put('/:id', authenticate, requireSellerFeature('promotions'), MerchantAdsController.update);
+router.post(
+  '/',
+  authenticate,
+  requireSellerFeature(PERMISSIONS.PROMOTIONS_ADD),
+  MerchantAdsController.create,
+);
+router.put(
+  '/:id',
+  authenticate,
+  requireSellerFeature(PERMISSIONS.PROMOTIONS_ADD),
+  MerchantAdsController.update,
+);
 router.delete(
   '/:id',
   authenticate,
-  requireSellerFeature('promotions'),
+  requireSellerFeature(PERMISSIONS.PROMOTIONS_ADD),
   MerchantAdsController.destroy,
 );
 router.patch(
   '/:id',
   authenticate,
-  requireSellerFeature('promotions'),
+  requireSellerFeature(PERMISSIONS.PROMOTIONS_ADD),
   MerchantAdsController.toggle,
 );
 

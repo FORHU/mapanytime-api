@@ -1,6 +1,9 @@
 import OrganizationService from '../../src/modules/organization/organization.service';
 import OrganizationRepository from '../../src/modules/organization/organization.repository';
 import { prisma } from '../../src/utils/prisma';
+import { SYSTEM_ROLES } from '../../src/constants/roles.constant';
+import { PERMISSIONS } from '../../src/constants/permissions.constant';
+import { ALL_SELLER_FEATURES } from '../../src/modules/organization/sellerPermissions.constant';
 
 jest.mock('../../src/modules/organization/organization.repository');
 jest.mock('../../src/modules/auth/auth.service', () => ({
@@ -22,7 +25,7 @@ const base = {
   firstName: 'Rico',
   lastName: 'Bautista',
   email: 'rico@example.com',
-  role: 'SELLER_USER' as const,
+  role: SYSTEM_ROLES.SELLER_MEMBER,
   storeIds: ['store-1'],
 };
 
@@ -83,7 +86,7 @@ describe('OrganizationService.createStaffAccount', () => {
     // would be a lie that goes stale the moment a store is added.
     const result = await OrganizationService.createStaffAccount(ORG, {
       ...base,
-      role: 'SELLER_ADMIN',
+      role: SYSTEM_ROLES.SELLER_ADMIN,
       storeIds: ['store-1'],
     });
 
@@ -95,7 +98,7 @@ describe('OrganizationService.createStaffAccount', () => {
     // A Sellers row would let staff complete merchant onboarding as an
     // independent competitor of the organization that hired them — see the
     // doc comment on createStaffAccount. Their authority comes from the
-    // SellerOrganizationMemberStores assignment instead.
+    // store assignment on their membership row instead.
     const tx = {
       users: {
         create: jest
@@ -105,9 +108,7 @@ describe('OrganizationService.createStaffAccount', () => {
       sellers: { create: jest.fn() },
       sellerOrganizationMembers: {
         create: jest.fn().mockResolvedValue({ id: 'member-1' }),
-        findUnique: jest.fn().mockResolvedValue({ id: 'member-1' }),
       },
-      sellerOrganizationMemberStores: { createMany: jest.fn() },
     };
     mockedPrisma.$transaction.mockImplementation((cb: (tx: unknown) => unknown) => cb(tx));
 
@@ -121,16 +122,16 @@ describe('OrganizationService.createStaffAccount', () => {
       }),
     );
     expect(tx.sellers.create).not.toHaveBeenCalled();
+    // One insert: the store assignments ride on the member row now, so there is
+    // no second write to keep consistent with it.
     expect(tx.sellerOrganizationMembers.create).toHaveBeenCalledWith({
       data: {
-        sellerOrganizationId: ORG,
+        sellerId: ORG,
         userId: 'user-new',
-        role: base.role,
-        permissions: ['orders', 'products'],
+        role: SYSTEM_ROLES.SELLER_MEMBER,
+        permissions: [PERMISSIONS.ORDERS_PROCESS, PERMISSIONS.PRODUCTS_VIEW],
+        assignedStoreIds: ['store-1'],
       },
-    });
-    expect(tx.sellerOrganizationMemberStores.createMany).toHaveBeenCalledWith({
-      data: [{ memberId: 'member-1', storeId: 'store-1' }],
     });
   });
 
@@ -141,35 +142,31 @@ describe('OrganizationService.createStaffAccount', () => {
   });
 
   describe('feature permissions', () => {
-    it('defaults a SELLER_USER to orders and products', async () => {
+    it('defaults a SELLER_MEMBER to order processing and read-only catalog', async () => {
       const result = await OrganizationService.createStaffAccount(ORG, base);
 
-      expect(result.permissions).toEqual(['orders', 'products']);
+      expect(result.permissions).toEqual([PERMISSIONS.ORDERS_PROCESS, PERMISSIONS.PRODUCTS_VIEW]);
+      // The member default must not carry write access to the catalog.
+      expect(result.permissions).not.toContain(PERMISSIONS.PRODUCTS_EDIT);
     });
 
-    it('defaults a MANAGER to every feature', async () => {
+    it('defaults a SELLER_MANAGER to every feature', async () => {
       const result = await OrganizationService.createStaffAccount(ORG, {
         ...base,
-        role: 'MANAGER',
+        role: SYSTEM_ROLES.SELLER_MANAGER,
       });
 
-      expect(result.permissions).toEqual([
-        'orders',
-        'products',
-        'promotions',
-        'sales_review',
-        'customer_review',
-      ]);
+      expect(result.permissions).toEqual([...ALL_SELLER_FEATURES]);
     });
 
     it('honours an explicit list over the role default', async () => {
       const result = await OrganizationService.createStaffAccount(ORG, {
         ...base,
-        role: 'MANAGER',
-        permissions: ['orders'],
+        role: SYSTEM_ROLES.SELLER_MANAGER,
+        permissions: [PERMISSIONS.ORDERS_PROCESS],
       });
 
-      expect(result.permissions).toEqual(['orders']);
+      expect(result.permissions).toEqual([PERMISSIONS.ORDERS_PROCESS]);
     });
 
     it('persists an explicit empty list as empty rather than re-inflating it', async () => {
@@ -186,8 +183,8 @@ describe('OrganizationService.createStaffAccount', () => {
     it('stores nothing for an admin, who holds every feature implicitly', async () => {
       const result = await OrganizationService.createStaffAccount(ORG, {
         ...base,
-        role: 'SELLER_ADMIN',
-        permissions: ['orders'],
+        role: SYSTEM_ROLES.SELLER_ADMIN,
+        permissions: [PERMISSIONS.ORDERS_PROCESS],
       });
 
       expect(result.permissions).toEqual([]);
@@ -197,7 +194,7 @@ describe('OrganizationService.createStaffAccount', () => {
       await expect(
         OrganizationService.createStaffAccount(ORG, {
           ...base,
-          permissions: ['orders', 'not_a_feature'],
+          permissions: [PERMISSIONS.ORDERS_PROCESS, 'not_a_feature'],
         }),
       ).rejects.toMatchObject({ status: 400 });
       expect(mockedPrisma.$transaction).not.toHaveBeenCalled();
@@ -206,10 +203,14 @@ describe('OrganizationService.createStaffAccount', () => {
     it('de-duplicates a repeated code', async () => {
       const result = await OrganizationService.createStaffAccount(ORG, {
         ...base,
-        permissions: ['orders', 'orders', 'products'],
+        permissions: [
+          PERMISSIONS.ORDERS_PROCESS,
+          PERMISSIONS.ORDERS_PROCESS,
+          PERMISSIONS.PRODUCTS_VIEW,
+        ],
       });
 
-      expect(result.permissions).toEqual(['orders', 'products']);
+      expect(result.permissions).toEqual([PERMISSIONS.ORDERS_PROCESS, PERMISSIONS.PRODUCTS_VIEW]);
     });
   });
 });

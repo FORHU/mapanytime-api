@@ -151,7 +151,9 @@ export const requireStoreInScope = async (req: Request, res: Response, next: Nex
     }
 
     const store = await prisma.stores.findUnique({ where: { id: storeId } });
-    if (!store || store.sellerOrganizationId !== context.organizationId) {
+    // `organizationId` is a `Sellers.id`, which is exactly what a store's
+    // `sellerId` points at — the store/org link no longer needs its own column.
+    if (!store || store.sellerId !== context.organizationId) {
       return res.status(404).json({ status: 'error', message: 'Store not found.' });
     }
 

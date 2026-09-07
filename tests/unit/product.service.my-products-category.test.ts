@@ -1,4 +1,4 @@
-import ProductService from '../../src/modules/products/product.service';
+﻿import ProductService from '../../src/modules/products/product.service';
 import ProductRepository from '../../src/modules/products/product.repository';
 import CategoryService from '../../src/modules/categories/category.service';
 import type { OrgContext } from '../../src/modules/organization/orgContext';
@@ -36,6 +36,7 @@ const admin: OrgContext = {
   organizationId: 'org-1',
   role: 'SELLER_ADMIN',
   isAdmin: true,
+  isOwner: true,
   assignedStoreIds: null,
   permissions: [...ALL_SELLER_FEATURES],
 };
@@ -76,10 +77,10 @@ describe('ProductService.getMyProducts category filtering', () => {
   it('aggregates across every store when storeId is omitted', async () => {
     await ProductService.getMyProducts(admin, undefined, opts());
 
-    // The repository takes one resolved StoresWhereInput now — the old
+    // The repository takes one resolved StoresWhereInput now â€” the old
     // (storeId, sellerId, opts) triple is gone, so "all stores" is expressed as
     // an org-wide scope rather than an undefined store id.
     const [storeScope] = getMyProducts.mock.calls[0];
-    expect(storeScope).toEqual({ sellerOrganizationId: 'org-1' });
+    expect(storeScope).toEqual({ sellerId: 'org-1' });
   });
 });

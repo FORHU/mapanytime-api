@@ -3,6 +3,7 @@ import Joi from 'joi';
 import OrganizationService from './organization.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
 import type { OrgContext } from './orgContext';
+import { SELLER_ORG_ROLES, SYSTEM_ROLES } from '../../constants/roles.constant';
 
 function requireContext(req: Request): OrgContext & { organizationId: string } {
   const ctx = req.orgContext;
@@ -48,7 +49,9 @@ export default class OrganizationController {
   static async createMember(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
       userId: Joi.string().required(),
-      role: Joi.string().valid('SELLER_ADMIN', 'MANAGER', 'SELLER_USER').required(),
+      role: Joi.string()
+        .valid(...SELLER_ORG_ROLES)
+        .required(),
       storeIds: Joi.array().items(Joi.string()).default([]),
       // Omitted entirely means "use the role default"; an explicit [] means
       // "no features" and is honoured as such.
@@ -78,7 +81,9 @@ export default class OrganizationController {
       firstName: Joi.string().trim().min(1).required(),
       lastName: Joi.string().trim().min(1).required(),
       email: Joi.string().email().required(),
-      role: Joi.string().valid('SELLER_ADMIN', 'MANAGER', 'SELLER_USER').default('SELLER_USER'),
+      role: Joi.string()
+        .valid(...SELLER_ORG_ROLES)
+        .default(SYSTEM_ROLES.SELLER_MEMBER),
       storeIds: Joi.array().items(Joi.string()).default([]),
       permissions: Joi.array().items(Joi.string()).optional(),
     });
@@ -96,7 +101,9 @@ export default class OrganizationController {
 
   static async updateMember(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
-      role: Joi.string().valid('SELLER_ADMIN', 'MANAGER', 'SELLER_USER').optional(),
+      role: Joi.string()
+        .valid(...SELLER_ORG_ROLES)
+        .optional(),
       storeIds: Joi.array().items(Joi.string()).optional(),
       permissions: Joi.array().items(Joi.string()).optional(),
     });

@@ -36,7 +36,7 @@ const PRODUCT = { id: 'product-1', storeId: 'store-1' };
 const OWNER = {
   id: 'user-1',
   orgMemberships: [],
-  seller: { sellerOrganizationId: null },
+  seller: { sellerId: null },
 } as unknown as AuthUser;
 
 /** Organization staff assigned store-1, with no `Sellers` row of their own. */
@@ -44,8 +44,8 @@ const STAFF = {
   id: 'user-2',
   orgMemberships: [
     {
-      sellerOrganizationId: 'org-1',
-      role: 'SELLER_USER',
+      sellerId: 'org-1',
+      role: 'SELLER_MEMBER',
       assignedStores: [{ storeId: 'store-1' }],
     },
   ],

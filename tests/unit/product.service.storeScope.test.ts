@@ -1,4 +1,4 @@
-import ProductService from '../../src/modules/products/product.service';
+﻿import ProductService from '../../src/modules/products/product.service';
 import ProductRepository from '../../src/modules/products/product.repository';
 import type { OrgContext } from '../../src/modules/organization/orgContext';
 
@@ -17,16 +17,18 @@ const admin: OrgContext = {
   organizationId: 'org-1',
   role: 'SELLER_ADMIN',
   isAdmin: true,
+  isOwner: true,
   assignedStoreIds: null,
-  permissions: ['orders', 'products', 'promotions', 'sales_review', 'customer_review'],
+  permissions: ['orders.process', 'products.view', 'products.edit', 'promotions.add'],
 };
 
 const member: OrgContext = {
   organizationId: 'org-1',
-  role: 'SELLER_USER',
+  role: 'SELLER_MEMBER',
   isAdmin: false,
+  isOwner: false,
   assignedStoreIds: ['store-assigned'],
-  permissions: ['orders', 'products'],
+  permissions: ['orders.process', 'products.view', 'products.edit'],
 };
 
 /** The `StoresWhereInput` the service handed the repository. */
@@ -41,30 +43,27 @@ describe('ProductService.getMyProducts store scoping', () => {
   it('covers every org store for an admin in All-Stores mode', async () => {
     await ProductService.getMyProducts(admin, undefined, opts);
 
-    expect(scopeUsed()).toEqual({ sellerOrganizationId: 'org-1' });
+    expect(scopeUsed()).toEqual({ sellerId: 'org-1' });
   });
 
   it('covers only assigned stores for a member in All-Stores mode', async () => {
     await ProductService.getMyProducts(member, undefined, opts);
 
     expect(scopeUsed()).toEqual({
-      sellerOrganizationId: 'org-1',
+      sellerId: 'org-1',
       id: { in: ['store-assigned'] },
     });
   });
 
   it('narrows to the requested store without dropping the assignment filter', async () => {
     // The regression this guards: a supplied storeId used to REPLACE the scope
-    // with `{ id, sellerOrganizationId }`, so a seller_user could read any
+    // with `{ id, sellerId }`, so a seller member could read any
     // sibling store's products by passing its id. The store filter must be
     // intersected with the context scope, never substituted for it.
     await ProductService.getMyProducts(member, 'store-not-assigned', opts);
 
     expect(scopeUsed()).toEqual({
-      AND: [
-        { sellerOrganizationId: 'org-1', id: { in: ['store-assigned'] } },
-        { id: 'store-not-assigned' },
-      ],
+      AND: [{ sellerId: 'org-1', id: { in: ['store-assigned'] } }, { id: 'store-not-assigned' }],
     });
   });
 
@@ -73,6 +72,7 @@ describe('ProductService.getMyProducts store scoping', () => {
       organizationId: null,
       role: null,
       isAdmin: false,
+      isOwner: false,
       assignedStoreIds: null,
       permissions: [],
     };
@@ -91,7 +91,7 @@ describe('ProductService.getMyProducts store scoping', () => {
     await ProductService.getMyProducts(unassigned, undefined, opts);
 
     expect(scopeUsed()).toEqual({
-      sellerOrganizationId: 'org-1',
+      sellerId: 'org-1',
       id: { in: ['__NONE__'] },
     });
   });

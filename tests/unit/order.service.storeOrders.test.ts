@@ -46,21 +46,21 @@ const SELLER = {
 const OWNER = {
   id: 'user-1',
   orgMemberships: [],
-  seller: { sellerOrganizationId: null },
+  seller: { sellerId: null },
 } as unknown as AuthUser;
 
 /**
  * Organization staff: no stores of their own, two assigned to them. This is the
  * shape that used to be refused outright — `resolveSellerStoreIds` only ever
- * looked at directly-owned stores, so a seller_user could not read orders for
+ * looked at directly-owned stores, so a seller member could not read orders for
  * the stores they were explicitly given.
  */
 const STAFF = {
   id: 'user-2',
   orgMemberships: [
     {
-      sellerOrganizationId: 'org-1',
-      role: 'SELLER_USER',
+      sellerId: 'org-1',
+      role: 'SELLER_MEMBER',
       assignedStores: [{ storeId: 'store-1' }, { storeId: 'store-2' }],
     },
   ],

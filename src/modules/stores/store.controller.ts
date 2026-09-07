@@ -57,18 +57,13 @@ export default class StoreController {
 
       const user = req.user as Users & { seller?: { id: string } };
       const sellerId = user.seller?.id;
-      const orgId = req.orgContext?.organizationId;
 
       if (!sellerId) {
         return responseError(res, 403, 'User is not registered as a seller.');
       }
-      if (!orgId) {
-        return responseError(res, 403, 'User is not a member of a seller organization.');
-      }
 
       const newStore = await StoreService.createStoreWithDocuments(
         sellerId,
-        orgId,
         value.storeData,
         value.locationData,
         value.hoursData,

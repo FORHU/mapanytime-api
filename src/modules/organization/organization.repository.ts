@@ -1,12 +1,35 @@
-import { Prisma, SellerOrgRole } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
+import { SYSTEM_ROLES, type SellerOrgRoleName } from '../../constants/roles.constant';
+
+const memberInclude = {
+  user: { select: { id: true, email: true, firstName: true, lastName: true } },
+} satisfies Prisma.SellerOrganizationMembersInclude;
+
+type MemberRow = Prisma.SellerOrganizationMembersGetPayload<{ include: typeof memberInclude }>;
+
+export function toMemberResponse(member: MemberRow, ownerUserId: string | null = null) {
+  return {
+    id: member.id,
+    sellerId: member.sellerId,
+    userId: member.userId,
+    role: member.role,
+    user: member.user,
+    permissions: member.permissions,
+    assignedStores: member.assignedStoreIds.map((storeId) => ({ storeId })),
+    isOwner: ownerUserId !== null && member.userId === ownerUserId,
+  };
+}
 
 export default class OrganizationRepository {
-  /**
-   * Takes a resolved scope rather than a bare org id: an admin's scope is every
-   * store in the organization, a member's is only their assigned stores. Passing
-   * just the org id returned all of them to anyone who could call the route.
-   */
+  static async getOwnerUserId(orgId: string) {
+    const seller = await prisma.sellers.findUnique({
+      where: { id: orgId },
+      select: { userId: true },
+    });
+    return seller?.userId ?? null;
+  }
+
   static getOrgStores(scope: Prisma.StoresWhereInput) {
     return prisma.stores.findMany({
       where: scope,
@@ -17,79 +40,62 @@ export default class OrganizationRepository {
 
   static getMembers(orgId: string) {
     return prisma.sellerOrganizationMembers.findMany({
-      where: { sellerOrganizationId: orgId },
-      include: {
-        user: { select: { id: true, email: true, firstName: true, lastName: true } },
-        assignedStores: { select: { storeId: true } },
-      },
+      where: { sellerId: orgId },
+      include: memberInclude,
       orderBy: { createdAt: 'asc' },
     });
   }
 
   static getMemberById(memberId: string) {
-    return prisma.sellerOrganizationMembers.findUnique({ where: { id: memberId } });
+    return prisma.sellerOrganizationMembers.findUnique({
+      where: { id: memberId },
+      include: memberInclude,
+    });
   }
 
   static findMembership(orgId: string, userId: string) {
     return prisma.sellerOrganizationMembers.findUnique({
-      where: { sellerOrganizationId_userId: { sellerOrganizationId: orgId, userId } },
+      where: { sellerId_userId: { sellerId: orgId, userId } },
+      include: memberInclude,
     });
   }
 
+  /**
+   * Store assignments live on the member row as `assignedStoreIds`, so creating
+   * a member is a single insert — the transaction the old join table needed is
+   * gone.
+   */
   static createMember(data: {
-    sellerOrganizationId: string;
+    sellerId: string;
     userId: string;
-    role: SellerOrgRole;
+    role: SellerOrgRoleName;
     storeIds: string[];
     permissions: string[];
   }) {
-    return prisma.$transaction(async (tx) => {
-      const member = await tx.sellerOrganizationMembers.create({
-        data: {
-          sellerOrganizationId: data.sellerOrganizationId,
-          userId: data.userId,
-          role: data.role,
-          permissions: data.permissions,
-        },
-      });
-      if (data.storeIds.length > 0) {
-        await tx.sellerOrganizationMemberStores.createMany({
-          data: data.storeIds.map((storeId) => ({ memberId: member.id, storeId })),
-        });
-      }
-      return member;
+    return prisma.sellerOrganizationMembers.create({
+      data: {
+        sellerId: data.sellerId,
+        userId: data.userId,
+        role: data.role,
+        permissions: data.permissions,
+        assignedStoreIds: data.storeIds,
+      },
+      include: memberInclude,
     });
   }
 
-  static async updateMember(
+  static updateMember(
     memberId: string,
-    data: { role?: SellerOrgRole; storeIds?: string[]; permissions?: string[] },
+    data: { role?: SellerOrgRoleName; storeIds?: string[]; permissions?: string[] },
   ) {
-    return prisma.$transaction(async (tx) => {
-      if (data.role !== undefined || data.permissions !== undefined) {
-        await tx.sellerOrganizationMembers.update({
-          where: { id: memberId },
-          data: {
-            ...(data.role !== undefined ? { role: data.role } : {}),
-            ...(data.permissions !== undefined ? { permissions: data.permissions } : {}),
-          },
-        });
-      }
-      if (data.storeIds !== undefined) {
-        await tx.sellerOrganizationMemberStores.deleteMany({ where: { memberId } });
-        if (data.storeIds.length > 0) {
-          await tx.sellerOrganizationMemberStores.createMany({
-            data: data.storeIds.map((storeId) => ({ memberId, storeId })),
-          });
-        }
-      }
-      return tx.sellerOrganizationMembers.findUnique({
-        where: { id: memberId },
-        include: {
-          user: { select: { id: true, email: true, firstName: true, lastName: true } },
-          assignedStores: { select: { storeId: true } },
-        },
-      });
+    return prisma.sellerOrganizationMembers.update({
+      where: { id: memberId },
+      data: {
+        ...(data.role !== undefined ? { role: data.role } : {}),
+        ...(data.permissions !== undefined ? { permissions: data.permissions } : {}),
+        ...(data.storeIds !== undefined ? { assignedStoreIds: data.storeIds } : {}),
+      },
+      include: memberInclude,
     });
   }
 
@@ -105,11 +111,12 @@ export default class OrganizationRepository {
   }
 
   /**
-   * Idempotently create a seller organization for a brand-new seller: the org,
-   * the seller binding, and the owner's `SELLER_ADMIN` membership. Must run
-   * inside the same transaction that creates the seller so the seller always
-   * receives `sellerOrganizationId`. Roles are a fixed enum, not rows, so there
-   * is nothing else to provision.
+   * Idempotently provision the organization side of a brand-new seller.
+   *
+   * The `Sellers` row *is* the organization, so there is no org record to create
+   * and no binding to write — only the owner's `SELLER_ADMIN` membership and the
+   * organization's display name. Returns the organization id, which is the
+   * seller id.
    */
   static async ensureSellerOrganization(
     tx: Prisma.TransactionClient,
@@ -118,33 +125,23 @@ export default class OrganizationRepository {
     const seller = await tx.sellers.findUnique({ where: { id: input.sellerId } });
     if (!seller) throw new Error(`Seller ${input.sellerId} not found during org creation`);
 
-    const orgId =
-      seller.sellerOrganizationId ??
-      (
-        await tx.sellerOrganizations.create({
-          data: { ownerId: input.userId, name: input.orgName },
-        })
-      ).id;
-
-    if (!seller.sellerOrganizationId) {
+    if (!seller.organizationName) {
       await tx.sellers.update({
         where: { id: input.sellerId },
-        data: { sellerOrganizationId: orgId },
+        data: { organizationName: input.orgName },
       });
     }
 
     await tx.sellerOrganizationMembers.upsert({
-      where: {
-        sellerOrganizationId_userId: { sellerOrganizationId: orgId, userId: input.userId },
-      },
-      update: { role: SellerOrgRole.SELLER_ADMIN },
+      where: { sellerId_userId: { sellerId: input.sellerId, userId: input.userId } },
+      update: { role: SYSTEM_ROLES.SELLER_ADMIN },
       create: {
-        sellerOrganizationId: orgId,
+        sellerId: input.sellerId,
         userId: input.userId,
-        role: SellerOrgRole.SELLER_ADMIN,
+        role: SYSTEM_ROLES.SELLER_ADMIN,
       },
     });
 
-    return orgId;
+    return input.sellerId;
   }
 }

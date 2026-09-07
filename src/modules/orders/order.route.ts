@@ -3,6 +3,7 @@ import OrderController from './order.controller';
 import { authenticate } from '../../middleware/auth.middleware';
 import { requireAdmin } from '../../middleware/admin.middleware';
 import { requireSellerFeature } from '../../middleware/sellerOrg.middleware';
+import { PERMISSIONS } from '../../constants/permissions.constant';
 
 const router = express.Router();
 
@@ -19,18 +20,28 @@ router.get('/admin', authenticate, requireAdmin, OrderController.allOrders);
 router.get(
   '/store/stats',
   authenticate,
-  requireSellerFeature('orders'),
+  requireSellerFeature(PERMISSIONS.ORDERS_PROCESS),
   OrderController.storeOrderStats,
 );
-router.get('/store', authenticate, requireSellerFeature('orders'), OrderController.storeOrders);
-router.patch('/complete', authenticate, requireSellerFeature('orders'), OrderController.complete);
+router.get(
+  '/store',
+  authenticate,
+  requireSellerFeature(PERMISSIONS.ORDERS_PROCESS),
+  OrderController.storeOrders,
+);
+router.patch(
+  '/complete',
+  authenticate,
+  requireSellerFeature(PERMISSIONS.ORDERS_PROCESS),
+  OrderController.complete,
+);
 // Cash on Pickup only: seller generates a short-lived code, buyer confirms
 // it to complete the order — the flipped counterpart of /complete, which
 // every other payment method still uses (seller marks it complete directly).
 router.post(
   '/cash-pickup/generate-code',
   authenticate,
-  requireSellerFeature('orders'),
+  requireSellerFeature(PERMISSIONS.ORDERS_PROCESS),
   OrderController.generateCashPickupCode,
 );
 // The BUYER is the actor here and on /cancel — both resolve a `Buyers` row and
@@ -40,7 +51,7 @@ router.patch('/cancel', authenticate, OrderController.cancel);
 router.patch(
   '/status',
   authenticate,
-  requireSellerFeature('orders'),
+  requireSellerFeature(PERMISSIONS.ORDERS_PROCESS),
   OrderController.updateFulfillmentStatus,
 );
 

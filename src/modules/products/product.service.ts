@@ -69,7 +69,7 @@ export default class ProductService {
       throw { status: 404, message: 'Store not found.' };
     }
 
-    if (store.sellerOrganizationId !== context.organizationId) {
+    if (store.sellerId !== context.organizationId) {
       throw { status: 404, message: 'Store not found.' };
     }
 
@@ -286,7 +286,7 @@ export default class ProductService {
       throw { status: 403, message: 'Not a member of a seller organization.' };
     }
     const store = await ProductRepository.getStoreById(storeId);
-    if (!store || store.sellerOrganizationId !== context.organizationId) {
+    if (!store || store.sellerId !== context.organizationId) {
       throw { status: 404, message: 'Store not found.' };
     }
     if (!context.isAdmin && context.assignedStoreIds) {

@@ -154,7 +154,6 @@ export default class AgentService {
 
     const store = await StoreService.createStoreWithDocuments(
       sellerId,
-      seller.sellerOrganizationId ?? '',
       data.storeData,
       data.locationData,
       data.hoursData,

@@ -4,6 +4,7 @@ import {
   SELLER_FEATURES,
   isSellerFeature,
 } from '../../src/modules/organization/sellerPermissions.constant';
+import { PERMISSIONS } from '../../src/constants/permissions.constant';
 
 /**
  * Drift guard on the `requireSellerFeature` gates wired into route files.
@@ -14,7 +15,8 @@ import {
  * `SellerFeature`, but a raw cast or a widened type slips through). And a code
  * in the catalogue that no route enforces is a checkbox in the team UI that
  * grants nothing — exactly the "nav-gating only" trap `returns`/`payouts` were
- * kept out of the catalogue to avoid.
+ * kept out of the catalogue to avoid. Since the seller codes moved into the
+ * shared PERMISSIONS catalogue, every gate must resolve to one of them.
  *
  * Modelled on permission.gates.test.ts, which does the same job for the
  * platform-level `requirePermission` codes.
@@ -33,7 +35,17 @@ const routeFiles = walk(MODULES_DIR).filter((f) => f.endsWith('.route.ts'));
 
 const gatesIn = (file: string): string[] => {
   const source = fs.readFileSync(file, 'utf8');
-  return [...source.matchAll(/requireSellerFeature\(\s*['"]([^'"]+)['"]\s*\)/g)].map((m) => m[1]);
+  const codes: string[] = [];
+
+  for (const match of source.matchAll(/requireSellerFeature\(\s*PERMISSIONS\.([A-Z_]+)\s*\)/g)) {
+    codes.push(PERMISSIONS[match[1] as keyof typeof PERMISSIONS]);
+  }
+  // A raw string literal bypasses the constant, so catch those too — that is
+  // exactly the path a stale pre-merge slug like 'products' would come back in.
+  for (const match of source.matchAll(/requireSellerFeature\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+    codes.push(match[1]);
+  }
+  return codes;
 };
 
 const gatedRoutes = routeFiles
@@ -55,11 +67,28 @@ describe('seller feature gates', () => {
     expect(unknown).toEqual([]);
   });
 
-  it('enforces the three codes that gate real seller endpoints', () => {
-    // `sales_review` and `customer_review` are deliberately nav-only: analytics
-    // is a stub and reviews are read-only, so neither guards a mutation. If a
-    // write endpoint appears for either, gate it and move it up to this list.
-    expect([...enforcedCodes].sort()).toEqual(['orders', 'products', 'promotions']);
+  it('enforces every seller code on a real endpoint', () => {
+    // The pre-merge catalogue carried `sales_review` and `customer_review`,
+    // which gated nothing. They are gone, so the catalogue and the enforced set
+    // are now the same list with nothing knowingly left over.
+    expect([...enforcedCodes].sort()).toEqual([...SELLER_FEATURES].sort());
+  });
+
+  it('never gates a catalogue mutation on the read-only code', () => {
+    // A SELLER_MEMBER holds products.view but not products.edit. Gating a write
+    // route on the read code would hand every member write access to the
+    // catalog, and nothing else in the suite would notice.
+    for (const file of ['products/product.route.ts', 'inventory/inventory.route.ts']) {
+      const source = fs.readFileSync(path.join(MODULES_DIR, file), 'utf8');
+      const writeBlocks = source
+        .split(/router\./)
+        .filter((block) => /^(post|put|patch|delete)\(/.test(block));
+
+      expect(writeBlocks.length).toBeGreaterThan(0);
+      for (const block of writeBlocks) {
+        expect(block).not.toContain('PERMISSIONS.PRODUCTS_VIEW');
+      }
+    }
   });
 
   it('leaves buyer-facing order routes ungated', () => {
@@ -74,10 +103,7 @@ describe('seller feature gates', () => {
     }
   });
 
-  it('keeps every catalogue code either enforced or knowingly nav-only', () => {
-    const navOnly = ['sales_review', 'customer_review'];
-    const accountedFor = new Set([...enforcedCodes, ...navOnly]);
-
-    expect(SELLER_FEATURES.filter((code) => !accountedFor.has(code))).toEqual([]);
+  it('leaves no catalogue code unenforced', () => {
+    expect(SELLER_FEATURES.filter((code) => !enforcedCodes.has(code))).toEqual([]);
   });
 });
