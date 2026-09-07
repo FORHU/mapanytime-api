@@ -3,7 +3,12 @@ import {
   NON_ADMIN_ROLE_PERMISSIONS,
   type SellerOrgPermissionCode,
 } from '../../constants/permissions.constant';
-import { type SellerOrgRoleName } from '../../constants/roles.constant';
+import {
+  SELLER_ORG_ROLES,
+  SELLER_ORG_ROLE_LABELS,
+  SYSTEM_ROLES,
+  type SellerOrgRoleName,
+} from '../../constants/roles.constant';
 
 /**
  * Seller-organization member feature codes, sourced from the global platform
@@ -31,6 +36,60 @@ export const DEFAULT_PERMISSIONS_BY_ROLE: Record<SellerOrgRoleName, readonly Sel
 
 export function isSellerFeature(code: string): code is SellerFeature {
   return (SELLER_FEATURES as readonly string[]).includes(code);
+}
+
+/**
+ * Seller-facing wording for each feature code.
+ *
+ * Deliberately not `SYSTEM_PERMISSIONS[].name`: those strings label the rows of
+ * the platform RBAC matrix at `/admin/permissions`, and rewording them for the
+ * seller team page would change an unrelated screen.
+ */
+export const SELLER_FEATURE_LABELS: Record<SellerFeature, string> = {
+  'orders.process': 'Process orders',
+  'products.view': 'View products & stock',
+  'products.edit': 'Edit products & stock',
+  'promotions.add': 'Promotions & ads',
+};
+
+export interface SellerCatalogue {
+  features: { code: SellerFeature; label: string }[];
+  roles: { name: SellerOrgRoleName; label: string; isAdmin: boolean }[];
+  defaultsByRole: Record<SellerOrgRoleName, SellerFeature[]>;
+}
+
+/**
+ * The vocabulary the team UI renders: which features exist, which roles can be
+ * assigned, and what each role starts with.
+ *
+ * Served on `/seller/org/context` so the web stops keeping a hand-maintained
+ * copy. It kept one, the two drifted, and the fallout was a 400 on every role
+ * save and a checkbox grid whose codes no route had ever checked. The client
+ * cannot validate this vocabulary anyway — `normalizePermissions` and the Joi
+ * role schema are the only things that decide what is acceptable — so it has no
+ * business holding a second opinion about it.
+ *
+ * Feature order is `SELLER_FEATURES` order, which the UI preserves so the grid
+ * does not reshuffle as boxes are ticked. Roles are `SELLER_ORG_ROLES` order,
+ * which runs most- to least-privileged — the create-staff form relies on that to
+ * default a new hire to the narrowest role.
+ */
+export function buildSellerCatalogue(): SellerCatalogue {
+  return {
+    features: SELLER_FEATURES.map((code) => ({ code, label: SELLER_FEATURE_LABELS[code] })),
+    roles: SELLER_ORG_ROLES.map((name) => ({
+      name,
+      label: SELLER_ORG_ROLE_LABELS[name],
+      // Admins hold every feature implicitly, which is why the grid hides
+      // itself for them rather than showing four ticked, uneditable boxes.
+      isAdmin: name === SYSTEM_ROLES.SELLER_ADMIN,
+    })),
+    defaultsByRole: {
+      SELLER_ADMIN: defaultPermissionsForRole(SYSTEM_ROLES.SELLER_ADMIN),
+      SELLER_MANAGER: defaultPermissionsForRole(SYSTEM_ROLES.SELLER_MANAGER),
+      SELLER_MEMBER: defaultPermissionsForRole(SYSTEM_ROLES.SELLER_MEMBER),
+    },
+  };
 }
 
 export function defaultPermissionsForRole(role: SellerOrgRoleName): SellerFeature[] {
