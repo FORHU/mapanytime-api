@@ -36,9 +36,16 @@
 name: Deploy Staging
 
 on:
+  # Fires when CI finishes on `staging` — which is this repo's default branch and
+  # where every PR actually merges.
+  #
+  # This used to watch `main`. Nothing has landed on `main` in 25 commits, so the
+  # trigger never fired and staging could only be deployed by hand; the branch
+  # looks abandoned rather than release-bearing. CI already runs on pushes to
+  # `staging`, so this needs no change on the CI side.
   workflow_run:
     workflows: ['CI']
-    branches: [main]
+    branches: [staging]
     types: [completed]
   workflow_dispatch:
     inputs:
