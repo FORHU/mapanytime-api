@@ -117,21 +117,46 @@ model PasswordResetTokens {
   @@index([expiresAt])
 }
 
+/// One link in a refresh-token chain.
+///
+/// The row no longer holds the refresh token. It holds `jti` — the token's own
+/// identifier, which is what a presented token is now looked up by — and
+/// `refreshTokenHash`, which only proves a presented token is the one this row
+/// was issued for. Neither can be replayed as a credential, so read access to
+/// this table stops being equivalent to holding every live session (F100/F101).
+///
+/// Rows are retained after use rather than deleted, because a consumed row is
+/// the only evidence that lets a replayed token be told apart from an unknown
+/// one. `familyId` ties a chain together so the whole chain can be revoked at
+/// once when that happens (F103). Retention means pruning is now required —
+/// expired rows have no reader and belong to the sweeper work in F44/F52/F91.
 model Session {
-  id             String    @id @default(cuid())
-  userId         String
-  createdAt      DateTime  @default(now())
-  expiresAt      DateTime?
-  refreshToken   String?   @unique
-  provider       String
-  accessToken    String?
-  avatarUrl      String?
-  providerUserId String?
-  scopes         String?
-  updatedAt      DateTime  @updatedAt
-  users          Users     @relation(fields: [userId], references: [id])
+  id               String    @id @default(cuid())
+  userId           String
+  createdAt        DateTime  @default(now())
+  expiresAt        DateTime?
+  /// Token identifier, from the refresh JWT's `jti` claim. The lookup key.
+  jti              String?   @unique
+  /// SHA-256 of the refresh token. A verifier, never a credential.
+  refreshTokenHash String?   @unique
+  /// Shared by every token rotated from one login. Revoked as a unit on replay.
+  familyId         String?
+  /// Set the instant this token is claimed. The atomic-consumption latch (F102).
+  usedAt           DateTime?
+  /// Set when the chain is torn down — logout, or replay of a consumed token.
+  revokedAt        DateTime?
+  /// The `jti` this one rotated into. Makes a chain walkable after the fact.
+  replacedByJti    String?
+  provider         String
+  avatarUrl        String?
+  providerUserId   String?
+  scopes           String?
+  updatedAt        DateTime  @updatedAt
+  users            Users     @relation(fields: [userId], references: [id])
 
   @@unique([provider, providerUserId])
+  @@index([familyId])
+  @@index([userId, expiresAt])
 }
 
 model Files {

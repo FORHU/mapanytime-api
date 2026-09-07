@@ -1,6 +1,8 @@
+import jwt from 'jsonwebtoken';
 import AuthSvc from '../../src/modules/auth/auth.service';
 import AuthRepo from '../../src/modules/auth/auth.repository';
 import CacheUtil from '../../src/utils/cache.util';
+import { REFRESH_TOKEN_SECRET } from '../../src/config';
 
 jest.mock('../../src/modules/auth/auth.repository');
 jest.mock('../../src/utils/cache.util', () => ({
@@ -16,10 +18,17 @@ jest.mock('../../src/utils/prisma', () => ({ prisma: {} }));
 const mockRepo = AuthRepo as jest.Mocked<typeof AuthRepo>;
 const USER_ID = 'user-1';
 
+/** A refresh token that will actually verify, so logout gets as far as the repo. */
+const signedToken = (jti = 'jti-1') =>
+  jwt.sign({ userId: USER_ID, jti, familyId: 'fam-1' }, REFRESH_TOKEN_SECRET, {
+    expiresIn: '30d',
+  });
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockRepo.updateActiveSession.mockResolvedValue({} as never);
-  mockRepo.deleteSession.mockResolvedValue({ count: 0 } as never);
+  mockRepo.findSessionByJti.mockResolvedValue({ familyId: 'fam-1' } as never);
+  mockRepo.revokeFamily.mockResolvedValue(1 as never);
 });
 
 /**
@@ -33,45 +42,63 @@ describe('AuthSvc.logout', () => {
     await expect(AuthSvc.logout(USER_ID)).resolves.toBeDefined();
 
     expect(mockRepo.updateActiveSession).toHaveBeenCalledWith(USER_ID, null);
-    expect(mockRepo.deleteSession).not.toHaveBeenCalled();
+    expect(mockRepo.revokeFamily).not.toHaveBeenCalled();
   });
 
   it('succeeds when the refresh token matches no session row', async () => {
-    mockRepo.deleteSession.mockResolvedValue({ count: 0 } as never);
+    mockRepo.findSessionByJti.mockResolvedValue(null as never);
 
-    await expect(AuthSvc.logout(USER_ID, 'already-revoked-token')).resolves.toBeDefined();
+    await expect(AuthSvc.logout(USER_ID, signedToken())).resolves.toBeDefined();
 
     expect(mockRepo.updateActiveSession).toHaveBeenCalledWith(USER_ID, null);
+    expect(mockRepo.revokeFamily).not.toHaveBeenCalled();
+  });
+
+  it('succeeds when the refresh token is unparseable rather than merely stale', async () => {
+    // A token that cannot even be verified must not turn logout into an error — the
+    // authoritative revocation does not depend on it.
+    await expect(AuthSvc.logout(USER_ID, 'not-a-jwt')).resolves.toBeDefined();
+
+    expect(mockRepo.updateActiveSession).toHaveBeenCalledWith(USER_ID, null);
+    expect(mockRepo.revokeFamily).not.toHaveBeenCalled();
+  });
+
+  it('revokes the whole refresh family, not just the presented link', async () => {
+    // Retiring one row would leave its already-rotated successors alive to mint fresh
+    // access tokens, so logout would not actually end the session.
+    await AuthSvc.logout(USER_ID, signedToken());
+
+    expect(mockRepo.revokeFamily).toHaveBeenCalledWith('fam-1', USER_ID);
   });
 
   it('is safe to call twice', async () => {
-    await AuthSvc.logout(USER_ID, 'token');
-    await expect(AuthSvc.logout(USER_ID, 'token')).resolves.toBeDefined();
+    await AuthSvc.logout(USER_ID, signedToken());
+    await expect(AuthSvc.logout(USER_ID, signedToken())).resolves.toBeDefined();
 
     expect(mockRepo.updateActiveSession).toHaveBeenCalledTimes(2);
   });
 
-  it('kills the active session before tidying up the refresh row', async () => {
+  it('kills the active session before tearing down the refresh family', async () => {
     // Clearing activeSessionId is the authoritative revocation — authenticate() checks
-    // it on every request. If the refresh-row delete runs first and fails, the old order
+    // it on every request. If the family teardown runs first and fails, the old order
     // left a fully live session behind.
     const order: string[] = [];
     mockRepo.updateActiveSession.mockImplementation(async () => {
       order.push('updateActiveSession');
       return {} as never;
     });
-    mockRepo.deleteSession.mockImplementation(async () => {
-      order.push('deleteSession');
-      return { count: 1 } as never;
+    mockRepo.revokeFamily.mockImplementation(async () => {
+      order.push('revokeFamily');
+      return 1 as never;
     });
 
-    await AuthSvc.logout(USER_ID, 'token');
+    await AuthSvc.logout(USER_ID, signedToken());
 
-    expect(order).toEqual(['updateActiveSession', 'deleteSession']);
+    expect(order).toEqual(['updateActiveSession', 'revokeFamily']);
   });
 
   it('drops the cached user so a stale copy cannot outlive the session', async () => {
-    await AuthSvc.logout(USER_ID, 'token');
+    await AuthSvc.logout(USER_ID, signedToken());
 
     expect(CacheUtil.del).toHaveBeenCalledWith(`user:${USER_ID}`);
   });
@@ -81,6 +108,6 @@ describe('AuthSvc.logout', () => {
     // session really is still alive and saying "logged out" would be a lie.
     mockRepo.updateActiveSession.mockRejectedValue(new Error('db down') as never);
 
-    await expect(AuthSvc.logout(USER_ID, 'token')).rejects.toThrow('db down');
+    await expect(AuthSvc.logout(USER_ID, signedToken())).rejects.toThrow('db down');
   });
 });
