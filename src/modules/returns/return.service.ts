@@ -44,7 +44,10 @@ export default class ReturnService {
    * Resolves the `Buyers` row for an authenticated `Users` id. `Orders.buyerId`
    * and `ReturnRequests.buyerId` both reference `Buyers`, never `Users`.
    */
-  private static async resolveBuyerId(userId: string) {
+  private static async resolveBuyerId(userId?: string) {
+    if (!userId) {
+      throw { status: 401, message: 'Unauthorized.' };
+    }
     const buyer = await prisma.buyers.findUnique({ where: { userId } });
     if (!buyer) {
       throw { status: 403, message: 'Only registered buyers can request a return.' };
@@ -52,7 +55,7 @@ export default class ReturnService {
     return buyer.id;
   }
 
-  static async createReturnRequest(payload: { orderId: string; userId: string; reason: string }) {
+  static async createReturnRequest(payload: { orderId: string; userId?: string; reason: string }) {
     const buyerId = await this.resolveBuyerId(payload.userId);
 
     const order = await prisma.orders.findUnique({
@@ -120,7 +123,7 @@ export default class ReturnService {
   }
 
   /** [userId] is the authenticated `Users` id, resolved to its buyer profile. */
-  static async getReturnsByBuyer(userId: string) {
+  static async getReturnsByBuyer(userId?: string) {
     const buyerId = await this.resolveBuyerId(userId);
     return ReturnRepository.findByBuyerId(buyerId);
   }

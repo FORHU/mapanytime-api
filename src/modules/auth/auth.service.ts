@@ -13,6 +13,9 @@ import {
   REFRESH_TOKEN_GRACE_MS,
 } from '../../config';
 import CacheUtil from '../../utils/cache.util';
+import { resolveOrgContext } from '../organization/orgContext';
+import OrganizationRepository from '../organization/organization.repository';
+import type { AuthUser } from './auth.repository';
 import logger from '../../utils/logger';
 import { publish } from '../../infrastructure/rabbitmq/publisher';
 import { ROUTING_KEYS } from '../../events/routing-keys';
@@ -168,6 +171,15 @@ export default class AuthSvc {
       if (data.roleName === 'SELLER') {
         const seller = await tx.sellers.create({
           data: { userId: user.id },
+        });
+
+        // Every seller belongs to exactly one seller organization. Create it
+        // (plus system roles and the owner's admin membership) in the same
+        // transaction so a never-onboarded seller is always scoped.
+        await OrganizationRepository.ensureSellerOrganization(tx, {
+          sellerId: seller.id,
+          userId: user.id,
+          orgName: `${displayName}'s Organization`,
         });
 
         // Also create a buyer profile for the seller
@@ -377,6 +389,33 @@ export default class AuthSvc {
    * enumeration oracle, which is a worse leak than the inconvenience it saves.
    * See FLAGS.md ID-6.
    */
+  /**
+   * Store a reset code for a user and retire any still outstanding.
+   *
+   * Shared by the self-service forgot-password flow and by staff-account
+   * creation, so there is exactly one place that decides how a code is hashed
+   * and expired. `resetPassword` verifies whatever lands here, so the code
+   * itself does not have to be four digits — staff setup uses a long random
+   * one, because an admin relays it by hand and it lives for days rather than
+   * minutes.
+   */
+  static async storeResetCode(userId: string, code: string, ttlMinutes: number) {
+    // Any code already outstanding is retired, so a user who asks twice cannot
+    // be confused about which of two live codes to type.
+    await prisma.passwordResetTokens.updateMany({
+      where: { userId, consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
+
+    await prisma.passwordResetTokens.create({
+      data: {
+        userId,
+        codeHash: this.hashResetCode(code),
+        expiresAt: new Date(Date.now() + ttlMinutes * 60 * 1000),
+      },
+    });
+  }
+
   static async requestPasswordReset(email: string) {
     const genericResponse = {
       message: 'If an account exists for that address, a reset code has been sent.',
@@ -388,25 +427,12 @@ export default class AuthSvc {
       return genericResponse;
     }
 
-    // Any code already outstanding is retired, so a user who asks twice cannot
-    // be confused about which of two live codes to type.
-    await prisma.passwordResetTokens.updateMany({
-      where: { userId: user.id, consumedAt: null },
-      data: { consumedAt: new Date() },
-    });
-
     // 4 digits, to match the client's OTP field. Short codes are only safe
     // because they expire fast and the attempt counter closes them — see
     // MAX_RESET_ATTEMPTS in resetPassword.
     const code = String(crypto.randomInt(0, 10000)).padStart(4, '0');
 
-    await prisma.passwordResetTokens.create({
-      data: {
-        userId: user.id,
-        codeHash: this.hashResetCode(code),
-        expiresAt: new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000),
-      },
-    });
+    await this.storeResetCode(user.id, code, PASSWORD_RESET_TTL_MINUTES);
 
     await publish(ROUTING_KEYS.EMAIL_SEND_REQUESTED, {
       userId: user.id,
@@ -643,6 +669,22 @@ export default class AuthSvc {
       roles: safeUser.roles?.map((r) => r.roleName) || [],
     };
 
+    // The seller-organization context for the current user's active org — used
+    // by the web/mobile dashboards for the "Selected Store" dropdown and to
+    // decide whether the seller is an admin (all stores) or a scoped member.
+    const orgCtx = resolveOrgContext(user as AuthUser);
+    const orgContext = orgCtx.organizationId
+      ? {
+          organizationId: orgCtx.organizationId,
+          role: orgCtx.role,
+          isAdmin: orgCtx.isAdmin,
+          // Decides the post-login destination: staff never belong in merchant
+          // onboarding, whatever their org role.
+          isOwner: orgCtx.isOwner,
+          assignedStoreIds: orgCtx.isAdmin ? null : (orgCtx.assignedStoreIds ?? []),
+        }
+      : null;
+
     return {
       accessToken,
       refreshToken,
@@ -657,6 +699,7 @@ export default class AuthSvc {
             hasStores,
           }
         : null,
+      orgContext,
       location: { country: user.countryCode },
     };
   }

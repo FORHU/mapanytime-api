@@ -7,7 +7,14 @@ const userInclude = {
   seller: {
     include: { stores: true },
   },
+  // No include: `role`, `permissions` and `assignedStoreIds` are all scalar
+  // columns on the membership row, so everything `resolveOrgContext` and
+  // `requireSellerFeature` need arrives with the row. Both run on every seller
+  // request and stay query-free by construction rather than by care.
+  orgMemberships: true,
 } satisfies Prisma.UsersInclude;
+
+export type AuthUser = Prisma.UsersGetPayload<{ include: typeof userInclude }>;
 
 export default class AuthRepo {
   static async createUser(data: Prisma.UsersCreateInput) {

@@ -23,6 +23,8 @@ import SettlementService from '../settlements/settlement.service';
 import RewardService from '../rewards/reward.service';
 import InventoryStockRepository from '../inventory/inventoryStock.repository';
 import NotificationService from '../notifications/notification.service';
+import { assertStoreInScope, resolveAccessibleStoreIds } from '../organization/storeAccess';
+import type { AuthUser } from '../auth/auth.repository';
 import logger from '../../utils/logger';
 
 /**
@@ -415,17 +417,29 @@ export default class OrderService {
     return order;
   }
 
-  static async completeOrder(userId: string, orderId: string, storeId: string) {
-    const seller = await ProductRepository.getSellerByUserId(userId);
-    if (!seller || seller.applicationStatus !== 'APPROVED') {
-      throw { status: 403, message: 'User is not an approved seller profile.' };
-    }
+  /**
+   * A seller marks an order fulfilled.
+   *
+   * Organization-scoped: an assigned `SELLER_USER` fulfils orders for their
+   * store, not just the merchant who owns it. The old check compared the
+   * caller's own `Sellers.id` against `store.sellerId`, which staff can never
+   * match.
+   */
+  static async completeOrder(user: AuthUser, orderId: string, storeId: string) {
+    await assertStoreInScope(user, storeId);
+    return this.completeOrderInternal(orderId, storeId);
+  }
 
-    const store = await ProductRepository.getStoreById(storeId);
-    if (!store || store.sellerId !== seller.id) {
-      throw { status: 403, message: 'You do not have administrative access to this branch.' };
-    }
-
+  /**
+   * The completion work itself, with no actor check — callers must already have
+   * established authority.
+   *
+   * Two do, differently: {@link completeOrder} by proving the caller may
+   * operate the store, and {@link confirmCashPickup} by the BUYER presenting a
+   * valid single-use code. The buyer is the actor in that second case, so a
+   * seller-scope check there would always fail; the code is the authorization.
+   */
+  private static async completeOrderInternal(orderId: string, storeId: string) {
     // Populated inside the transaction, read after it commits — see below.
     const lowStockAlerts: { productId: string; productName: string; quantityOnHand: number }[] = [];
 
@@ -433,7 +447,7 @@ export default class OrderService {
       const order = await OrderRepository.getOrderById(orderId, tx);
 
       if (!order) throw new Error('Order not found.');
-      if (order.storeId !== storeId) throw new Error('Unauthorized store fulfillment.');
+      if (order.storeId !== storeId) throw new Error('No access to this store for fulfillment.');
 
       validateOrderTransition(order.status, 'COMPLETED');
 
@@ -535,10 +549,15 @@ export default class OrderService {
       return completed;
     });
 
-    for (const alert of lowStockAlerts) {
+    // The store's OWNER, not whoever completed the order. A SELLER_USER can now
+    // fulfil an order, and low stock is the merchant's problem to act on.
+    const storeOwner = lowStockAlerts.length ? await ProductRepository.getStoreById(storeId) : null;
+    const ownerUserId = storeOwner?.seller?.userId ?? '';
+
+    for (const alert of ownerUserId ? lowStockAlerts : []) {
       try {
         await NotificationService.sendNotification({
-          userId: seller.userId,
+          userId: ownerUserId,
           title: 'Low stock alert',
           body: `${alert.productName} is down to ${alert.quantityOnHand} unit${alert.quantityOnHand === 1 ? '' : 's'} left.`,
           metadata: {
@@ -564,16 +583,8 @@ export default class OrderService {
    * changed hands; see {@link confirmCashPickup}, which is the only thing
    * that can spend this code.
    */
-  static async generateCashPickupCode(userId: string, orderId: string, storeId: string) {
-    const seller = await ProductRepository.getSellerByUserId(userId);
-    if (!seller || seller.applicationStatus !== 'APPROVED') {
-      throw { status: 403, message: 'User is not an approved seller profile.' };
-    }
-
-    const store = await ProductRepository.getStoreById(storeId);
-    if (!store || store.sellerId !== seller.id) {
-      throw { status: 403, message: 'You do not have administrative access to this branch.' };
-    }
+  static async generateCashPickupCode(user: AuthUser, orderId: string, storeId: string) {
+    await assertStoreInScope(user, storeId);
 
     const order = await OrderRepository.getOrderById(orderId, prisma);
     if (!order) throw { status: 404, message: 'Order not found.' };
@@ -624,7 +635,7 @@ export default class OrderService {
     const order = await OrderRepository.getOrderById(orderId, prisma);
     if (!order) throw { status: 404, message: 'Order not found.' };
     if (order.buyerId !== buyer.id) {
-      throw { status: 403, message: 'Unauthorized. You do not own this order.' };
+      throw { status: 403, message: 'You do not have access to this order.' };
     }
 
     const payment = await prisma.payments.findFirst({
@@ -677,10 +688,9 @@ export default class OrderService {
       // be silently retried; the seller can just generate a fresh one.
       await RedisUtil.client.del(cashPickupCodeKey(orderId));
 
-      const store = await ProductRepository.getStoreById(order.storeId);
-      if (!store) throw { status: 404, message: 'Store not found.' };
-
-      return await this.completeOrder(store.seller.userId, orderId, order.storeId);
+      // No scope check: the buyer is the actor here, and the code they just
+      // presented is the authorization.
+      return await this.completeOrderInternal(orderId, order.storeId);
     } finally {
       await RedisUtil.client.del(lockKey);
     }
@@ -702,7 +712,7 @@ export default class OrderService {
 
     if (!order) throw { status: 404, message: 'Order not found.' };
     if (order.buyerId !== buyer.id) {
-      throw { status: 403, message: 'Unauthorized. You do not own this order.' };
+      throw { status: 403, message: 'You do not have access to this order.' };
     }
 
     try {
@@ -848,31 +858,39 @@ export default class OrderService {
    * Resolves which of the seller's stores a request may read, enforcing
    * ownership. Shared by the paginated list and the stats endpoint.
    */
-  private static async resolveSellerStoreIds(userId: string, storeId?: string) {
-    const seller = await prisma.sellers.findUnique({
-      where: { userId: userId },
-      include: { stores: true },
-    });
+  /**
+   * The stores whose orders the caller may read.
+   *
+   * Two ownership models coexist. Organization membership is the current one —
+   * a `seller_admin` reaches every store the org owns, a `seller_user` only the
+   * stores explicitly assigned to them. Direct ownership through the caller's
+   * own `Sellers` row is the pre-organization one.
+   *
+   * The union of both is deliberate. Reading org membership alone would break
+   * any seller whose organization backfill never ran; reading direct ownership
+   * alone was the bug — org staff own no stores of their own, so a `seller_user`
+   * asking for a store legitimately assigned to them was refused.
+   */
+  private static async resolveSellerStoreIds(user: AuthUser, storeId?: string) {
+    const { storeIds, hasOrg, hasSellerRow } = await resolveAccessibleStoreIds(user);
 
-    if (!seller) {
+    if (!hasOrg && !hasSellerRow) {
       throw { status: 403, message: 'Only registered sellers can view store orders.' };
     }
 
-    const sellerStoreIds = seller.stores.map((s) => s.id);
-
     if (!storeId || storeId === 'ALL') {
-      return sellerStoreIds;
+      return storeIds;
     }
 
-    if (!sellerStoreIds.includes(storeId)) {
-      throw { status: 403, message: 'Unauthorized store access.' };
+    if (!storeIds.includes(storeId)) {
+      throw { status: 404, message: 'Store not found.' };
     }
 
     return [storeId];
   }
 
   static async getStoreOrders(
-    userId: string,
+    user: AuthUser,
     storeId: string | undefined,
     query: {
       status?: ORDERSTATUS;
@@ -883,7 +901,7 @@ export default class OrderService {
       skip: number;
     },
   ) {
-    const storeIds = await this.resolveSellerStoreIds(userId, storeId);
+    const storeIds = await this.resolveSellerStoreIds(user, storeId);
 
     // Filtering, searching, sorting and pagination all run in the database —
     // the client renders the page it asked for instead of post-processing
@@ -926,8 +944,8 @@ export default class OrderService {
     return buildPage(items, total, { page: query.page, limit: query.limit });
   }
 
-  static async getStoreOrderStats(userId: string, storeId?: string) {
-    const storeIds = await this.resolveSellerStoreIds(userId, storeId);
+  static async getStoreOrderStats(user: AuthUser, storeId?: string) {
+    const storeIds = await this.resolveSellerStoreIds(user, storeId);
 
     const { totalRevenue, statusCounts, lowStockCount } =
       await OrderRepository.getStoreOrderStats(storeIds);
@@ -941,7 +959,7 @@ export default class OrderService {
     };
   }
 
-  static async updateFulfillmentStatus(userId: string, orderId: string, inputStatus: string) {
+  static async updateFulfillmentStatus(user: AuthUser, orderId: string, inputStatus: string) {
     const statusUpper = (inputStatus || '').toUpperCase();
     let normalizedStatus: ORDERSTATUS;
 
@@ -969,18 +987,17 @@ export default class OrderService {
     validateOrderTransition(order.status, normalizedStatus);
 
     if (normalizedStatus === 'COMPLETED') {
-      return this.completeOrder(userId, orderId, order.storeId);
+      return this.completeOrder(user, orderId, order.storeId);
     }
     if (normalizedStatus === 'CANCELLED') {
-      return this.cancelOrder(userId, orderId);
+      // Pre-existing: cancelOrder is buyer-scoped (it requires a `Buyers` row
+      // and matches `order.buyerId`), so this branch has never worked for a
+      // seller of any kind. Left as-is — changing who may cancel is a separate
+      // decision from store scoping.
+      return this.cancelOrder(user.id, orderId);
     }
 
-    const seller = await prisma.sellers.findUnique({ where: { userId } });
-    if (!seller) throw { status: 403, message: 'Only registered sellers can update order status.' };
-    const store = await prisma.stores.findUnique({ where: { id: order.storeId } });
-    if (!store || store.sellerId !== seller.id) {
-      throw { status: 403, message: 'Unauthorized. You do not own the store for this order.' };
-    }
+    await assertStoreInScope(user, order.storeId);
 
     const updated = await OrderRepository.updateOrderStatus(orderId, normalizedStatus);
 

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from '../../utils/prisma';
 import StoreService from '../stores/store.service';
+import OrganizationRepository from '../organization/organization.repository';
 import logger from '../../utils/logger';
 
 type SellerRegistrationData = {
@@ -86,6 +87,12 @@ export default class AgentService {
           onboardingStep: 0,
           isOnboarded: false,
         },
+      });
+
+      await OrganizationRepository.ensureSellerOrganization(tx, {
+        sellerId: seller.id,
+        userId: user.id,
+        orgName: data.storeName || `${data.firstName} ${data.lastName}'s Organization`,
       });
 
       return { sellerId: seller.id, userId: user.id };

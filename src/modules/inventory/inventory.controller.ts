@@ -13,12 +13,14 @@ export default class InventoryController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+      // The whole user, not just the id: store scoping resolves the caller's
+      // seller-organization context from the memberships already loaded on it.
+      const user = req.user;
+      if (!user) return responseError(res, 401, 'Unauthorized access.');
 
       const productId = req.params.productId;
 
-      const data = await InventoryService.restock(userId, productId, value.addedQuantity);
+      const data = await InventoryService.restock(user, productId, value.addedQuantity);
       return responseSuccess(res, 200, data, 'Stock replenished successfully');
     } catch (error) {
       const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
@@ -39,12 +41,14 @@ export default class InventoryController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+      // The whole user, not just the id: store scoping resolves the caller's
+      // seller-organization context from the memberships already loaded on it.
+      const user = req.user;
+      if (!user) return responseError(res, 401, 'Unauthorized access.');
 
       const productId = req.params.productId;
 
-      const data = await InventoryService.adjust(userId, productId, value.targetQuantity);
+      const data = await InventoryService.adjust(user, productId, value.targetQuantity);
       return responseSuccess(res, 200, data, 'Stock adjusted successfully');
     } catch (error) {
       const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };

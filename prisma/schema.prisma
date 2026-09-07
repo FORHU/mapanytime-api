@@ -30,20 +30,21 @@ model Users {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  roles              Roles[]                 @relation("UserRoles")
-  avatarFile         Files?                  @relation("UserAvatar", fields: [avatarFileId], references: [id])
+  roles              Roles[]                     @relation("UserRoles")
+  avatarFile         Files?                      @relation("UserAvatar", fields: [avatarFileId], references: [id])
   session            Session[]
   passwordResets     PasswordResetTokens[]
   seller             Sellers?
-  reviewedSellers    Sellers[]               @relation("SellerReviewer")
+  reviewedSellers    Sellers[]                   @relation("SellerReviewer")
   buyer              Buyers?
   verifiedDocuments  DocumentVerifications[]
   sentAdminInvites   AdminInvites[]
   notifications      Notifications[]
-  reviewedProperties ProductProperties[]     @relation("PropertyReviewers")
-  reviewedStores     Stores[]                @relation("StoreReviewers")
-  userReferral       Users?                  @relation("UserReferrals", fields: [userReferralId], references: [id])
-  userReferrals      Users[]                 @relation("UserReferrals")
+  reviewedProperties ProductProperties[]         @relation("PropertyReviewers")
+  reviewedStores     Stores[]                    @relation("StoreReviewers")
+  userReferral       Users?                      @relation("UserReferrals", fields: [userReferralId], references: [id])
+  userReferrals      Users[]                     @relation("UserReferrals")
+  orgMemberships     SellerOrganizationMembers[]
 
   @@unique([userReferralId, id])
   @@index([userReferralId])
@@ -182,31 +183,50 @@ model Files {
 }
 
 model Sellers {
-  id                    String                  @id @default(cuid())
-  userId                String                  @unique
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
+  id                    String                      @id @default(cuid())
+  userId                String                      @unique
+  organizationName      String?
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime                    @updatedAt
   deletedAt             DateTime?
-  applicationStatus     ApplicationStatus       @default(PENDING)
+  applicationStatus     ApplicationStatus           @default(PENDING)
   rejectionReason       String?
   reviewedAt            DateTime?
   reviewedById          String?
   sellerPlan            String?
   agentNotes            String?
-  onboardingStep        Int                     @default(0)
-  isOnboarded           Boolean                 @default(false)
+  onboardingStep        Int                         @default(0)
+  isOnboarded           Boolean                     @default(false)
   onboardedAt           DateTime?
   documentVerifications DocumentVerifications[]
-  users                 Users                   @relation(fields: [userId], references: [id])
-  reviewedBy            Users?                  @relation("SellerReviewer", fields: [reviewedById], references: [id])
+  users                 Users                       @relation(fields: [userId], references: [id])
+  reviewedBy            Users?                      @relation("SellerReviewer", fields: [reviewedById], references: [id])
   stores                Stores[]
   supplierProducts      SupplierProducts[]
   settlements           Settlements[]
   payouts               SellerPayouts[]
   returnRequests        ReturnRequests[]
+  organizationMembers   SellerOrganizationMembers[]
 
   @@index([applicationStatus])
   @@index([reviewedAt])
+}
+
+model SellerOrganizationMembers {
+  id               String   @id @default(cuid())
+  sellerId         String
+  userId           String
+  role             String
+  permissions      String[] @default([])
+  assignedStoreIds String[] @default([])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  seller Sellers @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  user   Users   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sellerId, userId])
+  @@index([userId])
 }
 
 model PropertiesFiles {

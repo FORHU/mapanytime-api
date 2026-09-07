@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+﻿import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import S3Util from '../../utils/s3.util';
 import { liveWindowFilter } from '../merchantAds/adWindow';
@@ -54,7 +54,7 @@ interface NearbyRow {
   markerSubtitle: string | null;
 }
 
-// No hours row for today (isClosed is null) defaults to open — matches the
+// No hours row for today (isClosed is null) defaults to open â€” matches the
 // app's prior client-side default when hours are unknown.
 function isOpenNow(
   isClosed: boolean | null,
@@ -197,6 +197,14 @@ export default class StoreRepository {
   static async getStoresBySellerId(sellerId: string) {
     return prisma.stores.findMany({
       where: { sellerId: sellerId },
+      include: { storeLocations: true, primaryCategory: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  static async getStoresByScope(scope: Prisma.StoresWhereInput) {
+    return prisma.stores.findMany({
+      where: scope,
       include: { storeLocations: true, primaryCategory: true },
       orderBy: { createdAt: 'desc' },
     });

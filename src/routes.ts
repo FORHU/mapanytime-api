@@ -19,6 +19,7 @@ import rbacRoute from './modules/rbac/rbac.route';
 import adminApprovalRoute from './modules/adminApprovals/adminApproval.route';
 import agentRoute from './modules/agent/agent.route';
 import propertyRoute from './modules/properties/property.route';
+import organizationRoute from './modules/organization/organization.route';
 import {
   publicAppReleaseRouter,
   adminAppReleaseRouter,
@@ -47,6 +48,7 @@ router.use('/v1/files', filesRoute);
 router.use('/v1/products', productRoute);
 router.use('/v1/supplier-products', supplierProductsRoute);
 router.use('/v1/stores', storeRoute);
+router.use('/v1/seller/org', organizationRoute);
 router.use('/v1/merchant-ads', merchantAdsRoute);
 router.use('/v1/pricing', pricingRoute);
 router.use('/health', healthRouter);

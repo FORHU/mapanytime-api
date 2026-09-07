@@ -52,7 +52,7 @@ describe('InventoryReservationController', () => {
 
     it('returns 201 with reservation data on success', async () => {
       mockReq.body = { inventoryId: 'inv-123', quantity: 2 };
-      mockReq.user = { id: 'buyer-999' };
+      mockReq.user = { id: 'buyer-999' } as unknown as Request['user'];
 
       const mockData = {
         id: 'res-1',
@@ -79,7 +79,7 @@ describe('InventoryReservationController', () => {
 
   describe('GET /reservations/active', () => {
     it('returns 200 with list of active reservations', async () => {
-      mockReq.user = { id: 'buyer-999' };
+      mockReq.user = { id: 'buyer-999' } as unknown as Request['user'];
 
       const mockReservations = [
         { id: 'res-1', inventoryId: 'inv-1', quantity: 2, status: 'RESERVED' },
