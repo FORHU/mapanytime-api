@@ -13,6 +13,7 @@ import { seedMultiStoreSeller } from './seeders/multi_store_seller.seeder';
 import { seedTags } from './seeders/tags.seeder';
 import { seedBulkMapStores } from './seeders/bulk_map_stores.seeder';
 import { seedPromotionBadges } from './seeders/promotion_badges.seeder';
+import { seedRewardVouchers } from './seeders/reward_vouchers.seeder';
 
 const prisma = new PrismaClient();
 
@@ -28,6 +29,7 @@ async function main() {
     await seedCategoryVariantSuggestions(prisma);
     await seedTags(prisma);
     await seedPromotionBadges(prisma);
+    await seedRewardVouchers(prisma);
     await seedPaymentProviders(prisma);
     await seedPricingConfiguration(prisma);
     await seedStoresAndProducts(prisma);
