@@ -1,14 +1,16 @@
-import ProductService from '../../src/modules/products/product.service';
+﻿import ProductService from '../../src/modules/products/product.service';
 import ProductRepository from '../../src/modules/products/product.repository';
 import InventoryRepository from '../../src/modules/inventory/inventory.repository';
 import { prisma } from '../../src/utils/prisma';
+import type { OrgContext } from '../../src/modules/organization/orgContext';
+import { ALL_SELLER_FEATURES } from '../../src/modules/organization/sellerPermissions.constant';
 
 jest.mock('../../src/modules/products/product.repository');
 jest.mock('../../src/modules/inventory/inventory.repository');
 
 /**
  * The transaction client handed to the callback. Kept as a distinct object from
- * `prisma` so the tests can assert the repository was given THIS one — passing
+ * `prisma` so the tests can assert the repository was given THIS one â€” passing
  * the global client instead type-checks fine and silently runs the create
  * outside the transaction.
  */
@@ -41,8 +43,25 @@ const LEAF_CATEGORY = {
 const mockedRepo = ProductRepository as jest.Mocked<typeof ProductRepository>;
 
 const SELLER = { id: 'seller-1', applicationStatus: 'APPROVED' };
-const STORE = { id: 'store-1', sellerId: 'seller-1', approvalStatus: 'ACTIVE' };
+// The store's `sellerId` is what create/update check against the caller's
+// `context.organizationId` â€” a seller *is* an organization, so the one column
+// answers both "who owns this store" and "which org is it in".
+const STORE = {
+  id: 'store-1',
+  sellerId: 'org-1',
+  approvalStatus: 'ACTIVE',
+};
 const PRODUCT = { id: 'prod-1', storeId: 'store-1' };
+
+/** The service takes a resolved org context now, not a user id. */
+const admin: OrgContext = {
+  organizationId: 'org-1',
+  role: 'SELLER_ADMIN',
+  isAdmin: true,
+  isOwner: true,
+  assignedStoreIds: null,
+  permissions: [...ALL_SELLER_FEATURES],
+};
 
 const BASE_CREATE = {
   name: 'Tee',
@@ -74,13 +93,13 @@ describe('category must be a leaf', () => {
     });
 
     await expect(
-      ProductService.createProduct('user-1', 'store-1', {
+      ProductService.createProduct(admin, 'store-1', {
         ...BASE_CREATE,
         categoryId: 'cat-branch',
       }),
     ).rejects.toMatchObject({ status: 400 });
 
-    // Rejected before any write — a branch category must not reach the transaction.
+    // Rejected before any write â€” a branch category must not reach the transaction.
     expect(mockedRepo.createProduct).not.toHaveBeenCalled();
   });
 
@@ -90,20 +109,20 @@ describe('category must be a leaf', () => {
     // store or an expired session.
     mockedPrisma.categories.findFirst.mockResolvedValue(null);
 
-    await expect(
-      ProductService.createProduct('user-1', 'store-1', BASE_CREATE),
-    ).rejects.toMatchObject({ status: 404, message: 'Category not found.' });
+    await expect(ProductService.createProduct(admin, 'store-1', BASE_CREATE)).rejects.toMatchObject(
+      { status: 404, message: 'Category not found.' },
+    );
   });
 
   it('accepts a leaf', async () => {
     await expect(
-      ProductService.createProduct('user-1', 'store-1', BASE_CREATE),
+      ProductService.createProduct(admin, 'store-1', BASE_CREATE),
     ).resolves.toBeDefined();
   });
 
   it('skips the check on update when the caller is not changing the category', async () => {
     // A product filed before this rule existed must stay editable.
-    await ProductService.updateProduct('user-1', 'prod-1', { name: 'Renamed' });
+    await ProductService.updateProduct(admin, 'user-1', 'prod-1', { name: 'Renamed' });
     expect(mockedPrisma.categories.findFirst).not.toHaveBeenCalled();
   });
 
@@ -115,14 +134,14 @@ describe('category must be a leaf', () => {
     });
 
     await expect(
-      ProductService.updateProduct('user-1', 'prod-1', { categoryId: 'cat-branch' }),
+      ProductService.updateProduct(admin, 'user-1', 'prod-1', { categoryId: 'cat-branch' }),
     ).rejects.toMatchObject({ status: 400 });
   });
 });
 
-describe('createProduct — option tier', () => {
+describe('createProduct â€” option tier', () => {
   it('builds the nested option/value write tree', async () => {
-    await ProductService.createProduct('user-1', 'store-1', {
+    await ProductService.createProduct(admin, 'store-1', {
       ...BASE_CREATE,
       options: [
         { name: 'Size', values: ['S', 'M'] },
@@ -138,13 +157,13 @@ describe('createProduct — option tier', () => {
     });
   });
 
-  it('omits `options` entirely when none are supplied — the strictly-optional case', async () => {
-    await ProductService.createProduct('user-1', 'store-1', BASE_CREATE);
+  it('omits `options` entirely when none are supplied â€” the strictly-optional case', async () => {
+    await ProductService.createProduct(admin, 'store-1', BASE_CREATE);
     expect(createArg().options).toBeUndefined();
   });
 
   it('omits `options` when every supplied option normalises away', async () => {
-    await ProductService.createProduct('user-1', 'store-1', {
+    await ProductService.createProduct(admin, 'store-1', {
       ...BASE_CREATE,
       options: [{ name: 'Color', values: ['   '] }],
     });
@@ -152,7 +171,7 @@ describe('createProduct — option tier', () => {
   });
 
   it('still writes the category as a relation connect, not a raw scalar', async () => {
-    await ProductService.createProduct('user-1', 'store-1', {
+    await ProductService.createProduct(admin, 'store-1', {
       ...BASE_CREATE,
       options: [{ name: 'Size', values: ['S'] }],
     });
@@ -162,9 +181,9 @@ describe('createProduct — option tier', () => {
   });
 });
 
-describe('createProduct — transaction', () => {
+describe('createProduct â€” transaction', () => {
   it('runs inside a transaction', async () => {
-    await ProductService.createProduct('user-1', 'store-1', BASE_CREATE);
+    await ProductService.createProduct(admin, 'store-1', BASE_CREATE);
     expect(mockedPrisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
@@ -172,12 +191,12 @@ describe('createProduct — transaction', () => {
     // Guards the silent regression: passing `prisma` here type-checks but takes
     // the create outside the transaction, so a failed inventory write would
     // leave a product with no inventory row.
-    await ProductService.createProduct('user-1', 'store-1', BASE_CREATE);
+    await ProductService.createProduct(admin, 'store-1', BASE_CREATE);
     expect((mockedRepo.createProduct as jest.Mock).mock.calls[0][1]).toBe(txMock);
   });
 
   it('creates the inventory row on the transaction client', async () => {
-    await ProductService.createProduct('user-1', 'store-1', {
+    await ProductService.createProduct(admin, 'store-1', {
       ...BASE_CREATE,
       initialStock: 12,
     });
@@ -193,9 +212,9 @@ describe('createProduct — transaction', () => {
   });
 });
 
-describe('updateProduct — option tier replace-all', () => {
+describe('updateProduct â€” option tier replace-all', () => {
   it('replaces the whole option set when an array is provided', async () => {
-    await ProductService.updateProduct('user-1', 'prod-1', {
+    await ProductService.updateProduct(admin, 'user-1', 'prod-1', {
       options: [{ name: 'Size', values: ['S'] }],
     });
 
@@ -206,29 +225,29 @@ describe('updateProduct — option tier replace-all', () => {
   });
 
   it('clears every option when given an empty array', async () => {
-    await ProductService.updateProduct('user-1', 'prod-1', { options: [] });
+    await ProductService.updateProduct(admin, 'user-1', 'prod-1', { options: [] });
 
     expect(updateArg().options).toEqual({ deleteMany: {}, create: [] });
   });
 
   it('leaves options untouched when the key is omitted', async () => {
     // The distinction that `[]` (clear) and `undefined` (leave alone) must not
-    // collapse into each other — both normalise to an empty array.
-    await ProductService.updateProduct('user-1', 'prod-1', { name: 'Renamed' });
+    // collapse into each other â€” both normalise to an empty array.
+    await ProductService.updateProduct(admin, 'user-1', 'prod-1', { name: 'Renamed' });
 
     expect(updateArg()).not.toHaveProperty('options');
   });
 
   it('does not leak the raw array into the update payload', async () => {
-    await ProductService.updateProduct('user-1', 'prod-1', {
+    await ProductService.updateProduct(admin, 'user-1', 'prod-1', {
       options: [{ name: 'Size', values: ['S'] }],
     });
 
     expect(Array.isArray(updateArg().options)).toBe(false);
   });
 
-  it('normalises before writing — duplicates collapse rather than reaching the DB', async () => {
-    await ProductService.updateProduct('user-1', 'prod-1', {
+  it('normalises before writing â€” duplicates collapse rather than reaching the DB', async () => {
+    await ProductService.updateProduct(admin, 'user-1', 'prod-1', {
       options: [
         { name: 'Size', values: ['S', 's'] },
         { name: 'size', values: ['M'] },
@@ -241,7 +260,7 @@ describe('updateProduct — option tier replace-all', () => {
   });
 
   it('keeps tags and options as independent replace-all writes', async () => {
-    await ProductService.updateProduct('user-1', 'prod-1', {
+    await ProductService.updateProduct(admin, 'user-1', 'prod-1', {
       tags: ['POPULAR'],
       options: [{ name: 'Size', values: ['S'] }],
     });

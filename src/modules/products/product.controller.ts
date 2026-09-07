@@ -43,11 +43,11 @@ export default class ProductController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized');
+      const context = req.orgContext;
+      if (!context) return responseError(res, 403, 'Forbidden: No seller organization context');
 
       const { storeId, ...productData } = value;
-      const data = await ProductService.createProduct(userId, storeId, productData);
+      const data = await ProductService.createProduct(context, storeId, productData);
 
       return responseSuccess(res, 201, data, 'Product created successfully');
     } catch (error) {
@@ -70,10 +70,12 @@ export default class ProductController {
     try {
       const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
+      const context = req.orgContext;
+      if (!context) return responseError(res, 403, 'Forbidden: No seller organization context');
 
       const { page, limit, skip, search } = parsePagination(req.query as Record<string, unknown>);
 
-      const data = await ProductService.getMyProducts(userId, value.storeId, {
+      const data = await ProductService.getMyProducts(context, value.storeId, {
         page,
         limit,
         skip,
@@ -99,10 +101,12 @@ export default class ProductController {
     try {
       const userId = (req.user as { id: string })?.id;
       if (!userId) return responseError(res, 401, 'Unauthorized');
+      const context = req.orgContext;
+      if (!context) return responseError(res, 403, 'Forbidden: No seller organization context');
 
       // A seller with no products yet is a valid empty result, not a 404 — the
       // web filter treats a non-2xx as a hard error and would break onboarding.
-      const data = await ProductService.getMyCategories(userId, value.storeId || undefined);
+      const data = await ProductService.getMyCategories(context, value.storeId || undefined);
       return responseSuccess(res, 200, data);
     } catch (error) {
       next(error);
@@ -172,11 +176,17 @@ export default class ProductController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized');
+      const context = req.orgContext;
+      if (!context) return responseError(res, 403, 'Forbidden: No seller organization context');
 
+      const actorUserId = (req.user as { id: string })?.id;
       const productId = req.params.id;
-      const updatedProduct = await ProductService.updateProduct(userId, productId, value);
+      const updatedProduct = await ProductService.updateProduct(
+        context,
+        actorUserId,
+        productId,
+        value,
+      );
 
       return responseSuccess(res, 200, updatedProduct, 'Product updated successfully');
     } catch (error) {
@@ -186,11 +196,11 @@ export default class ProductController {
 
   static async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      const userId = (req.user as { id: string })?.id;
-      if (!userId) return responseError(res, 401, 'Unauthorized');
+      const context = req.orgContext;
+      if (!context) return responseError(res, 403, 'Forbidden: No seller organization context');
 
       const productId = req.params.id;
-      await ProductService.deleteProduct(userId, productId);
+      await ProductService.deleteProduct(context, productId);
 
       return responseSuccess(res, 200, null, 'Product archived successfully');
     } catch (error) {

@@ -98,18 +98,18 @@ export default class PropertyService {
     });
   }
 
-  static async getMyProperties(sellerId: string) {
+  static async getMyProperties(storeIds: string[]) {
     const properties = await prisma.productProperties.findMany({
-      where: { store: { sellerId } },
+      where: { storeId: { in: storeIds } },
       orderBy: { createdAt: 'desc' },
     });
 
     return properties.map(withPricePerSqm);
   }
 
-  static async getPropertyById(sellerId: string, propertyId: string) {
+  static async getPropertyById(storeIds: string[], propertyId: string) {
     const property = await prisma.productProperties.findFirst({
-      where: { id: propertyId, store: { sellerId } },
+      where: { id: propertyId, storeId: { in: storeIds } },
     });
 
     if (!property) {
@@ -119,11 +119,11 @@ export default class PropertyService {
     return withPricePerSqm(property);
   }
 
-  static async getVerifiedPropertyDashboard(sellerId: string, propertyId: string) {
+  static async getVerifiedPropertyDashboard(storeIds: string[], propertyId: string) {
     const property = await prisma.productProperties.findFirst({
       where: {
         id: propertyId,
-        store: { sellerId },
+        storeId: { in: storeIds },
         propertyType: { in: ['HOUSE_LOT', 'RAW_LAND'] },
         status: 'ACTIVE',
       },

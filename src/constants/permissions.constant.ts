@@ -14,18 +14,37 @@ import { SystemRole } from './roles.constant';
  * `requirePermission` short-circuits on `isAdmin` (see
  * `middleware/permission.middleware.ts`), so swapping `requireAdmin` for
  * `requirePermission(code)` never locks an administrator out — but it *does*
- * open the route to every non-admin role holding that code. Three codes are
+ * open the route to every non-admin role holding that code. These codes are
  * granted to non-admin roles by the seeder:
  *
- * | code             | also held by             |
- * | ---------------- | ------------------------ |
- * | `stores.manage`  | SELLER, SUPPORT_AGENT    |
- * | `orders.view`    | SELLER, SUPPORT_AGENT    |
- * | `analytics.view` | SELLER                   |
+ * | code                | also held by                           |
+ * | ------------------- | -------------------------------------- |
+ * | `stores.manage`     | SELLER, SUPPORT_AGENT                  |
+ * | `orders.view`       | SELLER, SUPPORT_AGENT                  |
+ * | `analytics.view`    | SELLER                                 |
+ * | `orders.process`    | SELLER_ADMIN, SELLER_MANAGER, SELLER_MEMBER |
+ * | `products.view`     | SELLER_ADMIN, SELLER_MANAGER, SELLER_MEMBER |
+ * | `products.edit`     | SELLER_ADMIN, SELLER_MANAGER           |
+ * | `promotions.add`    | SELLER_ADMIN, SELLER_MANAGER           |
  *
- * Gating an administrator-only endpoint with one of those three is a privilege
+ * Gating an administrator-only endpoint with one of those is a privilege
  * escalation, not a refactor. The remaining four are administrator-only today,
  * which is why they are the ones wired into admin routers.
+ *
+ * ---
+ *
+ * **The last four are seller-organization codes.** They gate seller-facing
+ * routes through `requireSellerFeature` (see `middleware/sellerOrg.middleware.ts`),
+ * which reads a member's `SellerOrganizationMembers.permissions` — never through
+ * `requirePermission`, which answers the platform RBAC question instead. They
+ * live in this same catalogue so there is one permission vocabulary rather than
+ * two competing ones.
+ *
+ * Note that `roles.seeder.ts` grants every ADMIN_ROLES role *every* seeded
+ * permission, so platform administrators now nominally hold the seller codes
+ * too. That changes nothing in practice — they already bypass every seller gate
+ * via `isAdmin` — but it is why these codes must not be used to gate an
+ * admin-only surface.
  */
 export const PERMISSIONS = {
   STORES_APPROVE: 'stores.approve',
@@ -36,6 +55,12 @@ export const PERMISSIONS = {
   USERS_ROLES: 'users.roles',
   ORDERS_VIEW: 'orders.view',
   ANALYTICS_VIEW: 'analytics.view',
+
+  // Seller-organization codes.
+  ORDERS_PROCESS: 'orders.process',
+  PRODUCTS_VIEW: 'products.view',
+  PRODUCTS_EDIT: 'products.edit',
+  PROMOTIONS_ADD: 'promotions.add',
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -88,7 +113,36 @@ export const SYSTEM_PERMISSIONS: SystemPermission[] = [
     name: 'View Platform Analytics',
     description: 'Can access gross merchandise volume and revenue charts',
   },
+  {
+    code: PERMISSIONS.ORDERS_PROCESS,
+    name: 'Process Orders',
+    description: 'Can process the orders',
+  },
+  {
+    code: PERMISSIONS.PRODUCTS_VIEW,
+    name: 'View Products',
+    description: 'Can view the products',
+  },
+  {
+    code: PERMISSIONS.PRODUCTS_EDIT,
+    name: 'Edit Products',
+    description: 'Can edit the products',
+  },
+  {
+    code: PERMISSIONS.PROMOTIONS_ADD,
+    name: 'Add Promotions',
+    description: 'Can add promotions and ads',
+  },
 ];
+
+export const SELLER_ORG_PERMISSIONS = [
+  PERMISSIONS.ORDERS_PROCESS,
+  PERMISSIONS.PRODUCTS_VIEW,
+  PERMISSIONS.PRODUCTS_EDIT,
+  PERMISSIONS.PROMOTIONS_ADD,
+] as const;
+
+export type SellerOrgPermissionCode = (typeof SELLER_ORG_PERMISSIONS)[number];
 
 /**
  * Codes granted to at least one non-administrator role by the seeder. Exported
@@ -98,15 +152,16 @@ export const NON_ADMIN_HELD_PERMISSIONS: PermissionCode[] = [
   PERMISSIONS.STORES_MANAGE,
   PERMISSIONS.ORDERS_VIEW,
   PERMISSIONS.ANALYTICS_VIEW,
+  PERMISSIONS.ORDERS_PROCESS,
+  PERMISSIONS.PRODUCTS_VIEW,
+  PERMISSIONS.PRODUCTS_EDIT,
+  PERMISSIONS.PROMOTIONS_ADD,
 ];
 
-/**
- * What `roles.seeder.ts` assigns to each non-admin role. Administrators
- * (ADMIN_ROLES) always get every seeded permission instead — see the seeder —
- * so they are intentionally absent here. A role with no entry gets none,
- * which is the safe default for a role nobody has explicitly granted yet.
- */
 export const NON_ADMIN_ROLE_PERMISSIONS: Partial<Record<SystemRole, PermissionCode[]>> = {
   SELLER: [PERMISSIONS.STORES_MANAGE, PERMISSIONS.ORDERS_VIEW, PERMISSIONS.ANALYTICS_VIEW],
   SUPPORT_AGENT: [PERMISSIONS.ORDERS_VIEW, PERMISSIONS.STORES_MANAGE],
+  SELLER_ADMIN: [...SELLER_ORG_PERMISSIONS],
+  SELLER_MANAGER: [...SELLER_ORG_PERMISSIONS],
+  SELLER_MEMBER: [PERMISSIONS.ORDERS_PROCESS, PERMISSIONS.PRODUCTS_VIEW],
 };

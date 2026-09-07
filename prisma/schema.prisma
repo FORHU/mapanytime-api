@@ -30,20 +30,21 @@ model Users {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  roles              Roles[]                 @relation("UserRoles")
-  avatarFile         Files?                  @relation("UserAvatar", fields: [avatarFileId], references: [id])
+  roles              Roles[]                     @relation("UserRoles")
+  avatarFile         Files?                      @relation("UserAvatar", fields: [avatarFileId], references: [id])
   session            Session[]
   passwordResets     PasswordResetTokens[]
   seller             Sellers?
-  reviewedSellers    Sellers[]               @relation("SellerReviewer")
+  reviewedSellers    Sellers[]                   @relation("SellerReviewer")
   buyer              Buyers?
   verifiedDocuments  DocumentVerifications[]
   sentAdminInvites   AdminInvites[]
   notifications      Notifications[]
-  reviewedProperties ProductProperties[]     @relation("PropertyReviewers")
-  reviewedStores     Stores[]                @relation("StoreReviewers")
-  userReferral       Users?                  @relation("UserReferrals", fields: [userReferralId], references: [id])
-  userReferrals      Users[]                 @relation("UserReferrals")
+  reviewedProperties ProductProperties[]         @relation("PropertyReviewers")
+  reviewedStores     Stores[]                    @relation("StoreReviewers")
+  userReferral       Users?                      @relation("UserReferrals", fields: [userReferralId], references: [id])
+  userReferrals      Users[]                     @relation("UserReferrals")
+  orgMemberships     SellerOrganizationMembers[]
 
   @@unique([userReferralId, id])
   @@index([userReferralId])
@@ -157,31 +158,50 @@ model Files {
 }
 
 model Sellers {
-  id                    String                  @id @default(cuid())
-  userId                String                  @unique
-  createdAt             DateTime                @default(now())
-  updatedAt             DateTime                @updatedAt
+  id                    String                      @id @default(cuid())
+  userId                String                      @unique
+  organizationName      String?
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime                    @updatedAt
   deletedAt             DateTime?
-  applicationStatus     ApplicationStatus       @default(PENDING)
+  applicationStatus     ApplicationStatus           @default(PENDING)
   rejectionReason       String?
   reviewedAt            DateTime?
   reviewedById          String?
   sellerPlan            String?
   agentNotes            String?
-  onboardingStep        Int                     @default(0)
-  isOnboarded           Boolean                 @default(false)
+  onboardingStep        Int                         @default(0)
+  isOnboarded           Boolean                     @default(false)
   onboardedAt           DateTime?
   documentVerifications DocumentVerifications[]
-  users                 Users                   @relation(fields: [userId], references: [id])
-  reviewedBy            Users?                  @relation("SellerReviewer", fields: [reviewedById], references: [id])
+  users                 Users                       @relation(fields: [userId], references: [id])
+  reviewedBy            Users?                      @relation("SellerReviewer", fields: [reviewedById], references: [id])
   stores                Stores[]
   supplierProducts      SupplierProducts[]
   settlements           Settlements[]
   payouts               SellerPayouts[]
   returnRequests        ReturnRequests[]
+  organizationMembers   SellerOrganizationMembers[]
 
   @@index([applicationStatus])
   @@index([reviewedAt])
+}
+
+model SellerOrganizationMembers {
+  id               String   @id @default(cuid())
+  sellerId         String
+  userId           String
+  role             String
+  permissions      String[] @default([])
+  assignedStoreIds String[] @default([])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  seller Sellers @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  user   Users   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sellerId, userId])
+  @@index([userId])
 }
 
 model PropertiesFiles {
@@ -789,22 +809,22 @@ model SupplierProducts {
   @@index([productId])
 }
 
-model   Categories {
-  id                String              @id @default(cuid())
-  parentId          String?
-  name              String
-  description       String?
-  status            CategoryStatus      @default(APPROVED)
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  deletedAt         DateTime?
-  parent            Categories?         @relation("CategoryToParent", fields: [parentId], references: [id])
-  subCategories     Categories[]        @relation("CategoryToParent")
-  products          Products[]
-  stores            Stores[]            @relation("CategoriesToStores")
-  primaryForStores  Stores[]            @relation("StorePrimaryCategory")
-  commissionRules   CommissionRules?
-  pricingComponents PricingComponents[]
+model Categories {
+  id                 String                       @id @default(cuid())
+  parentId           String?
+  name               String
+  description        String?
+  status             CategoryStatus               @default(APPROVED)
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+  deletedAt          DateTime?
+  parent             Categories?                  @relation("CategoryToParent", fields: [parentId], references: [id])
+  subCategories      Categories[]                 @relation("CategoryToParent")
+  products           Products[]
+  stores             Stores[]                     @relation("CategoriesToStores")
+  primaryForStores   Stores[]                     @relation("StorePrimaryCategory")
+  commissionRules    CommissionRules?
+  pricingComponents  PricingComponents[]
   /// Suggested product-option names, inherited by sub-categories at read time.
   variantSuggestions CategoryVariantSuggestions[]
 
@@ -1042,10 +1062,10 @@ model RewardConfigurations {
   version  Int     @default(1)
   isActive Boolean @default(true)
 
-  earnPercentage  Decimal @default(0.0010) @db.Decimal(7, 6) // fraction of eligible spend, 0.0010 = 0.1%
-  pointValueInPhp Decimal @default(0.10) @db.Decimal(10, 4) // 1 pt = ₱0.10
-  expirationMonths    Int     @default(12)
-  isEarningActive     Boolean @default(true)
+  earnPercentage   Decimal @default(0.0010) @db.Decimal(7, 6) // fraction of eligible spend, 0.0010 = 0.1%
+  pointValueInPhp  Decimal @default(0.10) @db.Decimal(10, 4) // 1 pt = ₱0.10
+  expirationMonths Int     @default(12)
+  isEarningActive  Boolean @default(true)
 
   effectiveFrom DateTime  @default(now())
   effectiveTo   DateTime?

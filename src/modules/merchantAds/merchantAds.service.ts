@@ -6,6 +6,8 @@ import { S3_CDN_URL } from '../../config';
 import S3Util from '../../utils/s3.util';
 import { deriveAdState, windowsOverlap, START_GRACE_MS, type AdWindowState } from './adWindow';
 import { publish } from '../../infrastructure/rabbitmq/publisher';
+import { assertStoreInScope, resolveAccessibleStoreIds } from '../organization/storeAccess';
+import type { AuthUser } from '../auth/auth.repository';
 
 async function resolveImageUrl(file: { path: string; bucket?: string | null }): Promise<string> {
   if (S3_CDN_URL) return `${S3_CDN_URL}/${file.path}`;
@@ -73,21 +75,40 @@ function formatWindow(startAt: Date | null, expiresAt: Date | null, timeZone: st
 }
 
 export default class MerchantAdsService {
-  private static async assertOwnership(userId: string, storeId: string) {
-    const seller = await MerchantAdsRepository.getSellerByUserId(userId);
-    if (!seller) {
-      throw { status: 403, message: 'Only sellers can manage merchant ads.' };
-    }
+  /**
+   * Which stores the caller may run promotions for.
+   *
+   * A `SELLER_ADMIN` reaches every store the organization owns, a `SELLER_USER`
+   * only the stores explicitly assigned to them, and a pre-organization seller
+   * their own. The previous check demanded a `Sellers` row and then compared it
+   * against `store.sellerId` — an IDENTITY test that organization staff can
+   * never satisfy, since they deliberately have no `Sellers` row of their own.
+   *
+   * Out-of-scope is 404 rather than 403, matching the convention in
+   * storeAccess.ts: a store outside your scope must be indistinguishable from
+   * one that does not exist, so ids cannot be probed.
+   */
+  private static assertOwnership(user: AuthUser, storeId: string) {
+    return assertStoreInScope(user, storeId);
+  }
 
-    const store = await MerchantAdsRepository.getStoreById(storeId);
-    if (!store) {
-      throw { status: 404, message: 'Store not found.' };
-    }
+  /**
+   * Reject any product that does not belong to the store the ad runs for.
+   *
+   * The product links were written straight through, so a promotion could
+   * reference another store's product — including one in a different
+   * organization. Nothing reads those rows without re-asserting the store, so
+   * it was never directly exploitable, but it is cross-tenant data one filter
+   * away from being so.
+   */
+  private static async assertProductsInStore(storeId: string, products: ProductLink[]) {
+    if (products.length === 0) return;
 
-    if (store.sellerId !== seller.id) {
-      throw { status: 403, message: 'You do not own this store.' };
+    const ids = [...new Set(products.map((p) => p.productId))];
+    const owned = await MerchantAdsRepository.countProductsInStore(storeId, ids);
+    if (owned !== ids.length) {
+      throw { status: 404, message: 'Product not found.' };
     }
-    return seller;
   }
 
   /**
@@ -272,8 +293,8 @@ export default class MerchantAdsService {
     return { ...ad, state: deriveAdState(ad, now), storeTimezone: timezone };
   }
 
-  static async listMyAds(userId: string, storeId: string) {
-    await this.assertOwnership(userId, storeId);
+  static async listMyAds(user: AuthUser, storeId: string) {
+    await this.assertOwnership(user, storeId);
 
     const now = new Date();
     const [ads, timezone] = await Promise.all([
@@ -289,14 +310,16 @@ export default class MerchantAdsService {
     };
   }
 
-  static async listAllMyAds(userId: string) {
-    const seller = await MerchantAdsRepository.getSellerByUserId(userId);
-    if (!seller) {
+  static async listAllMyAds(user: AuthUser) {
+    const { storeIds, hasOrg, hasSellerRow } = await resolveAccessibleStoreIds(user);
+    if (!hasOrg && !hasSellerRow) {
       throw { status: 403, message: 'Only sellers can access merchant ads.' };
     }
 
     const now = new Date();
-    const ads = await MerchantAdsRepository.getAdsBySellerId(seller.id);
+    // An empty scope yields no ads rather than every ad — the state a member
+    // with no store assigned yet lands in.
+    const ads = await MerchantAdsRepository.getAdsByStoreIds(storeIds);
 
     // One seller can own stores in different zones, so the listing resolves a
     // zone per row rather than assuming a single one for the whole page.
@@ -310,10 +333,15 @@ export default class MerchantAdsService {
     };
   }
 
-  static async createAd(userId: string, payload: CreateAdPayload) {
-    await this.assertOwnership(userId, payload.storeId);
+  static async createAd(user: AuthUser, payload: CreateAdPayload) {
+    await this.assertOwnership(user, payload.storeId);
 
     const { storeId, products, badgeId, badgeLabel, ...adFields } = payload;
+
+    await this.assertProductsInStore(
+      storeId,
+      (products ?? []).map((p) => ({ productId: p.productId, variantId: p.variantId ?? null })),
+    );
 
     this.assertStartNotPast(adFields.startAt);
     await this.assertNoWindowConflict(storeId, {
@@ -349,13 +377,13 @@ export default class MerchantAdsService {
     });
   }
 
-  static async setActive(userId: string, adId: string, isActive: boolean) {
+  static async setActive(user: AuthUser, adId: string, isActive: boolean) {
     const ad = await MerchantAdsRepository.getAdById(adId);
     if (!ad) {
       throw { status: 404, message: 'Merchant ad not found.' };
     }
 
-    await this.assertOwnership(userId, ad.storeId);
+    await this.assertOwnership(user, ad.storeId);
 
     const timezone = await MerchantAdsRepository.getStoreTimezone(ad.storeId);
 
@@ -376,13 +404,13 @@ export default class MerchantAdsService {
     return this.decorate(updated, timezone, new Date());
   }
 
-  static async updateAd(userId: string, adId: string, payload: AdFields) {
+  static async updateAd(user: AuthUser, adId: string, payload: AdFields) {
     const ad = await MerchantAdsRepository.getAdById(adId);
     if (!ad) {
       throw { status: 404, message: 'Merchant ad not found.' };
     }
 
-    await this.assertOwnership(userId, ad.storeId);
+    await this.assertOwnership(user, ad.storeId);
 
     const { products, badgeId, badgeLabel, ...adFields } = payload;
 
@@ -409,6 +437,9 @@ export default class MerchantAdsService {
       productId: p.productId,
       variantId: p.variantId ?? null,
     }));
+
+    // Against the ad's own store, never a client-supplied one.
+    if (products) await this.assertProductsInStore(ad.storeId, nextProducts);
 
     await this.assertNoWindowConflict(
       ad.storeId,
@@ -437,13 +468,13 @@ export default class MerchantAdsService {
     return this.decorate(updated, timezone, new Date());
   }
 
-  static async deleteAd(userId: string, adId: string) {
+  static async deleteAd(user: AuthUser, adId: string) {
     const ad = await MerchantAdsRepository.getAdById(adId);
     if (!ad) {
       throw { status: 404, message: 'Merchant ad not found.' };
     }
 
-    await this.assertOwnership(userId, ad.storeId);
+    await this.assertOwnership(user, ad.storeId);
 
     // Ads referenced by past orders are kept so the order history stays
     // readable. Disabling is offered as the alternative rather than performed
@@ -540,10 +571,10 @@ export default class MerchantAdsService {
     });
   }
 
-  static async getAnalytics(userId: string, adId: string) {
+  static async getAnalytics(user: AuthUser, adId: string) {
     const ad = await MerchantAdsRepository.getAdById(adId);
     if (!ad) throw { status: 404, message: 'Merchant ad not found.' };
-    await this.assertOwnership(userId, ad.storeId);
+    await this.assertOwnership(user, ad.storeId);
 
     return MerchantAdsRepository.getAdAnalytics(adId);
   }
