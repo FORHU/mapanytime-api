@@ -10,15 +10,16 @@ Region is `ap-southeast-1` throughout.
 
 ## 1. What is actually connected to AWS
 
-| Service              | Used for                                                          | How it is reached                                              | Live?           |
-| :------------------- | :---------------------------------------------------------------- | :------------------------------------------------------------- | :-------------- |
-| **S3**               | All user uploads — avatars, product images, seller ID documents   | `@aws-sdk/client-s3`, presigned `PutObject`/`GetObject` only   | Yes             |
-| **ECR**              | Docker images for api, web, admin                                 | `aws-actions/amazon-ecr-login` in CI; `docker pull` on the box | Yes             |
-| **EC2**              | Runs the API, web and admin containers                            | Staging: `ssm:SendCommand` (§4). Production: still SSH         | Yes             |
-| **SSM**              | Deploy transport, and the env file as a SecureString parameter    | `SendCommand` from CI, `GetParameter` on the box               | Staging only    |
-| **RDS (PostgreSQL)** | The application database                                          | `DATABASE_URL`, `sslmode=require`                              | Yes             |
-| **CloudWatch Logs**  | Container logs under `/mapanytime-api/*`                          | EC2 instance profile                                           | Yes             |
-| **IAM**              | Production CI self-grants the EC2 role its ECR policy each deploy | `aws iam put-role-policy` — see §5, this should go             | Production only |
+| Service              | Used for                                                        | How it is reached                                              | Live?      |
+| :------------------- | :-------------------------------------------------------------- | :------------------------------------------------------------- | :--------- |
+| **S3**               | All user uploads — avatars, product images, seller ID documents | `@aws-sdk/client-s3`, presigned `PutObject`/`GetObject` only   | Yes        |
+| **ECR**              | Docker images for api, web, admin                               | `aws-actions/amazon-ecr-login` in CI; `docker pull` on the box | Yes        |
+| **EC2**              | Runs the API, web and admin containers                          | `ssm:SendCommand` — see §4                                     | Yes        |
+| **SSM**              | Deploy transport, and the env file as a SecureString parameter  | `SendCommand` from CI, `GetParameter` on the box               | Yes        |
+| **RDS (PostgreSQL)** | The application database                                        | `DATABASE_URL`, `sslmode=require`                              | Yes        |
+| **CloudWatch Logs**  | Container logs under `/mapanytime-api/*`                        | EC2 instance profile                                           | Yes        |
+| **STS**              | GitHub Actions assumes the deploy role via OIDC                 | `sts:AssumeRoleWithWebIdentity` — see §2B                      | Yes        |
+| **IAM**              | Nothing at deploy time any more — the self-grant step is gone   | policies attached once, by hand                                | Setup only |
 
 **Not AWS, despite looking like it:**
 
@@ -74,10 +75,10 @@ gc3-client-web already deploys.
   against instances tagged `Project=mapanytime`, which is what replaces SSH.
 - ARN goes in the **`AWS_DEPLOY_ROLE_ARN`** secret.
 
-**Staging uses this. Production does not yet** — it is still on the static
-`AWS_ACCESS_KEY` / `AWS_SECRET_ACCESS_KEY` pair shared with the web repo. Those
-two secrets can only be deleted once production is converted as well, and the
-same role covers it (the trust policy already lists the production environment).
+**Both environments use this.** The static
+`AWS_ACCESS_KEY` / `AWS_SECRET_ACCESS_KEY` pair is no longer read by either
+workflow here and can be deleted once both have deployed green — but check the
+web and admin repos first, which still use the same pair.
 
 ### C. Application runtime user — what the app code may do
 
@@ -105,17 +106,35 @@ to S3. Two consequences:
 
 ---
 
-## 4. SSM cutover — staging is converted, production is not
+## 4. SSM cutover — both environments are converted
 
-`deploy-staging.yml` no longer uses SSH. `appleboy/scp-action` and
-`appleboy/ssh-action` are gone; the env file travels as a SecureString parameter
-and the deploy runs through `ssm:SendCommand`. The script it runs is
-`deploy-remote.sh` in this directory — same logic as before, lifted out of the
-workflow so it can be diffed and shellchecked, and so staging and production
-cannot drift apart by being edited separately.
+Neither workflow uses SSH any more. `appleboy/scp-action` and
+`appleboy/ssh-action` are gone from both; the env file travels as a SecureString
+parameter and the deploy runs through `ssm:SendCommand`. Both run the same
+`deploy-remote.sh` from this directory, parameterised — so the two environments
+cannot drift by being edited separately, which is exactly how they had drifted
+before (production created no docker network and named its worker by suffix;
+staging did neither).
 
-`deploy-production.yml` is **deliberately untouched** and still on SSH. Prove the
-staging path first, then port it.
+**Land and prove staging first.** Production is dispatch-only, so nothing runs
+there until someone presses the button — but do not press it until a staging
+deploy has gone green end to end.
+
+The only differences between the two workflows are the `env:` block and the
+trigger:
+
+|            | staging                                      | production                                 |
+| :--------- | :------------------------------------------- | :----------------------------------------- |
+| ECR repo   | `mapanytime-api-staging`                     | `mapanytime`                               |
+| Containers | `mapanytime-api-staging` / `-worker-staging` | `mapanytime-api` / `mapanytime-api-worker` |
+| Network    | `mapanytime-staging`                         | `mapanytime`                               |
+| Ports      | 4003→4002, 8081→8080                         | 4002→4002, 8080→8080                       |
+| Parameter  | `/mapanytime/staging/env`                    | `/mapanytime/production/env`               |
+| Trigger    | after CI on `main`                           | `workflow_dispatch` only                   |
+
+The worker container name is deliberately `mapanytime-api-worker` — what the old
+workflow built as `"${CONTAINER_NAME}-worker"` — so the first SSM deploy replaces
+that container rather than leaving an orphan running beside the new one.
 
 It follows the same shape as `gc3-client-web`'s production deploy — OIDC role
 assumption, tag-based SSM targeting, per-environment config in `vars` — so the
@@ -142,10 +161,24 @@ see §4a.
    should list it. If it does not, the agent is not running or the subnet has no
    route to the SSM endpoints.
 
-Optional: `AWS_REGION` and `ECR_REPOSITORY` are read from repository variables
-but fall back to the values the workflow used before, so they can be set later
-without breaking anything. The two tag variables have no sane default and the
-workflow refuses to run without them.
+**Define the tag variables per GitHub environment, not repository-wide.** Both
+workflows read the same `EC2_TARGET_TAG_KEY` / `EC2_TARGET_TAG_VALUE` names but
+declare `environment: staging` and `environment: production` respectively, so
+environment-scoped values resolve to the right box for each. A repository-wide
+value would point both at whichever instance it names — which, for the
+production workflow, means deploying staging's image over production or
+failing to match anything.
+
+Optional: `AWS_REGION` and `ECR_REPOSITORY` are read from variables but fall
+back to the values each workflow used before, so they can be set later without
+breaking anything. The two tag variables have no sane default and the workflows
+refuse to run without them.
+
+**Clean up after the first successful deploy of each environment.** The old
+scp'd env files stay behind at `/home/ec2-user/mapanytime-api.env` and
+`/home/ec2-user/mapanytime-api-staging.env`, still holding every secret they
+held before. The new path is `/opt/mapanytime-api/`, so nothing overwrites or
+removes them. Delete them once the SSM path is proven.
 
 ### 4a. Where this differs from gc3-client-web, and why
 
@@ -180,15 +213,27 @@ non-secret config; `deploy-remote.sh` fetches the rest with
 
 ---
 
-## 5. Two things to fix while you are in here
+## 5. Still open
 
-**`iam:PutRolePolicy` in CI.** Production still runs
-`aws iam put-role-policy --role-name mapanytime-role` on every deploy, to grant the
-EC2 role its own ECR access. That hands the CI identity the ability to rewrite IAM
-role policies — far more than a deploy needs, and it re-runs on every push to do
-work that only needed doing once. Attach `ec2-ecr-pull-policy.json` to the role by
-hand, delete the step, and drop the permission.
+**Confirm the production S3 bucket before deploying.** `ec2-app-runtime-policy.json`
+names `forhu-marketplace-dev`, which is what the staging `.env` points at, and it
+is the one value in this directory that is probably wrong for production. If
+production uses a different bucket, that policy needs a per-environment copy;
+if both environments genuinely share one bucket, that is worth fixing on its own
+merits — staging writes and deletes would be landing next to real customer
+uploads. The S3 user is named `style-mirror-s3-dev` too, so the `dev` suffix may
+be a naming accident rather than an environment marker. **This is unverified —
+neither name was confirmed against the production environment.**
 
-**The bucket is named `forhu-marketplace-dev`.** That is what the staging `.env`
-points at. Confirm production uses a separate bucket before assuming the `dev`
-suffix is cosmetic — the S3 user is named `style-mirror-s3-dev` too.
+**`iam:PutRolePolicy` is no longer used**, by either workflow — the self-grant
+step is deleted from both. `cicd-deploy-policy.json` deliberately does not grant
+it. The consequence is that `ec2-ecr-pull-policy.json` must be attached to each
+instance role by hand once, per §4; nothing will do it at deploy time any more,
+and a missing attachment shows up as a `docker pull` denial in the SSM output.
+
+**The S3 credentials in the env file are still there.** `ec2-app-runtime-policy.json`
+gives the instance role S3 access, but `s3.util.ts` still passes an explicit
+`credentials:` block, so the key pair in the env file is what actually gets used.
+Deleting that block (§2C) is what lets the role take over and the
+`style-mirror-s3-dev` user be retired. Left alone here because it changes
+application code, not deploy configuration.
