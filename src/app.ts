@@ -95,8 +95,22 @@ const authLimiter = rateLimit({
 // Rate limiting runs in production only, which is why limit problems never surface locally.
 // Set RATE_LIMIT_IN_DEV=true to exercise it against a dev server before shipping a change.
 if (!isDev || process.env.RATE_LIMIT_IN_DEV === 'true') {
-  app.use('/api/v1/auth/login', authLimiter);
-  app.use('/api/v1/auth/register', authLimiter);
+  // Every endpoint that accepts or issues a credential, not just the two obvious
+  // ones. `/reset-password` is the sharp omission: it checks a one-time code, and
+  // the global bucket gave a guesser a thousand tries per window. See F104.
+  //
+  // `skipSuccessfulRequests` means these only ever count failures, which is what
+  // makes throttling `/refresh-token` safe — a client refreshing normally never
+  // touches the budget, while one replaying a dead token burns it.
+  for (const path of [
+    'login',
+    'register',
+    'refresh-token',
+    'forgot-password',
+    'reset-password',
+  ] as const) {
+    app.use(`/api/v1/auth/${path}`, authLimiter);
+  }
   app.use(limiter);
 }
 

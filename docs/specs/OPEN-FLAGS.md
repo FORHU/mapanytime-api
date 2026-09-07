@@ -1,8 +1,9 @@
 # MapAnytime — Open Flags, F39 onward
 
 Triage batch raised **2026-08-24**, worked **2026-08-25** and **2026-08-27**.
+Authentication pass raised and worked **2026-09-07** (F98–F106).
 Continues the numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently
-F39–F97.
+F39–F106.
 
 F84–F88 come from a sweep of the returns and refund path — the current branch's
 own module, and ground neither register had covered.
@@ -25,6 +26,74 @@ lost `FIX-PLAN.md` (F55). Findings raised during a session and never written
 down do not survive it.
 
 ---
+
+## ✅ Closed 2026-09-07 — the authentication hardening pass
+
+| Flag     | Outcome                                                                                                                    |
+| :------- | :------------------------------------------------------------------------------------------------------------------------- |
+| **F98**  | Access tokens are 15 minutes, in the code default **and in both deploy workflows** — see the secret note below             |
+| **F99**  | The session row's expiry is derived from `REFRESH_TOKEN_EXPIRY`; the duration is written once                              |
+| **F100** | The refresh token is gone from the database. Rows carry `jti` and a SHA-256, neither of which is replayable                |
+| **F101** | `jti` is the lookup key — unique, indexed, and the thing a presented token is found by                                     |
+| **F102** | Consumption is one conditional `UPDATE ... WHERE usedAt IS NULL`, so exactly one caller can spend a token                  |
+| **F103** | Replay revokes the whole family and clears `activeSessionId`; a 10s grace window keeps genuine races from reading as theft |
+| **F104** | `authLimiter` now covers refresh, forgot-password and reset-password as well as login and register                         |
+| **F105** | The dead `roles` claim is out of the access token                                                                          |
+| **F106** | `Session.accessToken` dropped in the same migration as the raw refresh token                                               |
+
+Changed: `config.ts`, `app.ts`, `auth.service.ts`, `auth.repository.ts`,
+`schema.prisma`, both deploy workflows, `.env.example`. New unit coverage in
+`tests/unit/auth.service.refresh.test.ts` (10 cases — replay, hash mismatch,
+lost race, legacy token, forged signature); `auth.service.logout.test.ts`
+rewritten onto the family-revocation contract. Suite: **599 tests / 58 suites
+passing**, `tsc` clean, `npm run lint` clean, prettier clean.
+
+**The migration is applied to STAGING as of 2026-09-07 13:46 (+08).**
+`20260907120000_refresh_token_hashing_and_families` was written by hand rather
+than generated, then applied by `prisma migrate dev` against the checked-in
+`.env` — which points at the staging RDS instance, not a local database. That is
+the hazard F-register readers keep rediscovering, and this time it landed on the
+intended-enough target rather than a wrong one, but it landed there by default,
+not by choice. Verified afterwards:
+
+- `migrate status` reports 32/32 applied, schema up to date.
+- It was the **only** migration applied that day. The five that used to be
+  described here as pending had in fact gone in on 27–28 Aug; that note was
+  stale.
+- **No reset.** Data intact — 19 users, 1745 products, 72 stores, 2 orders.
+  `migrate dev` resets on drift, and did not.
+- New shape confirmed on the table: `jti`, `refreshTokenHash`, `familyId`,
+  `usedAt`, `revokedAt`, `replacedByJti`, with `Session_jti_key`,
+  `Session_refreshTokenHash_key`, `Session_familyId_idx` and
+  `Session_userId_expiresAt_idx`. `refreshToken` and `accessToken` are gone.
+
+**Production has NOT had it.** It arrives on the next production deploy, which
+runs `prisma migrate deploy` ahead of the container swap
+(`deploy-production.yml:181`).
+
+**It forces one round of re-logins, and has already done so on staging** — the
+`Session` table is at 0 rows and no user holds an `activeSessionId`, which is the
+migration working as intended. Existing refresh tokens cannot be carried across:
+the raw token is the column being dropped, and an issued token's `jti` is inside
+a JWT the SQL cannot parse. Nulling `activeSessionId` alongside is deliberate —
+leaving it pointing at a deleted id would let pre-deploy access tokens keep
+matching, which is precisely what `activeSessionId` exists to stop.
+
+**F98 is not finished by this commit alone.** Both workflows read
+`secrets.ACCESS_TOKEN_EXPIRY` and only fall back to the literal that was changed
+here. If that repository secret is set — it was invisible from the working tree —
+it still wins, and the deployed access token is still whatever it says. Check it
+in repo settings and either clear it or set it to `15m`.
+
+**Two things this pass deliberately did not do:**
+
+- **Pruning.** Consumed session rows are now retained, so the table only grows.
+  That belongs with the sweeper in F44/F52/F91, not bolted on here.
+- **The Google constraint.** `@@unique([provider, providerUserId])` on `Session`
+  is safe only while `providerUserId` is null on every row. Retained rows make
+  it a real collision the moment a Google session rotates twice. The constraint
+  wants moving to the user before `/auth/google` is re-enabled — recorded in
+  F103's body.
 
 ## ✅ Closed 2026-08-27 — the inventory races
 
@@ -1228,6 +1297,154 @@ This would have failed the very first deploy after `14a3950` instead of letting
 the outage run for a week.
 
 ---
+
+## 🔴 Raised 2026-09-07 — the authentication hardening pass
+
+Raised while checking the recommended auth architecture document against the
+working tree. The document is sound as a direction and its P1 list is accurate;
+what it gets wrong is the state of the code, so three items it files under
+"P0 — KEEP" are not things this codebase currently does. F98 and F99 are those.
+
+Confirmed genuinely present and worth keeping: `activeSessionId` validation
+(`auth.middleware.ts:56`), session-bound access tokens, immediate revocation on
+logout, and the single-active-device login rule.
+
+The Web-side move to HttpOnly cookies (the document's P2) is **not flagged
+here**. It is a known, already-written-down gap — `web/src/shared/lib/token.ts`
+explains why the stack cannot adopt it unilaterally while Flutter uses bearer
+tokens — and it is a project, not a defect. It stays deferred.
+
+### F98. Access tokens live seven days, not the fifteen minutes the design assumes
+
+`ACCESS_TOKEN_EXPIRY` falls back to `'7d'` (`config.ts:12`). Every security
+property the architecture document hangs on "short-lived access tokens" is
+therefore not in effect. `auth.middleware.ts:47` says so out loud, in a comment
+explaining why a `sessionId`-less token had to be rejected: _"they were already
+past ACCESS_TOKEN_EXPIRY of being issued one"_ — seven days of one.
+
+What carries the codebase today is `activeSessionId`, which revokes immediately
+and does not care how long the token claims to live. That is why this has never
+bitten. It is still the entire blast radius of a leaked access token: a token
+lifted from `sessionStorage` works for a week unless the user happens to log out.
+
+Cheapest fix in the register — one env default. Safe to make, because both
+clients already refresh transparently on 401 rather than signing out:
+`web/src/shared/lib/http.ts:118` (with a subscriber queue) and the Flutter
+`AuthInterceptor` (a `QueuedInterceptor`, same reason).
+
+### F99. Refresh JWTs outlive their own session row by 23 days
+
+`REFRESH_TOKEN_EXPIRY` is `'30d'` (`config.ts:13`), but `generateAuthResponse`
+hardcodes the row's expiry to seven days:
+
+```ts
+expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+```
+
+`findValidSession` filters on `expiresAt: { gt: new Date() }`, so on day eight a
+signature-valid, unexpired refresh token starts failing with a bare
+`Invalid token` and the user is bounced to login with no explanation. The number
+is written twice, in two units, in two files, and the shorter one silently wins.
+
+Largely masked today because F98 gives the access token the same seven days, so
+the refresh path is barely exercised. Fixing F98 without fixing F99 would expose
+it immediately.
+
+### F100. The session table stores live refresh tokens in plaintext
+
+`Session.refreshToken String? @unique` holds the credential itself, and
+`findValidSession(refreshToken)` looks rows up by string equality against it.
+Anyone with read access to the table — a backup, a replica, a logged query, an
+SQLi — holds every live refresh token, and read access alone is enough to
+authenticate as any user.
+
+The fix is the document's §8: store `jti` plus a hash and never the secret. A
+SHA-256 of the token is the right primitive here rather than bcrypt/argon2 — the
+value being hashed is a JWT with a full-entropy signature, not a human-chosen
+password, so there is nothing to slow an attacker down against and the lookup
+stays a single indexed read.
+
+### F101. `jti` is minted and immediately thrown away
+
+`auth.service.ts:484` puts `crypto.randomBytes(16)` into the refresh token as
+`jti`. Nothing stores it and nothing reads it. The refresh path decodes the
+token for `userId` only and then finds the session by raw-token equality
+(F100) — so the claim that exists to identify a token identifies nothing, and
+the column that could hold it does not exist.
+
+### F102. Refresh consumption is not atomic — two callers can both rotate one token
+
+`refreshToken()` is verify → `findValidSession` → `generateAuthResponse` →
+`rotateSession`, with no step that claims the token. Two requests presenting the
+same refresh token both pass `findValidSession`, both mint a session, and both
+call `users.update({ activeSessionId })`. The loser's session row is the one
+`activeSessionId` does _not_ end up pointing at, so the client that gets those
+tokens is holding an access token the middleware will reject on first use, plus
+a refresh token whose row was never retired.
+
+Not hypothetical for long: the document's own §11 calls for the conditional
+`UPDATE ... WHERE usedAt IS NULL`, which is exactly the missing step.
+
+### F103. No reuse detection, no token families
+
+Reusing a consumed refresh token currently produces a plain 401 — the row was
+deleted, so it looks identical to an expired or unknown token. A stolen refresh
+token that the attacker rotates first is therefore indistinguishable from
+ordinary token expiry, and the legitimate user simply gets logged out and signs
+in again while the attacker's chain keeps rotating.
+
+Rotation without replay detection is half a control. The missing half is §12
+and §13: a `familyId` on the chain, and revocation of the whole family the
+moment a consumed token comes back.
+
+This also requires that consumed rows stop being deleted — `rotateSession`
+currently `deleteMany`s the row it replaces, which is precisely the evidence
+reuse detection needs. Keeping them means the table grows, so pruning expired
+sessions belongs with the scheduler work in F44/F52/F91 rather than being
+invented separately.
+
+**Landmine for whoever re-enables Google:** `Session` carries
+`@@unique([provider, providerUserId])`. Retaining consumed rows is safe only
+while `providerUserId` is null on every row, because Postgres does not collide
+nulls in a unique index. The first real Google session makes the second refresh
+on that account fail on a constraint violation. That constraint wants to move to
+the user, not the session, before the §20 Google work lands.
+
+### F104. Four of six credential endpoints are unthrottled
+
+`authLimiter` is applied to `/auth/login` and `/auth/register` only
+(`app.ts:98-99`). `/auth/refresh-token`, `/auth/forgot-password`,
+`/auth/reset-password` and the verify path fall through to the global
+1000-per-15-minutes bucket, which is not a credential budget.
+
+`/reset-password` is the sharp one: it validates a one-time code, and a
+thousand attempts per window per IP is a real guessing budget against it.
+`/refresh-token` is named explicitly in the architecture document's §23
+alongside login.
+
+Note that `authLimiter` sets `skipSuccessfulRequests: true`, which is correct
+for login but means a throttle on `/refresh-token` only ever counts failures —
+the right behaviour here too, since legitimate refreshes succeed.
+
+### F105. The access token carries a `roles` claim nothing reads
+
+`auth.service.ts:509-511` embeds the user's role names in the access token. No
+code path reads them: `authenticate` loads the user from the database and
+`permission.middleware.ts` works from `req.user`, so authorization is already
+correctly server-side (the document's §22, satisfied). The claim is dead weight
+that grows the token and invites someone to start trusting it later.
+
+Removing it is safe precisely because nothing reads it — verified by grep across
+`src/`, no `decoded.*role` anywhere.
+
+### F106. `Session.accessToken` is a column nothing writes
+
+A nullable `accessToken String?` sits in the `Session` model beside the refresh
+token. `rotateSession` never populates it and no query reads it. Harmless while
+empty — but it is a credential-shaped column in a credential table, and F100 is
+what happens when one of those gets used. It should go in the same migration
+that removes the raw refresh token, rather than being left as a place for one to
+reappear.
 
 ## Suggested order for tomorrow
 

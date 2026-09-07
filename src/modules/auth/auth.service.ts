@@ -9,6 +9,8 @@ import {
   REFRESH_TOKEN_SECRET,
   ACCESS_TOKEN_EXPIRY,
   REFRESH_TOKEN_EXPIRY,
+  REFRESH_TOKEN_EXPIRY_MS,
+  REFRESH_TOKEN_GRACE_MS,
 } from '../../config';
 import CacheUtil from '../../utils/cache.util';
 import logger from '../../utils/logger';
@@ -282,24 +284,89 @@ export default class AuthSvc {
     };
   }
 
+  /**
+   * Exchanges a refresh token for a new pair, consuming the old one.
+   *
+   * The token is found by its `jti` and verified against a stored hash — the database no
+   * longer holds anything replayable (F100/F101) — and claimed with a conditional UPDATE so
+   * only one caller can spend it (F102).
+   *
+   * A token that comes back after being consumed is the interesting case. It means either
+   * a harmless race the clients could not serialise, or that someone else has the token.
+   * Inside a short grace window it is read as the former and merely refused; outside it,
+   * the whole family is revoked and the user must sign in again (F103). Distinguishing
+   * these is the entire reason consumed rows are now retained rather than deleted.
+   */
   static async refreshToken(refreshToken: string) {
-    const decoded = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET) as { userId: string };
-    const session = await AuthRepo.findValidSession(refreshToken);
-    if (!session) {
-      logger.warn(`[Auth] Refresh rejected — invalid or expired session (user: ${decoded.userId})`);
+    const decoded = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET) as {
+      userId: string;
+      jti?: string;
+      familyId?: string;
+    };
+
+    // Tokens minted before the jti migration carry no identifier to look up. They cannot be
+    // honoured and cannot be told apart from a forgery, so they are simply spent.
+    if (!decoded.jti) {
+      logger.warn(`[Auth] Refresh rejected — token predates jti (user: ${decoded.userId})`);
+      throw { status: 401, message: 'Invalid token' };
+    }
+
+    const { outcome, session } = await AuthRepo.claimRefreshSession({
+      jti: decoded.jti,
+      tokenHash: this.hashRefreshToken(refreshToken),
+      graceMs: REFRESH_TOKEN_GRACE_MS,
+    });
+
+    if (outcome === 'replayed' || outcome === 'mismatch') {
+      const familyId = session?.familyId || decoded.familyId;
+      if (familyId) {
+        const revoked = await AuthRepo.revokeFamily(familyId, decoded.userId);
+        await CacheUtil.del(`user:${decoded.userId}`);
+        logger.error(
+          `[Auth] Refresh token ${outcome} — revoked family ${familyId} ` +
+            `(${revoked} sessions, user: ${decoded.userId})`,
+        );
+      } else {
+        logger.error(
+          `[Auth] Refresh token ${outcome} with no family to revoke (user: ${decoded.userId})`,
+        );
+      }
+      throw { status: 401, message: 'Session revoked — please sign in again.' };
+    }
+
+    if (outcome !== 'claimed') {
+      // 'unknown', 'revoked', 'expired', 'raced' — all dead ends, none of them evidence of
+      // compromise, and all deliberately answering the same way so a caller probing jtis
+      // learns nothing about which ones exist.
+      logger.warn(`[Auth] Refresh rejected — ${outcome} (user: ${decoded.userId})`);
       throw { status: 401, message: 'Invalid token' };
     }
 
     const user = await AuthRepo.findUserById(decoded.userId);
     if (!user) throw { status: 404, message: 'User not found' };
 
-    logger.info(`[Auth] Token refreshed for user ${user.id}`);
+    logger.info(`[Auth] Token refreshed for user ${user.id} (family: ${session!.familyId})`);
 
-    // Carry the original provider through — otherwise a Google session is relabelled 'local'
-    // the first time it refreshes. Retire only this session, not the user's other devices.
-    return this.generateAuthResponse(user, session.provider || 'local', false, {
-      replacesRefreshToken: refreshToken,
+    // Carry the original provider and family through — otherwise a Google session is
+    // relabelled 'local' the first time it refreshes, and every rotation would start a new
+    // family, which is the same as having none. Retire only this link, not the user's
+    // other devices.
+    return this.generateAuthResponse(user, session!.provider || 'local', false, {
+      replacesJti: decoded.jti,
+      familyId: session!.familyId || undefined,
     });
+  }
+
+  /**
+   * The stored form of a refresh token.
+   *
+   * Plain SHA-256, not bcrypt or argon2, and deliberately so: the input is a JWT whose
+   * signature is full-entropy machine-generated output, not a human-chosen password. There
+   * is no guessing to slow down, and the lookup stays one indexed read. Same reasoning as
+   * `hashResetCode` below.
+   */
+  private static hashRefreshToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
   }
 
   /**
@@ -453,12 +520,29 @@ export default class AuthSvc {
   static async logout(userId: string, refreshToken?: string) {
     await AuthRepo.updateActiveSession(userId, null);
 
-    // Best-effort tidy-up of the matching refresh row. `deleteMany` matches zero rows
-    // without throwing, so an unknown token is a no-op rather than an error.
-    if (refreshToken) await AuthRepo.deleteSession(refreshToken);
+    // Best-effort teardown of the refresh chain the caller came in on. Revoking the whole
+    // family, not just the presented link, is what makes logout final: retiring one row
+    // would leave its already-rotated successors alive to mint new access tokens.
+    //
+    // Every failure here is swallowed. The token may be unparseable, unknown, or already
+    // revoked, and none of those should turn a logout into an error — the authoritative
+    // kill already happened above.
+    let familyRevoked = false;
+    if (refreshToken) {
+      try {
+        const decoded = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET) as { jti?: string };
+        const session = decoded.jti ? await AuthRepo.findSessionByJti(decoded.jti) : null;
+        if (session?.familyId) {
+          await AuthRepo.revokeFamily(session.familyId, userId);
+          familyRevoked = true;
+        }
+      } catch {
+        logger.debug(`[Auth] Logout for ${userId} carried an unusable refresh token`);
+      }
+    }
 
     await CacheUtil.del(`user:${userId}`);
-    logger.info(`[Auth] User ${userId} logged out (refresh row dropped: ${Boolean(refreshToken)})`);
+    logger.info(`[Auth] User ${userId} logged out (refresh family revoked: ${familyRevoked})`);
     return { message: 'Logged out successfully' };
   }
 
@@ -475,25 +559,35 @@ export default class AuthSvc {
     includeUser = true,
     options: {
       revokeOtherSessions?: boolean;
-      replacesRefreshToken?: string;
+      replacesJti?: string;
+      familyId?: string;
       providerUserId?: string;
       providerAvatarUrl?: string;
     } = {},
   ) {
-    const refreshToken = jwt.sign(
-      { userId: user.id, jti: crypto.randomBytes(16).toString('hex') },
-      REFRESH_TOKEN_SECRET,
-      { expiresIn: REFRESH_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] },
-    );
+    // A login starts a family; a refresh continues the one it was handed. Continuing matters —
+    // a fresh family per rotation would leave every chain one link long and reuse detection
+    // with nothing to revoke.
+    const jti = crypto.randomBytes(16).toString('hex');
+    const familyId = options.familyId || crypto.randomBytes(16).toString('hex');
 
-    // Purge, create, and point activeSessionId at the new session — all or nothing.
+    const refreshToken = jwt.sign({ userId: user.id, jti, familyId }, REFRESH_TOKEN_SECRET, {
+      expiresIn: REFRESH_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'],
+    });
+
+    // Revoke, create, link, and point activeSessionId at the new session — all or nothing.
+    // The row stores the token's identity and a hash of it, never the token (F100).
     const newSession = await AuthRepo.rotateSession({
       userId: user.id,
-      refreshToken,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      jti,
+      refreshTokenHash: this.hashRefreshToken(refreshToken),
+      familyId,
+      // Derived from the same value the JWT is signed with. These were two independent
+      // numbers and the shorter one silently won on day eight (F99).
+      expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRY_MS),
       provider,
       revokeOtherSessions: options.revokeOtherSessions,
-      replacesRefreshToken: options.replacesRefreshToken,
+      replacesJti: options.replacesJti,
       providerUserId: options.providerUserId,
       providerAvatarUrl: options.providerAvatarUrl,
     });
@@ -502,15 +596,17 @@ export default class AuthSvc {
 
     // The access token carries sessionId so authenticate() can tell a live session from a
     // superseded one without a second lookup.
+    //
+    // It deliberately carries no roles. It used to, and nothing ever read them —
+    // `authenticate` loads the user from the database and `permission.middleware` works from
+    // `req.user`, so authorization was already server-side. A roles claim that nobody checks
+    // is only an invitation for someone to start trusting it (F105).
     const accessToken = jwt.sign(
-      {
-        userId: user.id,
-        sessionId: newSession.id,
-        roles:
-          (user as Users & { roles?: { roleName: string }[] }).roles?.map((r) => r.roleName) || [],
-      },
+      { userId: user.id, sessionId: newSession.id },
       ACCESS_TOKEN_SECRET,
-      { expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'] },
+      {
+        expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'],
+      },
     );
 
     await CacheUtil.set(`user:${user.id}`, user);

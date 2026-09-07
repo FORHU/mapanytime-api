@@ -8,9 +8,74 @@ export const ACCESS_TOKEN_SECRET =
   process.env.ACCESS_TOKEN_SECRET || process.env.JWT_SECRET || 'access-secret';
 export const REFRESH_TOKEN_SECRET =
   process.env.REFRESH_TOKEN_SECRET || process.env.JWT_REFRESH_SECRET || 'refresh-secret';
+/**
+ * Access tokens are meant to be short-lived; this default used to be `7d`.
+ *
+ * Nothing depended on the long life — `activeSessionId` is what actually revokes
+ * a token, and it revokes immediately regardless of `exp`. What seven days bought
+ * was blast radius: a token lifted out of `sessionStorage` stayed usable for a
+ * week unless the victim happened to log out. See OPEN-FLAGS.md F98.
+ *
+ * Both clients refresh transparently on 401 and queue concurrent requests while
+ * they do (`web/src/shared/lib/http.ts`, Flutter's `AuthInterceptor`), so a short
+ * expiry costs a silent round-trip rather than a visible sign-out.
+ */
 export const ACCESS_TOKEN_EXPIRY =
-  process.env.ACCESS_TOKEN_EXPIRY || process.env.JWT_EXPIRY || '7d';
+  process.env.ACCESS_TOKEN_EXPIRY || process.env.JWT_EXPIRY || '15m';
 export const REFRESH_TOKEN_EXPIRY = process.env.REFRESH_TOKEN_EXPIRY || '30d';
+
+/**
+ * The refresh lifetime again, in milliseconds, for the session row's `expiresAt`.
+ *
+ * These two must agree. They did not: the JWT was signed for `REFRESH_TOKEN_EXPIRY`
+ * while the row it is validated against was hardcoded to seven days, so on day
+ * eight a signature-valid token failed with a bare "Invalid token" (F99). The
+ * duration is now written once and derived here.
+ */
+export const REFRESH_TOKEN_EXPIRY_MS = parseDuration(REFRESH_TOKEN_EXPIRY);
+
+/**
+ * Parses the `ms`-style duration strings `jsonwebtoken` accepts (`'30d'`, `'15m'`,
+ * `'900s'`, or a bare number of seconds) into milliseconds.
+ *
+ * `ms` itself is a transitive dependency of `jsonwebtoken`, not a direct one, so
+ * it is not ours to import — this covers the spellings this config actually uses
+ * and refuses anything else loudly rather than silently resolving to `NaN`, which
+ * would put `Invalid Date` in `expiresAt` and fail every refresh.
+ */
+function parseDuration(value: string): number {
+  const match = /^(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w|y)?$/i.exec(value.trim());
+  if (!match) {
+    throw new Error(
+      `Invalid token expiry "${value}". Expected a number of seconds or an ms-style duration such as "15m", "7d".`,
+    );
+  }
+
+  const amount = parseFloat(match[1]);
+  const unit = (match[2] || 's').toLowerCase();
+  const perUnit: Record<string, number> = {
+    ms: 1,
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000,
+    w: 7 * 24 * 60 * 60 * 1000,
+    y: 365 * 24 * 60 * 60 * 1000,
+  };
+
+  return amount * perUnit[unit];
+}
+
+/**
+ * How long a just-rotated refresh token still answers without being treated as
+ * theft. See OPEN-FLAGS.md F103 and §14 of the auth architecture note.
+ *
+ * Deliberately small. Both clients serialise their refreshes, so this covers the
+ * genuine races they cannot — a retry landing after the response was lost, two
+ * tabs waking together — and nothing else. Set it to 0 to disable the grace and
+ * treat every reuse as compromise.
+ */
+export const REFRESH_TOKEN_GRACE_MS = parseInt(process.env.REFRESH_TOKEN_GRACE_MS || '10000');
 
 export const DATABASE_URL = process.env.DATABASE_URL;
 
