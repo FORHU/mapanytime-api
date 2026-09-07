@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import OrganizationRepository, { toMemberResponse } from './organization.repository';
 import { storeScopeWhere, type OrgContext } from './orgContext';
-import { normalizePermissions } from './sellerPermissions.constant';
+import { normalizePermissions, buildSellerCatalogue } from './sellerPermissions.constant';
 import { SYSTEM_ROLES, type SellerOrgRoleName } from '../../constants/roles.constant';
 import { prisma } from '../../utils/prisma';
 import AuthService from '../auth/auth.service';
@@ -38,6 +38,9 @@ export default class OrganizationService {
       // Resolved, not raw: admins come back holding every feature so the web
       // nav does not have to re-implement the implicit-admin rule.
       permissions: ctx.permissions,
+      // The vocabulary itself, so the team UI renders what this API accepts
+      // rather than a hand-copied list of its own that can drift from it.
+      catalogue: buildSellerCatalogue(),
     };
   }
 

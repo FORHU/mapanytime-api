@@ -57,6 +57,20 @@ export function isSellerOrgRole(role: string): role is SellerOrgRoleName {
 }
 
 /**
+ * Short labels for the seller-organization roles, for the team UI's role picker.
+ *
+ * Separate from `ROLE_DESCRIPTIONS`, which holds sentences meant for the admin
+ * RBAC screens. These are served to the web so the client no longer keeps its
+ * own copy of the role vocabulary — the two drifted (`MANAGER` vs
+ * `SELLER_MANAGER`) and every role save came back 400.
+ */
+export const SELLER_ORG_ROLE_LABELS: Record<SellerOrgRoleName, string> = {
+  SELLER_ADMIN: 'Seller Admin',
+  SELLER_MANAGER: 'Manager',
+  SELLER_MEMBER: 'Member',
+};
+
+/**
  * What `roles.seeder.ts` writes to `Roles.description` for each role. Typed as
  * `Record<SystemRole, string>` so adding a role to SYSTEM_ROLES without adding
  * its description here is a compile error, not a role that silently never gets
