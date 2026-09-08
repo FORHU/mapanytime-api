@@ -35,6 +35,7 @@ const admin: OrgContext = {
   isOwner: true,
   assignedStoreIds: null,
   permissions: [...ALL_SELLER_FEATURES],
+  sellerStatus: 'APPROVED',
 };
 
 /**
@@ -115,6 +116,7 @@ describe('ProductService.getMyProducts â€” server-side sorting', () => {
       isOwner: false,
       assignedStoreIds: ['store-assigned'],
       permissions: ['products.view'],
+      sellerStatus: null,
     };
 
     await ProductService.getMyProducts(member, 'store-not-assigned', base);

@@ -1,4 +1,4 @@
-﻿import { Prisma } from '@prisma/client';
+﻿import { Prisma, ApplicationStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.repository';
 import { SYSTEM_ROLES, type SellerOrgRoleName } from '../../constants/roles.constant';
 import { ALL_SELLER_FEATURES, type SellerFeature } from './sellerPermissions.constant';
@@ -28,6 +28,12 @@ import { ALL_SELLER_FEATURES, type SellerFeature } from './sellerPermissions.con
  *   verbatim, because role defaults are resolved at write time (see
  *   `normalizePermissions`). An empty list therefore means "no features", not
  *   "fall back to the role default".
+ * - `sellerStatus` — the caller's own seller application status, or `null` when
+ *   they hold no `Sellers` row. `null` is not a failure state: org staff never
+ *   apply to be sellers, and their authority comes from the store assignment.
+ *   Anything reading this must distinguish the two, or every hired member of an
+ *   approved organization gets treated as unverified. See
+ *   `requireApprovedSeller`.
  */
 export interface OrgContext {
   organizationId: string | null;
@@ -36,6 +42,7 @@ export interface OrgContext {
   isOwner: boolean;
   assignedStoreIds: string[] | null;
   permissions: SellerFeature[];
+  sellerStatus: ApplicationStatus | null;
 }
 
 const EMPTY_CONTEXT: OrgContext = {
@@ -45,6 +52,7 @@ const EMPTY_CONTEXT: OrgContext = {
   isOwner: false,
   assignedStoreIds: null,
   permissions: [],
+  sellerStatus: null,
 };
 
 /**
@@ -72,12 +80,18 @@ export function resolveOrgContext(user: AuthUser | undefined): OrgContext {
     return Number(bAdmin) - Number(aAdmin);
   });
 
+  // Reported alongside the context rather than folded into `permissions`:
+  // withholding features here would silently change every `requireSellerFeature`
+  // check in the codebase. Approval is enforced in one explicit middleware
+  // instead, so this stays a fact about the caller, not a decision about them.
+  const sellerStatus = user.seller?.applicationStatus ?? null;
+
   const membership = sorted[0];
   if (membership) {
     // Ownership is per-organization, not "has a Sellers row": a merchant who
     // also works as staff somewhere else owns the org their own row *is*, and
     // is plain staff in the other one.
-    return buildContext(membership, user.seller?.id ?? null);
+    return buildContext(membership, user.seller?.id ?? null, sellerStatus);
   }
 
   // Fall back to the user's own seller registration. Since `Sellers` *is* the
@@ -92,6 +106,7 @@ export function resolveOrgContext(user: AuthUser | undefined): OrgContext {
       isOwner: true,
       assignedStoreIds: null,
       permissions: [...ALL_SELLER_FEATURES],
+      sellerStatus,
     };
   }
 
@@ -106,6 +121,7 @@ function buildContext(
     permissions?: string[];
   },
   ownedSellerId: string | null,
+  sellerStatus: ApplicationStatus | null,
 ): OrgContext {
   const roleName = membership.role ?? null;
   const role = roleName ? (roleName as SellerOrgRoleName) : null;
@@ -130,6 +146,7 @@ function buildContext(
     isOwner,
     assignedStoreIds,
     permissions,
+    sellerStatus,
   };
 }
 

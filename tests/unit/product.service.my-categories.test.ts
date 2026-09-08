@@ -40,6 +40,7 @@ const admin: OrgContext = {
   isOwner: true,
   assignedStoreIds: null,
   permissions: [...ALL_SELLER_FEATURES],
+  sellerStatus: 'APPROVED',
 };
 
 beforeEach(() => {
@@ -168,6 +169,7 @@ describe('ProductService.getMyCategories', () => {
       isOwner: false,
       assignedStoreIds: ['store-assigned'],
       permissions: ['products.view'],
+      sellerStatus: null,
     };
     getUsedCounts.mockResolvedValue([]);
 
@@ -190,6 +192,7 @@ describe('ProductService.getMyCategories', () => {
       isOwner: false,
       assignedStoreIds: null,
       permissions: [],
+      sellerStatus: null,
     };
     getUsedCounts.mockResolvedValue([]);
 
