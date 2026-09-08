@@ -201,6 +201,7 @@ describe('StoreService', () => {
       isOwner: true,
       assignedStoreIds: null,
       permissions: [...ALL_SELLER_FEATURES],
+      sellerStatus: 'APPROVED',
     };
 
     const existingStore = {

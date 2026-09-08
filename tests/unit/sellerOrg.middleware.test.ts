@@ -1,5 +1,6 @@
 ﻿import type { Request, Response, NextFunction } from 'express';
 import {
+  requireApprovedSeller,
   requireSellerFeature,
   requireSellerOrgAdmin,
 } from '../../src/middleware/sellerOrg.middleware';
@@ -35,8 +36,11 @@ const ADMIN: OrgContext = {
   isOwner: true,
   assignedStoreIds: null,
   permissions: [...ALL_SELLER_FEATURES],
+  sellerStatus: 'APPROVED',
 };
 
+// `sellerStatus: null` is the accurate value for staff, not a placeholder: a
+// member holds no `Sellers` row of their own.
 const MEMBER: OrgContext = {
   organizationId: 'org-1',
   role: 'SELLER_MEMBER',
@@ -44,6 +48,7 @@ const MEMBER: OrgContext = {
   isOwner: false,
   assignedStoreIds: ['store-1'],
   permissions: ['orders.process', 'products.view'],
+  sellerStatus: null,
 };
 
 /**
@@ -200,6 +205,70 @@ describe('requireSellerFeature', () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(403);
+  });
+
+  it('401s when there is no authenticated user', () => {
+    const { res, next } = run({} as Request);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+/**
+ * Gates store creation on an administrator having approved the seller.
+ *
+ * The staff case is the one worth guarding: an organization member has no
+ * `Sellers` row, so a check that treated a missing status as "not approved"
+ * would lock every hired member out of an approved organization. That is a
+ * regression this suite exists to catch, not a hypothetical — the same carve-out
+ * already had to be written into `inventory.service.ts`.
+ */
+describe('requireApprovedSeller', () => {
+  const run = (req: Request) => {
+    const res = makeRes();
+    const next = jest.fn() as NextFunction;
+    requireApprovedSeller(req, res, next);
+    return { res, next };
+  };
+
+  const withSeller = (applicationStatus: string | null) =>
+    ({
+      user: {
+        id: 'u1',
+        seller: applicationStatus === null ? null : { id: 's1', applicationStatus },
+      },
+    }) as unknown as Request;
+
+  it('admits an approved seller', () => {
+    const { res, next } = run(withSeller('APPROVED'));
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(0);
+  });
+
+  it('refuses a pending seller with 403 and a review-specific code', () => {
+    const { res, next } = run(withSeller('PENDING'));
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toMatchObject({ code: 'SELLER_NOT_APPROVED' });
+    expect(res.body.message).toMatch(/reviewed/i);
+  });
+
+  it('refuses a rejected seller, and says so rather than implying a wait', () => {
+    const { res, next } = run(withSeller('REJECTED'));
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(403);
+    expect(res.body.message).toMatch(/not approved/i);
+  });
+
+  it('admits organization staff, who have no Sellers row of their own', () => {
+    const { res, next } = run(withSeller(null));
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(0);
   });
 
   it('401s when there is no authenticated user', () => {
