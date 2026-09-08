@@ -109,6 +109,47 @@ export const requireSellerFeature = (code: SellerFeature) => {
 };
 
 /**
+ * Gate a route on the caller's seller application having been approved by an
+ * administrator.
+ *
+ * Only applies to a caller who holds a `Sellers` row of their own. Organization
+ * staff have no application to approve — their authority comes from the store
+ * assignment — so a missing status is a pass, not a refusal. Blocking on `null`
+ * here would lock every hired member out of an approved organization, which is
+ * the same carve-out `assertSellerApprovedIfOwner` documents in
+ * `inventory.service.ts`.
+ *
+ * Like `requireSellerFeature` this is a pure in-memory check: `userInclude`
+ * already loads the seller row onto `req.user`, so it costs no query.
+ *
+ * The 403 body carries `code: 'SELLER_NOT_APPROVED'` so the web can tell "your
+ * application is still under review" from the generic organization refusals
+ * above, which are about who you are rather than what state you are in.
+ */
+export const requireApprovedSeller = (req: Request, res: Response, next: NextFunction) => {
+  const user = req.user;
+  if (!user) return res.status(401).json({ status: 'error', message: 'Unauthorized' });
+
+  const status = user.seller?.applicationStatus ?? null;
+
+  // No seller row: org staff. Not their application to pass or fail.
+  if (status === null) return next();
+
+  if (status !== 'APPROVED') {
+    return res.status(403).json({
+      status: 'error',
+      code: 'SELLER_NOT_APPROVED',
+      message:
+        status === 'REJECTED'
+          ? 'Your seller application was not approved.'
+          : 'Your seller account is still being reviewed by an administrator.',
+    });
+  }
+
+  next();
+};
+
+/**
  * Resolve the `storeId` for a request. Prefers an explicit `:storeId` route
  * param, then a `storeId` in the body or query string.
  */

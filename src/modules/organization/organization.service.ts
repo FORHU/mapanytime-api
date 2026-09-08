@@ -38,6 +38,12 @@ export default class OrganizationService {
       // Resolved, not raw: admins come back holding every feature so the web
       // nav does not have to re-implement the implicit-admin rule.
       permissions: ctx.permissions,
+      // Whether an administrator has verified this seller yet. Carried here
+      // rather than read from the login response alone so an approval takes
+      // effect on the next refetch of this endpoint — the seller does not have
+      // to sign out and back in to be let through. `null` means org staff, who
+      // have no application of their own.
+      sellerStatus: ctx.sellerStatus,
       // The vocabulary itself, so the team UI renders what this API accepts
       // rather than a hand-copied list of its own that can drift from it.
       catalogue: buildSellerCatalogue(),

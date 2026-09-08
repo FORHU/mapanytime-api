@@ -20,6 +20,7 @@ const admin: OrgContext = {
   isOwner: true,
   assignedStoreIds: null,
   permissions: ['orders.process', 'products.view', 'products.edit', 'promotions.add'],
+  sellerStatus: 'APPROVED',
 };
 
 const member: OrgContext = {
@@ -29,6 +30,7 @@ const member: OrgContext = {
   isOwner: false,
   assignedStoreIds: ['store-assigned'],
   permissions: ['orders.process', 'products.view', 'products.edit'],
+  sellerStatus: null,
 };
 
 /** The `StoresWhereInput` the service handed the repository. */
@@ -75,6 +77,7 @@ describe('ProductService.getMyProducts store scoping', () => {
       isOwner: false,
       assignedStoreIds: null,
       permissions: [],
+      sellerStatus: null,
     };
 
     await ProductService.getMyProducts(orphan, 'store-assigned', opts);
