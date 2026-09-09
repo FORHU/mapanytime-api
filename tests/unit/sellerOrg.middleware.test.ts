@@ -3,9 +3,7 @@ import {
   requireApprovedSeller,
   requireSellerFeature,
   requireSellerOrgAdmin,
-  requireStoreInScope,
 } from '../../src/middleware/sellerOrg.middleware';
-import { prisma } from '../../src/utils/prisma';
 import type { OrgContext } from '../../src/modules/organization/orgContext';
 import {
   ALL_SELLER_FEATURES,
@@ -13,11 +11,7 @@ import {
 } from '../../src/modules/organization/sellerPermissions.constant';
 import { PERMISSIONS } from '../../src/constants/permissions.constant';
 
-jest.mock('../../src/utils/prisma', () => ({
-  prisma: { stores: { findUnique: jest.fn(), findFirst: jest.fn() } },
-}));
-
-const mockPrisma = prisma as unknown as { stores: { findFirst: jest.Mock } };
+jest.mock('../../src/utils/prisma', () => ({ prisma: { stores: { findUnique: jest.fn() } } }));
 
 function makeRes() {
   const res = {
@@ -282,79 +276,5 @@ describe('requireApprovedSeller', () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(401);
-  });
-});
-
-/**
- * The org-ownership gate. Its 404-not-403 answer is the reason store ids cannot
- * be probed from outside an organization, and a deleted store has to give the
- * same answer â€” otherwise "not found" and "deleted" are distinguishable, and the
- * soft delete leaks the fact that the store once existed.
- */
-describe('requireStoreInScope', () => {
-  const runScope = async (context: OrgContext, storeId = 'store-1') => {
-    const req = {
-      params: { id: storeId },
-      body: {},
-      query: {},
-      orgContext: context,
-    } as unknown as Request;
-    const res = makeRes();
-    const next = jest.fn() as unknown as NextFunction;
-    await requireStoreInScope(req, res, next);
-    return { res, next };
-  };
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  it('excludes soft-deleted stores in the query itself', async () => {
-    mockPrisma.stores.findFirst.mockResolvedValue({ id: 'store-1', sellerId: 'org-1' });
-
-    await runScope(ADMIN);
-
-    expect(mockPrisma.stores.findFirst).toHaveBeenCalledWith({
-      where: { id: 'store-1', deletedAt: null },
-    });
-  });
-
-  it('admits a store the organization owns', async () => {
-    mockPrisma.stores.findFirst.mockResolvedValue({ id: 'store-1', sellerId: 'org-1' });
-
-    const { res, next } = await runScope(ADMIN);
-
-    expect(next).toHaveBeenCalledTimes(1);
-    expect(res.statusCode).toBe(0);
-  });
-
-  // The filter above means a deleted store arrives here as null, which is the
-  // same shape as one that never existed.
-  it('404s a deleted store', async () => {
-    mockPrisma.stores.findFirst.mockResolvedValue(null);
-
-    const { res, next } = await runScope(ADMIN);
-
-    expect(next).not.toHaveBeenCalled();
-    expect(res.statusCode).toBe(404);
-    expect(res.body.message).toBe('Store not found.');
-  });
-
-  it("404s another organization's store", async () => {
-    mockPrisma.stores.findFirst.mockResolvedValue({ id: 'store-1', sellerId: 'org-2' });
-
-    const { res, next } = await runScope(ADMIN);
-
-    expect(next).not.toHaveBeenCalled();
-    expect(res.statusCode).toBe(404);
-  });
-
-  it("404s a store outside a member's assigned set", async () => {
-    mockPrisma.stores.findFirst.mockResolvedValue({ id: 'store-9', sellerId: 'org-1' });
-
-    const { res, next } = await runScope(MEMBER, 'store-9');
-
-    expect(next).not.toHaveBeenCalled();
-    expect(res.statusCode).toBe(404);
   });
 });

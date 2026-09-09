@@ -191,10 +191,7 @@ export const requireStoreInScope = async (req: Request, res: Response, next: Nex
       return res.status(400).json({ status: 'error', message: 'storeId is required' });
     }
 
-    // `deletedAt: null` is part of the lookup, not a check afterwards: a deleted
-    // store is gone, and answering with the same 404 as an out-of-scope one
-    // keeps the two indistinguishable.
-    const store = await prisma.stores.findFirst({ where: { id: storeId, deletedAt: null } });
+    const store = await prisma.stores.findUnique({ where: { id: storeId } });
     // `organizationId` is a `Sellers.id`, which is exactly what a store's
     // `sellerId` points at — the store/org link no longer needs its own column.
     if (!store || store.sellerId !== context.organizationId) {

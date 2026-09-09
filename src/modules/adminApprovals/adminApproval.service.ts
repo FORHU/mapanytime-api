@@ -1,28 +1,7 @@
-import { PROPERTYSTATUS } from '@prisma/client';
+import { PROPERTYSTATUS, STOREAPPROVALSTATUS } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
-import StoreApprovalService, { isClaimStale } from './storeApproval.service';
 
-/**
- * The vocabulary the admin queue speaks, across both entity types.
- *
- * `DRAFT` exists here because properties have one and stores do not. It used to
- * be folded into PENDING, which put listings the seller had not submitted yet
- * into the review queue looking identical to ones actually waiting on an admin.
- */
-export type ApprovalStatus =
-  'DRAFT' | 'PENDING' | 'UNDER_REVIEW' | 'NEEDS_REVISION' | 'ACTIVE' | 'REJECTED';
-
-/**
- * Properties have no reviewer-claim concept, so `PENDING_REVIEW` maps to
- * PENDING (waiting, unclaimed) rather than UNDER_REVIEW — nobody has picked it
- * up, and saying otherwise would hide it from the queue an admin works from.
- */
-const PROPERTY_STATUS_MAP: Record<PROPERTYSTATUS, ApprovalStatus> = {
-  [PROPERTYSTATUS.DRAFT]: 'DRAFT',
-  [PROPERTYSTATUS.PENDING_REVIEW]: 'PENDING',
-  [PROPERTYSTATUS.ACTIVE]: 'ACTIVE',
-  [PROPERTYSTATUS.REJECTED]: 'REJECTED',
-};
+export type ApprovalStatus = 'PENDING' | 'ACTIVE' | 'REJECTED';
 
 export default class AdminApprovalService {
   static async listApprovals() {
@@ -32,16 +11,8 @@ export default class AdminApprovalService {
         include: {
           seller: { include: { users: true } },
           storeLocations: true,
-          reviewClaimedBy: { select: { id: true, firstName: true, lastName: true } },
         },
-        // Queue order follows the most recent submission, so a store that has
-        // been through a revision round takes its new place in line rather than
-        // keeping its original one.
-        //
-        // `nulls: 'last'` because Postgres sorts NULLs first on DESC, which
-        // would float every row without a submission date — seeded fixtures,
-        // and anything the backfill missed — above real submissions.
-        orderBy: [{ lastSubmittedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+        orderBy: { createdAt: 'desc' },
       }),
       prisma.productProperties.findMany({
         include: {
@@ -73,21 +44,6 @@ export default class AdminApprovalService {
         propertyType: null,
         status: store.approvalStatus as ApprovalStatus,
         rejectionReason: store.rejectionReason,
-        revisionNotes: store.revisionNotes,
-        // A claim nobody has acted on for a day is reported as released, so the
-        // store returns to the workable queue without a scheduled job and
-        // without the status column lying about where it is.
-        claimedBy:
-          store.reviewClaimedBy && !isClaimStale(store.reviewClaimedAt)
-            ? {
-                id: store.reviewClaimedBy.id,
-                name:
-                  `${store.reviewClaimedBy.firstName ?? ''} ${store.reviewClaimedBy.lastName ?? ''}`.trim() ||
-                  'Unknown admin',
-              }
-            : null,
-        claimedAt: isClaimStale(store.reviewClaimedAt) ? null : store.reviewClaimedAt,
-        submittedAt: store.lastSubmittedAt ?? store.createdAt,
         createdAt: store.createdAt,
       })),
       ...properties.map((property) => ({
@@ -100,14 +56,13 @@ export default class AdminApprovalService {
         city: null,
         province: null,
         propertyType: property.propertyType,
-        status: PROPERTY_STATUS_MAP[property.status],
+        status:
+          property.status === PROPERTYSTATUS.ACTIVE
+            ? ('ACTIVE' as const)
+            : property.status === PROPERTYSTATUS.REJECTED
+              ? ('REJECTED' as const)
+              : ('PENDING' as const),
         rejectionReason: property.rejectionReason,
-        revisionNotes: null,
-        // Properties are reviewed without the claim workflow, so these are
-        // always null rather than absent — the admin table renders one shape.
-        claimedBy: null,
-        claimedAt: null,
-        submittedAt: property.createdAt,
         createdAt: property.createdAt,
       })),
     ];
@@ -143,32 +98,62 @@ export default class AdminApprovalService {
     });
   }
 
-  /**
-   * Store decisions all delegate to `StoreApprovalService`, which owns the
-   * transition matrix, the compare-and-set write and the audit entry. These
-   * wrappers exist so the controller keeps one service to talk to.
-   */
-  static approveStore(storeId: string, adminId: string) {
-    return StoreApprovalService.approve(storeId, adminId);
+  static async approveStore(storeId: string, adminId: string) {
+    const store = await prisma.stores.findUnique({
+      where: { id: storeId },
+      include: { documentVerifications: true },
+    });
+    if (!store) throw { status: 404, message: 'Store not found.' };
+
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.stores.update({
+        where: { id: storeId },
+        data: {
+          isActive: true,
+          approvalStatus: STOREAPPROVALSTATUS.ACTIVE,
+          rejectionReason: null,
+          reviewedAt: new Date(),
+          reviewedById: adminId,
+        },
+      });
+
+      await tx.documentVerifications.updateMany({
+        where: { storeId },
+        data: {
+          verificationStatus: 'APPROVED',
+          verifiedById: adminId,
+        },
+      });
+
+      return updated;
+    });
   }
 
-  static rejectStore(storeId: string, adminId: string, reason: string) {
-    return StoreApprovalService.reject(storeId, adminId, reason);
-  }
+  static async rejectStore(storeId: string, adminId: string, reason: string) {
+    const store = await prisma.stores.findUnique({ where: { id: storeId } });
+    if (!store) throw { status: 404, message: 'Store not found.' };
 
-  static requestStoreRevision(storeId: string, adminId: string, notes: string) {
-    return StoreApprovalService.requestRevision(storeId, adminId, notes);
-  }
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.stores.update({
+        where: { id: storeId },
+        data: {
+          isActive: false,
+          approvalStatus: STOREAPPROVALSTATUS.REJECTED,
+          rejectionReason: reason,
+          reviewedAt: new Date(),
+          reviewedById: adminId,
+        },
+      });
 
-  static claimStore(storeId: string, adminId: string, force = false) {
-    return StoreApprovalService.claim(storeId, adminId, force);
-  }
+      await tx.documentVerifications.updateMany({
+        where: { storeId },
+        data: {
+          verificationStatus: 'REJECTED',
+          verifiedById: adminId,
+        },
+      });
 
-  static releaseStore(storeId: string, adminId: string) {
-    return StoreApprovalService.release(storeId, adminId);
-  }
-
-  static getStoreHistory(storeId: string) {
-    return StoreApprovalService.getHistory(storeId);
+      return updated;
+    });
   }
 }

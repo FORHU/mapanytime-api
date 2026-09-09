@@ -43,7 +43,7 @@ const admin: OrgContext = {
  * intersected with the requested store, never replaced by it.
  */
 const SCOPE_FOR_STORE_1 = {
-  AND: [{ sellerId: 'org-1', deletedAt: null }, { id: 'store-1' }],
+  AND: [{ sellerId: 'org-1' }, { id: 'store-1' }],
 };
 
 describe('ProductService.getMyProducts â€” server-side sorting', () => {
@@ -123,10 +123,7 @@ describe('ProductService.getMyProducts â€” server-side sorting', () => {
 
     expect(mockedRepo.getMyProducts).toHaveBeenCalledWith(
       {
-        AND: [
-          { sellerId: 'org-1', deletedAt: null, id: { in: ['store-assigned'] } },
-          { id: 'store-not-assigned' },
-        ],
+        AND: [{ sellerId: 'org-1', id: { in: ['store-assigned'] } }, { id: 'store-not-assigned' }],
       },
       expect.anything(),
     );

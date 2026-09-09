@@ -158,11 +158,6 @@ function buildContext(
  *
  * A context with no usable organization yields a tautology-free filter that
  * matches nothing, so a caller can never leak rows across organizations.
- *
- * `deletedAt: null` is part of the scope, not an extra the callers remember to
- * add. This function backs both `getMyStores` and `resolveAccessibleStoreIds`,
- * and the latter is what `assertStoreInScope` reads for products, inventory,
- * orders and ads â€” so a deleted store stops being reachable everywhere at once.
  */
 export function storeScopeWhere(context: OrgContext): Prisma.StoresWhereInput {
   if (!context.organizationId) {
@@ -171,11 +166,10 @@ export function storeScopeWhere(context: OrgContext): Prisma.StoresWhereInput {
     return { id: { equals: '__NO_SCOPE__' } };
   }
   if (context.isAdmin || context.assignedStoreIds === null) {
-    return { sellerId: context.organizationId, deletedAt: null };
+    return { sellerId: context.organizationId };
   }
   return {
     sellerId: context.organizationId,
-    deletedAt: null,
     id: { in: context.assignedStoreIds.length > 0 ? context.assignedStoreIds : ['__NONE__'] },
   };
 }

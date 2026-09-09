@@ -152,7 +152,7 @@ describe('ProductService.getMyCategories', () => {
     await ProductService.getMyCategories(admin, undefined);
 
     // The repository takes a resolved StoresWhereInput now, not (storeId, sellerId).
-    expect(getUsedCounts).toHaveBeenCalledWith({ sellerId: 'org-1', deletedAt: null });
+    expect(getUsedCounts).toHaveBeenCalledWith({ sellerId: 'org-1' });
     expect(getStore).not.toHaveBeenCalled();
   });
 
@@ -177,7 +177,6 @@ describe('ProductService.getMyCategories', () => {
 
     expect(getUsedCounts).toHaveBeenCalledWith({
       sellerId: 'org-1',
-      deletedAt: null,
       id: { in: ['store-assigned'] },
     });
   });

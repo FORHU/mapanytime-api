@@ -45,7 +45,7 @@ describe('ProductService.getMyProducts store scoping', () => {
   it('covers every org store for an admin in All-Stores mode', async () => {
     await ProductService.getMyProducts(admin, undefined, opts);
 
-    expect(scopeUsed()).toEqual({ sellerId: 'org-1', deletedAt: null });
+    expect(scopeUsed()).toEqual({ sellerId: 'org-1' });
   });
 
   it('covers only assigned stores for a member in All-Stores mode', async () => {
@@ -53,7 +53,6 @@ describe('ProductService.getMyProducts store scoping', () => {
 
     expect(scopeUsed()).toEqual({
       sellerId: 'org-1',
-      deletedAt: null,
       id: { in: ['store-assigned'] },
     });
   });
@@ -66,10 +65,7 @@ describe('ProductService.getMyProducts store scoping', () => {
     await ProductService.getMyProducts(member, 'store-not-assigned', opts);
 
     expect(scopeUsed()).toEqual({
-      AND: [
-        { sellerId: 'org-1', deletedAt: null, id: { in: ['store-assigned'] } },
-        { id: 'store-not-assigned' },
-      ],
+      AND: [{ sellerId: 'org-1', id: { in: ['store-assigned'] } }, { id: 'store-not-assigned' }],
     });
   });
 
@@ -99,7 +95,6 @@ describe('ProductService.getMyProducts store scoping', () => {
 
     expect(scopeUsed()).toEqual({
       sellerId: 'org-1',
-      deletedAt: null,
       id: { in: ['__NONE__'] },
     });
   });
