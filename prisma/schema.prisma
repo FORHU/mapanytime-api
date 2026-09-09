@@ -42,6 +42,7 @@ model Users {
   notifications      Notifications[]
   reviewedProperties ProductProperties[]         @relation("PropertyReviewers")
   reviewedStores     Stores[]                    @relation("StoreReviewers")
+  claimedStoreReviews Stores[]                   @relation("StoreReviewClaimant")
   userReferral       Users?                      @relation("UserReferrals", fields: [userReferralId], references: [id])
   userReferrals      Users[]                     @relation("UserReferrals")
   orgMemberships     SellerOrganizationMembers[]
@@ -412,9 +413,37 @@ model Stores {
   vacationMode      Boolean             @default(false)
   isActive          Boolean             @default(false)
   approvalStatus    STOREAPPROVALSTATUS @default(PENDING)
+  // Terminal denial only. Kept separate from `revisionNotes` because
+  // overloading one column is exactly what made REJECTED ambiguous: the seller
+  // UI branches on which of the two is populated.
   rejectionReason   String?
+  // The current round's fix list, written when an admin moves the store to
+  // NEEDS_REVISION. A denormalised copy of the newest AuditLogs entry, kept
+  // because the seller must read it without querying an admin-shaped log; it is
+  // overwritten each round on purpose. AuditLogs remains the history.
+  revisionNotes     String?
+  // The soft lock. Set when an admin claims the application (UNDER_REVIEW) and
+  // cleared on every exit from it. A claim older than STALE_CLAIM_MS is treated
+  // as released at read time — see storeApproval.service.ts.
+  reviewClaimedById String?
+  reviewClaimedAt   DateTime?
+  // Queue ordering that survives resubmission: `createdAt` would keep sending a
+  // store that has been through three revision rounds to the top of the list.
+  lastSubmittedAt   DateTime?
+  // The seller's own open/closed toggle, parked while an already-approved store
+  // is pulled back into review. The map filters on `isActive` alone, so a
+  // re-review has to force it false; without somewhere to keep the seller's
+  // intent, re-approval would reopen a store they had deliberately closed.
+  // Null except while a previously-approved store is under re-review.
+  activeBeforeReview Boolean?
   reviewedAt        DateTime?
   reviewedById      String?
+  // When the store entered REJECTED, and the anchor for the 24-hour deletion
+  // window. Deliberately not `reviewedAt`: every terminal transition overwrites
+  // that one, so a re-approval or a revision request would silently re-date a
+  // window that is supposed to belong to the rejection alone. Cleared on every
+  // transition out of REJECTED, which is what cancels the timer.
+  rejectedAt        DateTime?
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
   deletedAt         DateTime?
@@ -429,6 +458,7 @@ model Stores {
   storeReviews          StoreReviews[]
   seller                Sellers                 @relation(fields: [sellerId], references: [id])
   reviewedBy            Users?                  @relation("StoreReviewers", fields: [reviewedById], references: [id])
+  reviewClaimedBy       Users?                  @relation("StoreReviewClaimant", fields: [reviewClaimedById], references: [id])
   categories            Categories[]            @relation("CategoriesToStores")
   orders                Orders[]
   inventory             Inventory[]
@@ -439,6 +469,12 @@ model Stores {
   @@index([sellerId])
   @@index([isActive])
   @@index([primaryCategoryId])
+  // Re-added: dropped by the house_lot_metadata migration, and the admin queue
+  // now filters on this column on every load.
+  @@index([approvalStatus])
+  @@index([reviewClaimedById])
+  // The hourly purge sweep's only query: REJECTED rows past their window.
+  @@index([approvalStatus, rejectedAt])
 }
 
 model StoreHours {
@@ -870,8 +906,20 @@ enum ApplicationStatus {
   REJECTED
 }
 
+/**
+ * The store approval lifecycle.
+ *
+ * Distinct from `ApplicationStatus`, which governs whether the *seller* is
+ * verified at all. A verified seller can still have a PENDING store.
+ *
+ * PENDING and UNDER_REVIEW are both "waiting on an admin" — the difference is
+ * whether one has claimed it. NEEDS_REVISION is the only non-terminal state the
+ * seller can act on, and the only one besides ACTIVE where their edits unlock.
+ */
 enum STOREAPPROVALSTATUS {
   PENDING
+  UNDER_REVIEW
+  NEEDS_REVISION
   ACTIVE
   REJECTED
 }

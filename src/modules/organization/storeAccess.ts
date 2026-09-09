@@ -35,7 +35,10 @@ export async function resolveAccessibleStoreIds(user: AuthUser): Promise<{
 
   const seller = await prisma.sellers.findUnique({
     where: { userId: user.id },
-    include: { stores: { select: { id: true } } },
+    // The org branch above scopes out deleted stores via `storeScopeWhere`; this
+    // legacy direct-ownership branch has to say so itself, or a deleted store
+    // stays reachable for any seller whose organization backfill never ran.
+    include: { stores: { where: { deletedAt: null }, select: { id: true } } },
   });
 
   const storeIds = [...new Set([...orgStoreIds, ...(seller?.stores.map((s) => s.id) ?? [])])];

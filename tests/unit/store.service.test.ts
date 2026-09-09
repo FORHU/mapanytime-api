@@ -204,10 +204,13 @@ describe('StoreService', () => {
       sellerStatus: 'APPROVED',
     };
 
+    // ACTIVE because these cases are about the patch itself, not the review
+    // lock — an approved store is editable. The lock has its own suite below.
     const existingStore = {
       id: 'store-1',
       sellerId: 'org-1',
       storeName: 'Test Store',
+      approvalStatus: 'ACTIVE' as const,
       storeLocations: null,
     };
 
@@ -273,6 +276,41 @@ describe('StoreService', () => {
       expect(CategoryRepository.findById).not.toHaveBeenCalled();
       const { data } = (tx.stores.update as jest.Mock).mock.calls[0][0];
       expect(data).toEqual({ storeName: 'Renamed' });
+    });
+
+    /**
+     * A store waiting on an administrator is frozen so the reviewer judges the
+     * submission they were handed. NEEDS_REVISION is what unlocks it again —
+     * without that, the seller would be told to fix something they cannot open.
+     */
+    describe('the review lock', () => {
+      const patchIn = (approvalStatus: string) => {
+        (StoreRepository.getStoreById as jest.Mock).mockResolvedValue({
+          ...existingStore,
+          approvalStatus,
+        });
+        return StoreService.updateStore(admin, 'store-1', { storeName: 'Renamed' });
+      };
+
+      it.each(['PENDING', 'UNDER_REVIEW'])('refuses an edit while %s', async (status) => {
+        await expect(patchIn(status)).rejects.toMatchObject({
+          status: 409,
+          code: 'STORE_LOCKED_FOR_REVIEW',
+        });
+        expect(tx.stores.update).not.toHaveBeenCalled();
+      });
+
+      it.each(['NEEDS_REVISION', 'ACTIVE'])('allows an edit while %s', async (status) => {
+        await expect(patchIn(status)).resolves.toBeDefined();
+        expect(tx.stores.update).toHaveBeenCalled();
+      });
+
+      it('refuses a rejected store too, so a denial cannot be edited away', async () => {
+        await expect(patchIn('REJECTED')).rejects.toMatchObject({
+          status: 409,
+          code: 'STORE_LOCKED_FOR_REVIEW',
+        });
+      });
     });
   });
 });
