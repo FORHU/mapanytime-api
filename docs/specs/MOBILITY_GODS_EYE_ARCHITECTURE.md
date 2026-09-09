@@ -13,14 +13,14 @@ MapAnytime Mobility should be implemented as a **vehicle-agnostic mobility subsy
 
 The system must NOT create separate tracking implementations for:
 
-* Jeepneys
-* Tricycles
-* Taxis
-* Buses
-* Vans
-* UV Express
-* E-Trikes
-* Future vehicle types
+- Jeepneys
+- Tricycles
+- Taxis
+- Buses
+- Vans
+- UV Express
+- E-Trikes
+- Future vehicle types
 
 Instead, all transportation modes should use the same generic domain:
 
@@ -78,27 +78,27 @@ The responsibility split should be:
 
 Owns:
 
-* Vehicles
-* Vehicle types
-* Operators
-* Drivers
-* Tracking permissions
-* Operational state
-* Routes
-* Stops
-* Availability
-* Historical telemetry
+- Vehicles
+- Vehicle types
+- Operators
+- Drivers
+- Tracking permissions
+- Operational state
+- Routes
+- Stops
+- Availability
+- Historical telemetry
 
 ### God's Eye
 
 Owns the real-time visibility experience:
 
-* Live vehicle positions
-* Spatial filtering
-* Realtime updates
-* Vehicle movement visualization
-* Map rendering
-* Smooth vehicle interpolation
+- Live vehicle positions
+- Spatial filtering
+- Realtime updates
+- Vehicle movement visualization
+- Map rendering
+- Smooth vehicle interpolation
 
 ---
 
@@ -122,13 +122,13 @@ OrganizationType.TRANSPORT_OPERATOR
 
 Transport operators will therefore automatically benefit from the existing:
 
-* Multi-tenancy
-* RBAC
-* User management
-* Invitations
-* Audit logs
-* API credentials
-* Organization permissions
+- Multi-tenancy
+- RBAC
+- User management
+- Invitations
+- Audit logs
+- API credentials
+- Organization permissions
 
 Conceptually:
 
@@ -272,12 +272,12 @@ Vehicle
 
 This provides:
 
-* Driver accountability
-* Device/app identification
-* Tracking lifecycle
-* Auditability
-* Better telemetry ownership
-* Future trip/session analytics
+- Driver accountability
+- Device/app identification
+- Tracking lifecycle
+- Auditability
+- Better telemetry ownership
+- Future trip/session analytics
 
 ---
 
@@ -311,10 +311,10 @@ Realtime Event
 
 Avoid unnecessary:
 
-* Session loading
-* Heavy database queries
-* Expensive middleware
-* Synchronous historical writes
+- Session loading
+- Heavy database queries
+- Expensive middleware
+- Synchronous historical writes
 
 ## Future Scale
 
@@ -390,7 +390,7 @@ Example data:
 ```json
 {
   "lat": 16.4023,
-  "lng": 120.5960,
+  "lng": 120.596,
   "speed": 23.4,
   "heading": 182,
   "accuracy": 8,
@@ -568,10 +568,10 @@ Expiration
 
 Initial implementation:
 
-* Store locally.
-* Apply a TTL.
-* Prompt again after expiration.
-* Clear when appropriate.
+- Store locally.
+- Apply a TTL.
+- Prompt again after expiration.
+- Clear when appropriate.
 
 Do NOT make sophisticated activity recognition a Phase 1 dependency.
 
@@ -626,12 +626,12 @@ RabbitMQ should decouple telemetry ingestion from historical persistence.
 
 This enables future:
 
-* Route playback
-* Heatmaps
-* Vehicle utilization
-* Traffic analysis
-* Incident investigation
-* Mobility analytics
+- Route playback
+- Heatmaps
+- Vehicle utilization
+- Traffic analysis
+- Incident investigation
+- Mobility analytics
 
 ---
 
@@ -709,16 +709,16 @@ Do NOT blindly introduce duplicate concepts already present in the system.
 
 Before writing mobility code:
 
-* Inspect `Organization`
-* Inspect `OrganizationType`
-* Inspect `User`
-* Inspect RBAC
-* Inspect API credentials
-* Inspect audit logging
-* Inspect Redis infrastructure
-* Inspect RabbitMQ infrastructure
-* Inspect Socket.IO spatial grid
-* Inspect existing Prisma conventions
+- Inspect `Organization`
+- Inspect `OrganizationType`
+- Inspect `User`
+- Inspect RBAC
+- Inspect API credentials
+- Inspect audit logging
+- Inspect Redis infrastructure
+- Inspect RabbitMQ infrastructure
+- Inspect Socket.IO spatial grid
+- Inspect existing Prisma conventions
 
 **Goal:** Integrate Mobility instead of creating a competing architecture.
 
@@ -774,13 +774,13 @@ POST /mobility/tracking/location
 
 Add:
 
-* Operator authentication
-* Vehicle authorization
-* Telemetry validation
-* Redis live state
-* Redis GEO index
-* TTL heartbeat
-* Tracking sessions
+- Operator authentication
+- Vehicle authorization
+- Telemetry validation
+- Redis live state
+- Redis GEO index
+- TTL heartbeat
+- Tracking sessions
 
 Goal:
 
@@ -808,11 +808,11 @@ Relevant Users
 
 Add:
 
-* Viewport subscriptions
-* Spatial filtering
-* Vehicle-type filtering
-* Stale vehicle removal
-* Realtime vehicle updates
+- Viewport subscriptions
+- Spatial filtering
+- Vehicle-type filtering
+- Stale vehicle removal
+- Realtime vehicle updates
 
 Goal:
 
@@ -826,14 +826,14 @@ GPS → Redis → Socket.IO → relevant users
 
 Implement:
 
-* Dynamic vehicle types
-* Dynamic icons
-* Availability API
-* GeoJSON source
-* Symbol layers
-* Smooth interpolation
-* Vehicle selection/filtering
-* Live vehicle display
+- Dynamic vehicle types
+- Dynamic icons
+- Availability API
+- GeoJSON source
+- Symbol layers
+- Smooth interpolation
+- Vehicle selection/filtering
+- Live vehicle display
 
 Goal:
 
@@ -878,11 +878,11 @@ PostgreSQL
 
 Add:
 
-* Historical location storage
-* Route playback
-* Vehicle history
-* Heatmaps
-* Mobility analytics
+- Historical location storage
+- Route playback
+- Vehicle history
+- Heatmaps
+- Mobility analytics
 
 ---
 
@@ -898,11 +898,11 @@ VehicleRouteAssignment
 
 Then:
 
-* Route visualization
-* Stop information
-* ETA
-* Route matching
-* Historical route analysis
+- Route visualization
+- Stop information
+- ETA
+- Route matching
+- Historical route analysis
 
 ---
 
@@ -918,11 +918,11 @@ WebSocket / MQTT
 
 Add:
 
-* Persistent connections
-* Binary/compact telemetry
-* Batch processing
-* High-volume operators
-* Advanced telemetry optimization
+- Persistent connections
+- Binary/compact telemetry
+- Batch processing
+- High-volume operators
+- Advanced telemetry optimization
 
 ---
 
