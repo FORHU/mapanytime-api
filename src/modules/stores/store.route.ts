@@ -46,4 +46,32 @@ router.patch(
   StoreController.updateStore,
 );
 
+// Seller removes a store whose application was rejected. Same stack as PATCH.
+//
+// Deliberately without `requireApprovedSeller`: a seller whose own application
+// has since lapsed must still be able to clear a rejected store out of their
+// list. Whether the store is actually REJECTED is the service's call, not the
+// middleware's â€” a PENDING store must not be deletable to dodge a review.
+router.delete(
+  '/:id',
+  authenticate,
+  requireSellerOrg,
+  requireSellerOrgAdmin,
+  requireStoreInScope,
+  StoreController.deleteStore,
+);
+
+// Seller sends a revised store back for review. Same stack as PATCH, plus the
+// approved-seller gate: a seller whose own application has since lapsed should
+// not be pushing work back into the admin queue.
+router.post(
+  '/:id/resubmit',
+  authenticate,
+  requireSellerOrg,
+  requireApprovedSeller,
+  requireSellerOrgAdmin,
+  requireStoreInScope,
+  StoreController.resubmitStore,
+);
+
 export default router;

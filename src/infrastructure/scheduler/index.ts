@@ -4,6 +4,7 @@ import InventoryReservationService from '../../modules/inventory/inventoryReserv
 import SettlementService from '../../modules/settlements/settlement.service';
 import MerchantAdsService from '../../modules/merchantAds/merchantAds.service';
 import RewardService from '../../modules/rewards/reward.service';
+import StoreService from '../../modules/stores/store.service';
 import RedisUtil from '../../utils/redis.util';
 
 /**
@@ -104,6 +105,27 @@ export const startScheduler = () => {
       });
     } catch (err) {
       logger.error('[Scheduler] MapPoints expiry sweep failed:', err);
+    }
+  });
+
+  // ── Rejected-store purge — runs hourly ──────────────────────────────────
+  // Removes stores whose 24-hour post-rejection window has run out. The window
+  // is the database's to decide, not the seller's dashboard: a seller who never
+  // opens the page must still have the store go away.
+  //
+  // Deliberately not under `withJobLock`. The sweep is idempotent (`deletedAt:
+  // null` is in the WHERE, so a second run in the same hour matches nothing) and
+  // has no outward-facing side effects to duplicate, so the lock would buy
+  // nothing — and see the note on `withJobLock` above about RedisUtil in the
+  // worker process.
+  cron.schedule('15 * * * *', async () => {
+    try {
+      const purged = await StoreService.purgeExpiredRejectedStores();
+      if (purged > 0) {
+        logger.info(`[Scheduler] Removed ${purged} expired rejected store(s).`);
+      }
+    } catch (err) {
+      logger.error('[Scheduler] Rejected-store purge failed:', err);
     }
   });
 

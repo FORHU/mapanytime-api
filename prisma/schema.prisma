@@ -42,6 +42,7 @@ model Users {
   notifications      Notifications[]
   reviewedProperties ProductProperties[]         @relation("PropertyReviewers")
   reviewedStores     Stores[]                    @relation("StoreReviewers")
+  claimedStoreReviews Stores[]                   @relation("StoreReviewClaimant")
   userReferral       Users?                      @relation("UserReferrals", fields: [userReferralId], references: [id])
   userReferrals      Users[]                     @relation("UserReferrals")
   orgMemberships     SellerOrganizationMembers[]
@@ -438,8 +439,14 @@ model Stores {
   isActive          Boolean             @default(false)
   approvalStatus    STOREAPPROVALSTATUS @default(PENDING)
   rejectionReason   String?
+  revisionNotes     String?
+  reviewClaimedById String?
+  reviewClaimedAt   DateTime?
+  lastSubmittedAt   DateTime?
+  activeBeforeReview Boolean?
   reviewedAt        DateTime?
   reviewedById      String?
+  rejectedAt        DateTime?
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
   deletedAt         DateTime?
@@ -454,6 +461,7 @@ model Stores {
   storeReviews          StoreReviews[]
   seller                Sellers                 @relation(fields: [sellerId], references: [id])
   reviewedBy            Users?                  @relation("StoreReviewers", fields: [reviewedById], references: [id])
+  reviewClaimedBy       Users?                  @relation("StoreReviewClaimant", fields: [reviewClaimedById], references: [id])
   categories            Categories[]            @relation("CategoriesToStores")
   orders                Orders[]
   inventory             Inventory[]
@@ -464,6 +472,12 @@ model Stores {
   @@index([sellerId])
   @@index([isActive])
   @@index([primaryCategoryId])
+  // Re-added: dropped by the house_lot_metadata migration, and the admin queue
+  // now filters on this column on every load.
+  @@index([approvalStatus])
+  @@index([reviewClaimedById])
+  // The hourly purge sweep's only query: REJECTED rows past their window.
+  @@index([approvalStatus, rejectedAt])
 }
 
 model StoreHours {
@@ -895,8 +909,20 @@ enum ApplicationStatus {
   REJECTED
 }
 
+/**
+ * The store approval lifecycle.
+ *
+ * Distinct from `ApplicationStatus`, which governs whether the *seller* is
+ * verified at all. A verified seller can still have a PENDING store.
+ *
+ * PENDING and UNDER_REVIEW are both "waiting on an admin" — the difference is
+ * whether one has claimed it. NEEDS_REVISION is the only non-terminal state the
+ * seller can act on, and the only one besides ACTIVE where their edits unlock.
+ */
 enum STOREAPPROVALSTATUS {
   PENDING
+  UNDER_REVIEW
+  NEEDS_REVISION
   ACTIVE
   REJECTED
 }
