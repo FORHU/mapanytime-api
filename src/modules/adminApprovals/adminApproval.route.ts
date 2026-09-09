@@ -23,7 +23,15 @@ router.use(authenticate, requirePermission(PERMISSIONS.STORES_APPROVE));
 router.get('/', AdminApprovalController.list);
 router.post('/properties/:id/approve', AdminApprovalController.approveProperty);
 router.post('/properties/:id/reject', AdminApprovalController.rejectProperty);
+
+// Store review workflow. Claim is what moves a store to UNDER_REVIEW; the three
+// decisions below are only reachable from there, enforced by the transition
+// matrix rather than by these routes.
+router.post('/stores/:id/claim', AdminApprovalController.claimStore);
+router.delete('/stores/:id/claim', AdminApprovalController.releaseStore);
 router.post('/stores/:id/approve', AdminApprovalController.approveStore);
 router.post('/stores/:id/reject', AdminApprovalController.rejectStore);
+router.post('/stores/:id/request-revision', AdminApprovalController.requestStoreRevision);
+router.get('/stores/:id/history', AdminApprovalController.storeHistory);
 
 export default router;

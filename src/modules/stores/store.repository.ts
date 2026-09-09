@@ -72,7 +72,7 @@ function isOpenNow(
 export default class StoreRepository {
   static async getActiveStoresWithLocations() {
     return prisma.stores.findMany({
-      where: { isActive: true },
+      where: { isActive: true, deletedAt: null },
       include: { storeLocations: true },
     });
   }
@@ -121,8 +121,12 @@ export default class StoreRepository {
         `
         : Prisma.sql``;
 
+    // A rejected store is forced isActive=false, so the deletedAt test is
+    // currently redundant here. Stated anyway: "deleted stores are off the map"
+    // should be a property of this query, not a consequence of another one.
     const inViewport = Prisma.sql`
       s."isActive" = true
+      AND s."deletedAt" IS NULL
       AND l."latitude" BETWEEN ${south} AND ${north}
       AND l."longitude" BETWEEN ${west} AND ${east}
       ${searchFilter}
@@ -196,7 +200,7 @@ export default class StoreRepository {
 
   static async getStoresBySellerId(sellerId: string) {
     return prisma.stores.findMany({
-      where: { sellerId: sellerId },
+      where: { sellerId: sellerId, deletedAt: null },
       include: { storeLocations: true, primaryCategory: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -210,9 +214,12 @@ export default class StoreRepository {
     });
   }
 
+  // findFirst rather than findUnique so the soft-delete filter can sit in the
+  // WHERE: a deleted store must read as absent to every caller, including the
+  // seller-facing ones that deliberately skip the isActive/approvalStatus gates.
   static async getStoreById(id: string) {
-    return prisma.stores.findUnique({
-      where: { id },
+    return prisma.stores.findFirst({
+      where: { id, deletedAt: null },
       include: {
         storeLocations: true,
         storeHours: {

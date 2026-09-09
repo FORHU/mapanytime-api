@@ -125,9 +125,90 @@ export default class StoreController {
       const updated = await StoreService.updateStore(context, id, value);
       return responseSuccess(res, 200, updated, 'Store updated successfully.');
     } catch (error) {
-      const err = error as { status?: Parameters<typeof responseError>[1]; message?: string };
+      // `code` is forwarded so the web can tell the review lock
+      // (STORE_LOCKED_FOR_REVIEW) from an ordinary 404/400 and show the
+      // "waiting on an administrator" panel instead of a generic error toast.
+      const err = error as {
+        status?: Parameters<typeof responseError>[1];
+        message?: string;
+        code?: string;
+      };
       if (err.status) {
-        return responseError(res, err.status, err.message || 'An error occurred');
+        return responseError(res, err.status, err.message || 'An error occurred', {
+          ...(err.code ? { code: err.code } : {}),
+        });
+      }
+      next(error);
+    }
+  }
+
+  /**
+   * POST /v1/stores/:id/resubmit — seller sends a revised store back for review.
+   *
+   * No body: what changed is already in the store record, and the transition
+   * matrix refuses anything that is not currently NEEDS_REVISION, so a double
+   * tap reports a conflict instead of re-dating the queue entry twice.
+   */
+  static async resubmitStore(req: Request, res: Response, next: NextFunction) {
+    const { id } = req.params;
+    if (!id) return responseError(res, 400, 'Store id is required.');
+
+    try {
+      const context = req.orgContext;
+      if (!context) return responseError(res, 403, 'Not a member of a seller organization.');
+
+      const actorUserId = (req.user as { id?: string } | undefined)?.id;
+      if (!actorUserId) return responseError(res, 401, 'Unauthorized.');
+
+      const store = await StoreService.resubmitForReview(context, id, actorUserId);
+      return responseSuccess(res, 200, store, 'Store resubmitted for review.');
+    } catch (error) {
+      const err = error as {
+        status?: Parameters<typeof responseError>[1];
+        message?: string;
+        code?: string;
+      };
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred', {
+          ...(err.code ? { code: err.code } : {}),
+        });
+      }
+      next(error);
+    }
+  }
+
+  /**
+   * DELETE /v1/stores/:id — seller removes a store that was rejected.
+   *
+   * No body. The only rule worth stating here is that the status check is not
+   * this endpoint's to make: the service refuses anything that is not REJECTED,
+   * so the frontend hiding the button is a convenience and not the control.
+   */
+  static async deleteStore(req: Request, res: Response, next: NextFunction) {
+    const { id } = req.params;
+    if (!id) return responseError(res, 400, 'Store id is required.');
+
+    try {
+      const context = req.orgContext;
+      if (!context) return responseError(res, 403, 'Not a member of a seller organization.');
+
+      const actorUserId = (req.user as { id?: string } | undefined)?.id;
+      if (!actorUserId) return responseError(res, 401, 'Unauthorized.');
+
+      await StoreService.deleteRejectedStore(context, id, actorUserId);
+      return responseSuccess(res, 200, null, 'Store deleted successfully.');
+    } catch (error) {
+      // `code` is forwarded so the web can tell STORE_NOT_REJECTED from a plain
+      // 404 and explain why the store is still there.
+      const err = error as {
+        status?: Parameters<typeof responseError>[1];
+        message?: string;
+        code?: string;
+      };
+      if (err.status) {
+        return responseError(res, err.status, err.message || 'An error occurred', {
+          ...(err.code ? { code: err.code } : {}),
+        });
       }
       next(error);
     }
