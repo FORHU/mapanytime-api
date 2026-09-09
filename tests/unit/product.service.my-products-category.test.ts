@@ -82,6 +82,6 @@ describe('ProductService.getMyProducts category filtering', () => {
     // (storeId, sellerId, opts) triple is gone, so "all stores" is expressed as
     // an org-wide scope rather than an undefined store id.
     const [storeScope] = getMyProducts.mock.calls[0];
-    expect(storeScope).toEqual({ sellerId: 'org-1' });
+    expect(storeScope).toEqual({ sellerId: 'org-1', deletedAt: null });
   });
 });

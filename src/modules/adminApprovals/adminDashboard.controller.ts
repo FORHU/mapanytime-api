@@ -5,6 +5,15 @@ import { prisma } from '../../utils/prisma';
 const TREND_MONTHS = 6;
 
 /**
+ * Everything still awaiting an outcome.
+ *
+ * Counting only PENDING would drop each application the moment a reviewer
+ * claimed it, so the backlog tile would fall as work was picked up rather than
+ * as it was finished — the queue would look emptier the busier it got.
+ */
+const OPEN_APPROVAL_STATUSES = ['PENDING', 'UNDER_REVIEW', 'NEEDS_REVISION'] as const;
+
+/**
  * Start of the month `monthsAgo` months back, in server-local time. Used as the
  * lower bound of each trend bucket.
  */
@@ -25,7 +34,10 @@ export default class AdminDashboardController {
         totalBuyers,
         totalSellers,
         verifiedStores,
-        pendingStoresCount,
+        openApprovalsCount,
+        unclaimedCount,
+        underReviewCount,
+        awaitingSellerCount,
         revenueAggregate,
         completedOrderCount,
         trendOrders,
@@ -33,7 +45,12 @@ export default class AdminDashboardController {
         prisma.buyers.count(),
         prisma.sellers.count(),
         prisma.stores.count({ where: { approvalStatus: 'ACTIVE' } }),
+        prisma.stores.count({ where: { approvalStatus: { in: [...OPEN_APPROVAL_STATUSES] } } }),
+        // Broken out so "nobody has picked this up" is visible separately from
+        // "someone is on it" — the two call for different action.
         prisma.stores.count({ where: { approvalStatus: 'PENDING' } }),
+        prisma.stores.count({ where: { approvalStatus: 'UNDER_REVIEW' } }),
+        prisma.stores.count({ where: { approvalStatus: 'NEEDS_REVISION' } }),
         // Summed in the database rather than by loading every completed order
         // into memory and reducing. See FLAGS.md.
         prisma.orders.aggregate({
@@ -70,8 +87,10 @@ export default class AdminDashboardController {
         };
       });
 
+      // The "needs your attention" list, so a claimed-but-undecided store does
+      // not vanish from the dashboard the moment someone opens it.
       const pendingStores = await prisma.stores.findMany({
-        where: { approvalStatus: 'PENDING' },
+        where: { approvalStatus: { in: ['PENDING', 'UNDER_REVIEW'] } },
         include: {
           primaryCategory: { select: { name: true } },
           seller: {
@@ -100,7 +119,14 @@ export default class AdminDashboardController {
             totalRevenue,
             verifiedStores,
             activeUsers: totalBuyers + totalSellers,
-            pendingStoreApprovals: pendingStoresCount,
+            // Every store still awaiting an outcome, not just the unclaimed
+            // ones. The breakdown below says where they are.
+            pendingStoreApprovals: openApprovalsCount,
+            storeApprovalBreakdown: {
+              unclaimed: unclaimedCount,
+              underReview: underReviewCount,
+              awaitingSeller: awaitingSellerCount,
+            },
             completedOrders: completedOrderCount,
           },
           pendingStores: pendingStores.map((store) => ({
