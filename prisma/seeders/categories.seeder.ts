@@ -1397,7 +1397,6 @@ export async function seedCategories(prisma: PrismaClient) {
     created += 1;
     seededIds.add(rootCategory.id);
 
-
     await upsertChildren(parent.children, rootCategory.id);
   }
 

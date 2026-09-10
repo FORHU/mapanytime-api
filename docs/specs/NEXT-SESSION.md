@@ -10,6 +10,7 @@
 ## 0. RESUME HERE — last session 2026-09-10
 
 ### ✅ Completed This Session
+
 - **P0-1**: Seeded QRPH (1.5%) and GrabPay (2.2%) rates into `PricingComponents` via `pricing.seeder.ts`
 - **P0-2**: Migrated all 105 active `CommissionRules` to `PricingComponents` as `SELLER_MARKETPLACE_FEE`; dropped old table
 - **P0-3**: Removed `Orders.taxAmount` (cleared existing data, dropped column, cleaned Joi schema)
@@ -19,6 +20,7 @@
 - **P1-9**: Built Admin Pricing Engine UI in `mapanytime-market-admin` (list + detail pages, sidebar nav)
 
 ### ▶️ Next Up (start here)
+
 - **P0-6**: Provider-Backed Refunds & Payment Reconciliation ← **START HERE**
 - **P1-2**: Environment & Staging Isolation
 - **P1-3**: Admin Invitation Endpoints
@@ -158,7 +160,6 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
   - Ensure consistent line endings across environments.
 - [x] **P1-9. Admin Pricing Engine UI**
   - Build frontend screens in `mapanytime-market-admin` to manage Pricing Configurations and Components via existing API routes.
-
 
 ---
 

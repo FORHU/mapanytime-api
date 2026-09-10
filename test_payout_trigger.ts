@@ -10,14 +10,14 @@ async function main() {
   // 1. Find or create a COMPLETED order
   let order = await prisma.orders.findFirst({
     where: { status: 'COMPLETED' },
-    include: { store: true }
+    include: { store: true },
   });
 
   if (!order) {
     console.log('No COMPLETED order found. Finding a PENDING order to complete...');
     order = await prisma.orders.findFirst({
       where: { status: 'PENDING' },
-      include: { store: true }
+      include: { store: true },
     });
 
     if (!order) {
@@ -31,18 +31,18 @@ async function main() {
   // Ensure it's COMPLETED and has no returns
   await prisma.orders.update({
     where: { id: order.id },
-    data: { status: 'COMPLETED', completedAt: new Date() }
+    data: { status: 'COMPLETED', completedAt: new Date() },
   });
   await prisma.returnRequests.deleteMany({
-    where: { orderId: order.id }
+    where: { orderId: order.id },
   });
 
   console.log(`Clearing existing payouts for seller to ensure clean test...`);
   await prisma.sellerPayoutItems.deleteMany({
-    where: { settlement: { sellerId: order.store.sellerId } }
+    where: { settlement: { sellerId: order.store.sellerId } },
   });
   await prisma.sellerPayouts.deleteMany({
-    where: { sellerId: order.store.sellerId }
+    where: { sellerId: order.store.sellerId },
   });
 
   // 2. Book the Settlement
@@ -60,13 +60,13 @@ async function main() {
   console.log('2. Artificially backdating releaseEligibleAt by 8 days to simulate hold expiry...');
   const pastDate = new Date();
   pastDate.setDate(pastDate.getDate() - 8);
-  
+
   await prisma.settlements.update({
     where: { id: settlement!.id },
-    data: { 
+    data: {
       releaseEligibleAt: pastDate,
-      status: 'PENDING' // Reset to PENDING just in case it was released before
-    }
+      status: 'PENDING', // Reset to PENDING just in case it was released before
+    },
   });
 
   // 4. Run the release cron function
@@ -77,7 +77,7 @@ async function main() {
   console.log(`   Verifying settlement directly before payout...`);
   const s = await prisma.settlements.findUnique({
     where: { id: settlement!.id },
-    include: { payoutItem: true }
+    include: { payoutItem: true },
   });
   console.log(`   - Status: ${s?.status}`);
   console.log(`   - SellerId: ${s?.sellerId} (Passed to Payout: ${order.store.sellerId})`);
@@ -88,7 +88,7 @@ async function main() {
     const payout = await PayoutService.createPayout({
       sellerId: order.store.sellerId,
       payoutMethod: 'BANK_TRANSFER', // Assuming a generic mock method
-      referenceNo: 'TEST-SWEEP-123'
+      referenceNo: 'TEST-SWEEP-123',
     });
 
     console.log(`   SUCCESS: Created Payout ${payout.payoutNumber}`);

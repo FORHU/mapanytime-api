@@ -16,7 +16,7 @@ async function main() {
         name: 'Temporary Configuration',
         status: 'ACTIVE',
         paymentFeePayerPolicy: 'BUYER',
-      }
+      },
     });
   }
 

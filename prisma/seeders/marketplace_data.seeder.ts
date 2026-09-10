@@ -43,8 +43,6 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
   const primaryStore = stores[0]; // Baguio Fresh Market
   const secondaryStore = stores[1] || stores[0]; // Session Brews Cafe
 
-
-
   // ── 3. Buyer Addresses ───────────────────────────────────────────────────
   console.log('  → Seeding BuyerAddresses...');
   await prisma.buyerAddresses.deleteMany({ where: { buyerId: buyer.id } });
