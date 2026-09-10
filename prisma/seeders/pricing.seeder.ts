@@ -12,6 +12,8 @@ import { PrismaClient, PRICINGCOMPONENTTYPE, PRICINGCALCULATIONTYPE } from '@pri
 const PAYMONGO_RATES = [
   { code: 'GCASH', rate: 0.0223, fixed: 0, label: 'GCash 2.23%' },
   { code: 'MAYA', rate: 0.0179, fixed: 0, label: 'Maya 1.79%' },
+  { code: 'QRPH', rate: 0.015, fixed: 0, label: 'QRPH 1.50%' },
+  { code: 'GRAB_PAY', rate: 0.022, fixed: 0, label: 'GrabPay 2.20%' },
   {
     code: 'CARD',
     rate: 0.03125,
@@ -28,7 +30,7 @@ const PAYMONGO_RATES = [
  * unchanged, but they price off the engine's fallback constant until a rate is
  * supplied — which will understate the real cost if it is above 2.00%.
  */
-const RATES_UNKNOWN = ['QRPH', 'GRAB_PAY'];
+const RATES_UNKNOWN: string[] = [];
 
 /**
  * Xendit's GCash/Maya rates are real contracted commercial terms specific to

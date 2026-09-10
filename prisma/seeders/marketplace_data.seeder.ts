@@ -43,25 +43,7 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
   const primaryStore = stores[0]; // Baguio Fresh Market
   const secondaryStore = stores[1] || stores[0]; // Session Brews Cafe
 
-  // ── 2. Commission Rules ──────────────────────────────────────────────────
-  console.log('  → Seeding CommissionRules...');
-  const categories = await prisma.categories.findMany();
-  for (const cat of categories) {
-    await prisma.commissionRules.upsert({
-      where: { categoryId: cat.id },
-      update: {},
-      create: {
-        categoryId: cat.id,
-        commissionRate: cat.name.includes('Electronics')
-          ? 0.05
-          : cat.name.includes('Fashion & Cosmetics')
-            ? 0.1
-            : 0.08,
-        fixedFee: 10.0,
-        isActive: true,
-      },
-    });
-  }
+
 
   // ── 3. Buyer Addresses ───────────────────────────────────────────────────
   console.log('  → Seeding BuyerAddresses...');

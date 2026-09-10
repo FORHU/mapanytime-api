@@ -106,19 +106,19 @@ that branch has long since merged.
 
 _The platform must prove that a single ₱1,000 transaction reconciles end-to-end before implementing new features._
 
-- [ ] **P0-1. Confirm Real Contracted Payment Rates (QRPH & GrabPay)**
-  - Obtain the real commercial rates for `QRPH` and `GRAB_PAY`.
-  - Insert them into `PricingComponents` so they do not fall back to the generic 2.00% rate.
-- [ ] **P0-2. Inspect & Migrate Orphaned `CommissionRules`**
-  - Check if `CommissionRules` contains any live category-specific commission rates.
-  - Migrate active rows to `PricingComponents` (`SELLER_MARKETPLACE_FEE` scoped by `categoryId`).
-  - Verify migration and safely drop the obsolete `CommissionRules` table.
-- [ ] **P0-3. Remove Obsolete `Orders.taxAmount`**
-  - Verify zero code reads/writes `Orders.taxAmount`.
+- [x] **P0-1. Confirm Real Contracted Payment Rates**
+  - Verify exact PayMongo & Xendit processing rates for GCash/Maya vs Card.
+  - Insert `QRPH` and `GRAB_PAY` real rates into `PricingComponents`.
+- [x] **P0-2. Migrate Orphaned `CommissionRules`**
+  - Migrate active rows from `CommissionRules` to `PricingComponents` (`SELLER_MARKETPLACE_FEE` scoped by `categoryId`).
+  - Verify migration and safely drop `CommissionRules` table and endpoints.
+- [x] **P0-3. Remove Obsolete `Orders.taxAmount`**
+  - Verify 0 code reads/writes.
+  - Drop column `taxAmount`.
   - Create a migration to drop the column, regenerate Prisma client, and verify tests.
-- [ ] **P0-4. Confirm Settlement Hold Policy (`SETTLEMENT_HOLD_DAYS`)**
+- [x] **P0-4. Confirm Settlement Hold Policy (`SETTLEMENT_HOLD_DAYS`)**
   - Confirm the default **7-day hold period** with the business owner (protects platform during return window).
-- [ ] **P0-5. Verify Vertical Financial Transaction Lifecycle**
+- [x] **P0-5. Verify Vertical Financial Transaction Lifecycle**
   - Trace and test:
     $$\text{Cart} \rightarrow \text{Pricing Engine} \rightarrow \text{Order Creation} \rightarrow \text{Payment Gateway} \rightarrow \text{Webhook Confirmation} \rightarrow \text{Order Completion} \rightarrow \text{Seller Settlement} \rightarrow \text{Payout Batch}$$
 - [ ] **P0-6. Provider-Backed Refunds & Payment Reconciliation**
@@ -148,6 +148,9 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
   - Verify reservation expiration job; remove or implement empty cron shells.
 - [ ] **P1-8. Add `.gitattributes` to `-web`**
   - Ensure consistent line endings across environments.
+- [ ] **P1-9. Admin Pricing Engine UI**
+  - Build frontend screens in `mapanytime-market-admin` to manage Pricing Configurations and Components via existing API routes.
+
 
 ---
 
