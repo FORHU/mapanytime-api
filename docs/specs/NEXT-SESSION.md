@@ -1,19 +1,27 @@
 # MapAnytime — Immediate Execution Checklist (Next Session)
 
-**Updated:** 2026-09-07 (auth + deploy). The payments/MapPoints checklist from
-**2026-08-24** follows from §1 onward and is unchanged — it was not worked on
-2026-09-07 and its items are still open.
+**Updated:** 2026-09-10 (pricing engine + payout verification).
 
 **Primary Reference:** [`MASTER_EXECUTION_PLAN.md`](./MASTER_EXECUTION_PLAN.md)  
 **Historical Context:** [`FLAGS.md`](./FLAGS.md) · [`OPEN-FLAGS.md`](./OPEN-FLAGS.md)
 
 ---
 
-## 0. CONTINUE HERE — picked up 2026-09-08
+## 0. RESUME HERE — last session 2026-09-10
 
-Everything from the 2026-09-07 session is **merged and on `staging`**; the repo
-is clean and there is nothing left to commit. What remains is AWS console work
-and two verifications. Do them in this order.
+### ✅ Completed This Session
+- **P0-1**: Seeded QRPH (1.5%) and GrabPay (2.2%) rates into `PricingComponents` via `pricing.seeder.ts`
+- **P0-2**: Migrated all 105 active `CommissionRules` to `PricingComponents` as `SELLER_MARKETPLACE_FEE`; dropped old table
+- **P0-3**: Removed `Orders.taxAmount` (cleared existing data, dropped column, cleaned Joi schema)
+- **P0-4**: Confirmed 7-day settlement hold policy is correct — no change needed
+- **P0-5**: Verified full payout lifecycle via `test_payout_trigger.ts` (hold → release → sweep)
+- **P1-1**: Already implemented — `cors.middleware.ts` has proper allowlist + production guard
+- **P1-9**: Built Admin Pricing Engine UI in `mapanytime-market-admin` (list + detail pages, sidebar nav)
+
+### ▶️ Next Up (start here)
+- **P0-6**: Provider-Backed Refunds & Payment Reconciliation ← **START HERE**
+- **P1-2**: Environment & Staging Isolation
+- **P1-3**: Admin Invitation Endpoints
 
 > **Run `git fetch` first.** GitHub was unreachable at the end of the session, so
 > the last confirmed state is `origin/staging` at `7203309`.
@@ -130,7 +138,7 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
 
 ## 2. PHASE 2 (P1): SECURITY, OPERATIONS & CORE PRODUCT GAPS
 
-- [ ] **P1-1. HTTP CORS Hardening**
+- [x] **P1-1. HTTP CORS Hardening**
   - Remove wildcard origin reflection on credentialed HTTP endpoints.
   - Restrict `Access-Control-Allow-Origin` to explicit allowlisted origins (matching the WebSocket gateway).
 - [ ] **P1-2. Environment & Staging Isolation**
@@ -148,7 +156,7 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
   - Verify reservation expiration job; remove or implement empty cron shells.
 - [ ] **P1-8. Add `.gitattributes` to `-web`**
   - Ensure consistent line endings across environments.
-- [ ] **P1-9. Admin Pricing Engine UI**
+- [x] **P1-9. Admin Pricing Engine UI**
   - Build frontend screens in `mapanytime-market-admin` to manage Pricing Configurations and Components via existing API routes.
 
 
