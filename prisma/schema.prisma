@@ -862,7 +862,6 @@ model Categories {
   products           Products[]
   stores             Stores[]                     @relation("CategoriesToStores")
   primaryForStores   Stores[]                     @relation("StorePrimaryCategory")
-  commissionRules    CommissionRules?
   pricingComponents  PricingComponents[]
   /// Suggested product-option names, inherited by sub-categories at read time.
   variantSuggestions CategoryVariantSuggestions[]
@@ -959,7 +958,6 @@ model Orders {
   // seller discount it does not reduce commission, and it must not shrink the
   // points-earning base (which reads subtotalAmount - discountAmount only).
   voucherAmount        Decimal @default(0) @db.Decimal(12, 2)
-  taxAmount            Decimal @default(0) @db.Decimal(12, 2)
   marketplaceFeeAmount Decimal @default(0) @db.Decimal(12, 2)
   sellerNetAmount      Decimal @default(0) @db.Decimal(12, 2)
 
@@ -1478,24 +1476,7 @@ enum PAYMENTSTATUS {
   REFUND_PENDING
 }
 
-// ORPHANED as of 2026-08-20. `TaxationService` was its only reader and has been
-// deleted — `PricingComponents` now supersedes it, and `PricingEngineService`
-// is the single engine for every fee. The model is kept rather than dropped
-// because the table may hold per-category rates worth migrating, and dropping
-// it is a destructive migration. Migrate any live rows into
-// `PricingComponents` (type SELLER_MARKETPLACE_FEE, scoped by categoryId),
-// then drop. See FLAGS.md F28.
-model CommissionRules {
-  id             String   @id @default(cuid())
-  categoryId     String?  @unique
-  commissionRate Decimal  @default(0.05) @db.Decimal(5, 4)
-  fixedFee       Decimal  @default(0) @db.Decimal(12, 2)
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
 
-  category Categories? @relation(fields: [categoryId], references: [id])
-}
 
 // =========================================================================
 // ⚖️ FEATURE DOMAIN: VERSIONED PRICING CONFIGURATIONS & COMPONENTS

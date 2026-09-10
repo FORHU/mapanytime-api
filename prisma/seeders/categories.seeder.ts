@@ -1397,17 +1397,6 @@ export async function seedCategories(prisma: PrismaClient) {
     created += 1;
     seededIds.add(rootCategory.id);
 
-    await prisma.commissionRules.upsert({
-      where: { categoryId: rootCategory.id },
-      update: { commissionRate: 0.05, fixedFee: 10.0 },
-      create: {
-        categoryId: rootCategory.id,
-        commissionRate: 0.05,
-        fixedFee: 10.0,
-        isActive: true,
-      },
-    });
-
     await upsertChildren(parent.children, rootCategory.id);
   }
 
