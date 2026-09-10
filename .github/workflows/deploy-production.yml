@@ -33,7 +33,6 @@ permissions:
 
 env:
   NODE_ENV: production
-  IMAGE_TAG: ${{ github.sha }}
   CONTAINER_NAME: mapanytime-api
   # Matches the container the old workflow created as "${CONTAINER_NAME}-worker",
   # so this deploy replaces it rather than leaving an orphan running alongside.
@@ -78,7 +77,17 @@ jobs:
 
       - name: Set image metadata
         id: meta
-        run: echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          # `git rev-parse HEAD`, not `github.sha`. This workflow checks out
+          # `inputs.ref`, while `github.sha` is the commit the *dispatch* came
+          # from — so tagging with it names a commit that is not in the image.
+          # Deploying a branch would then produce an image whose tag lies about
+          # its contents, which is a miserable thing to discover mid-incident.
+          SHA=$(git rev-parse HEAD)
+          echo "image_tag=$SHA" >> "$GITHUB_OUTPUT"
+          echo "IMAGE_TAG=$SHA" >> "$GITHUB_ENV"
+          echo "Building $SHA"
 
       - name: Build and push image
         env:
@@ -142,6 +151,12 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET || '' }}
           PAYMONGO_SECRET_KEY: ${{ secrets.PAYMONGO_SECRET_KEY || '' }}
           PAYMONGO_WEBHOOK_SECRET_KEY: ${{ secrets.PAYMONGO_WEBHOOK_SECRET_KEY || '' }}
+          # No AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY here, deliberately.
+          # The box authenticates as its instance role, which holds S3 on the
+          # bucket below plus ECR pull. A static key in this file overrides that
+          # role in the SDK's credential chain — and a stale one breaks the
+          # deploy itself, because deploy-remote.sh sources this file before
+          # `aws ecr get-login-password`. That is how 2026-09-10 was spent.
           APP_AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
           AWS_S3_BUCKET_NAME: ${{ secrets.AWS_S3_BUCKET_NAME || secrets.S3_BUCKET }}
           S3_CDN_URL: ${{ secrets.S3_CDN_URL || '' }}
@@ -156,50 +171,71 @@ jobs:
           # is how F94 shipped green for a week.
           MAPANYTIME_WEB_APP_URL: ${{ secrets.MAPANYTIME_WEB_APP_URL }}
         run: |
-          cat > runtime.env << EOF
-          DATABASE_URL=${DATABASE_URL}
-          NODE_ENV=${{ env.NODE_ENV }}
-          PORT=${{ env.APP_PORT }}
-          CORS_ORIGIN=${CORS_ORIGIN}
-          REDIS_HOST=${REDIS_HOST}
-          REDIS_PORT=${REDIS_PORT}
-          REDIS_PASSWORD=${REDIS_PASSWORD}
-          REDIS_TLS=${REDIS_TLS}
-          REDIS_TTL_SECONDS=${REDIS_TTL_SECONDS}
-          ACCESS_TOKEN_SECRET=${ACCESS_TOKEN_SECRET}
-          ACCESS_TOKEN_EXPIRY=${ACCESS_TOKEN_EXPIRY}
-          REFRESH_TOKEN_SECRET=${REFRESH_TOKEN_SECRET}
-          REFRESH_TOKEN_EXPIRY=${REFRESH_TOKEN_EXPIRY}
-          MAILER_TRANSPORT_HOST=${MAILER_TRANSPORT_HOST}
-          MAILER_TRANSPORT_PORT=${MAILER_TRANSPORT_PORT}
-          MAILER_TRANSPORT_SECURE=${MAILER_TRANSPORT_SECURE}
-          MAILER_EMAIL=${MAILER_EMAIL}
-          MAILER_PASSWORD=${MAILER_PASSWORD}
-          SMTP_HOST=${SMTP_HOST}
-          SMTP_PORT=${SMTP_PORT}
-          SMTP_USER=${SMTP_USER}
-          SMTP_PASS=${SMTP_PASS}
-          OPENAI_API_KEY=${OPENAI_API_KEY}
-          CHAT_WONDER_API_URL=${CHAT_WONDER_API_URL}
-          GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-          GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-          PAYMONGO_SECRET_KEY=${PAYMONGO_SECRET_KEY}
-          PAYMONGO_WEBHOOK_SECRET_KEY=${PAYMONGO_WEBHOOK_SECRET_KEY}
-          AWS_REGION=${APP_AWS_REGION}
-          AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME}
-          S3_CDN_URL=${S3_CDN_URL}
-          RABBITMQ_URL=${RABBITMQ_URL}
-          RABBITMQ_EXCHANGE=${RABBITMQ_EXCHANGE}
-          RABBITMQ_QUEUE_PREFIX=${RABBITMQ_QUEUE_PREFIX}
-          INGESTION_QUEUE_NAME=${INGESTION_QUEUE_NAME}
-          WORKER_HEALTH_PORT=${WORKER_HEALTH_PORT}
-          METRICS_INTERVAL_MS=${METRICS_INTERVAL_MS}
-          MAPANYTIME_WEB_APP_URL=${MAPANYTIME_WEB_APP_URL}
-          EOF
+          set -euo pipefail
+
+          # printf per line rather than a heredoc. An unquoted `<< EOF` expands
+          # its body, so a secret containing a backtick, `$(` or a backslash is
+          # interpreted by the shell instead of stored — DATABASE_URL,
+          # MAILER_PASSWORD and the PayMongo keys are all plausible carriers.
+          # Quoting the terminator is not an option, because these values do
+          # need substituting; writing each line explicitly is.
+          umask 077
+          {
+            printf 'DATABASE_URL=%s\n'                "$DATABASE_URL"
+            printf 'NODE_ENV=%s\n'                    '${{ env.NODE_ENV }}'
+            printf 'PORT=%s\n'                        '${{ env.APP_PORT }}'
+            printf 'CORS_ORIGIN=%s\n'                 "$CORS_ORIGIN"
+            printf 'REDIS_HOST=%s\n'                  "$REDIS_HOST"
+            printf 'REDIS_PORT=%s\n'                  "$REDIS_PORT"
+            printf 'REDIS_PASSWORD=%s\n'              "$REDIS_PASSWORD"
+            printf 'REDIS_TLS=%s\n'                   "$REDIS_TLS"
+            printf 'REDIS_TTL_SECONDS=%s\n'           "$REDIS_TTL_SECONDS"
+            printf 'ACCESS_TOKEN_SECRET=%s\n'         "$ACCESS_TOKEN_SECRET"
+            printf 'ACCESS_TOKEN_EXPIRY=%s\n'         "$ACCESS_TOKEN_EXPIRY"
+            printf 'REFRESH_TOKEN_SECRET=%s\n'        "$REFRESH_TOKEN_SECRET"
+            printf 'REFRESH_TOKEN_EXPIRY=%s\n'        "$REFRESH_TOKEN_EXPIRY"
+            printf 'MAILER_TRANSPORT_HOST=%s\n'       "$MAILER_TRANSPORT_HOST"
+            printf 'MAILER_TRANSPORT_PORT=%s\n'       "$MAILER_TRANSPORT_PORT"
+            printf 'MAILER_TRANSPORT_SECURE=%s\n'     "$MAILER_TRANSPORT_SECURE"
+            printf 'MAILER_EMAIL=%s\n'                "$MAILER_EMAIL"
+            printf 'MAILER_PASSWORD=%s\n'             "$MAILER_PASSWORD"
+            printf 'SMTP_HOST=%s\n'                   "$SMTP_HOST"
+            printf 'SMTP_PORT=%s\n'                   "$SMTP_PORT"
+            printf 'SMTP_USER=%s\n'                   "$SMTP_USER"
+            printf 'SMTP_PASS=%s\n'                   "$SMTP_PASS"
+            printf 'OPENAI_API_KEY=%s\n'              "$OPENAI_API_KEY"
+            printf 'CHAT_WONDER_API_URL=%s\n'         "$CHAT_WONDER_API_URL"
+            printf 'GOOGLE_CLIENT_ID=%s\n'            "$GOOGLE_CLIENT_ID"
+            printf 'GOOGLE_CLIENT_SECRET=%s\n'        "$GOOGLE_CLIENT_SECRET"
+            printf 'PAYMONGO_SECRET_KEY=%s\n'         "$PAYMONGO_SECRET_KEY"
+            printf 'PAYMONGO_WEBHOOK_SECRET_KEY=%s\n' "$PAYMONGO_WEBHOOK_SECRET_KEY"
+            printf 'AWS_REGION=%s\n'                  "$APP_AWS_REGION"
+            printf 'AWS_S3_BUCKET_NAME=%s\n'          "$AWS_S3_BUCKET_NAME"
+            printf 'S3_CDN_URL=%s\n'                  "$S3_CDN_URL"
+            printf 'RABBITMQ_URL=%s\n'                "$RABBITMQ_URL"
+            printf 'RABBITMQ_EXCHANGE=%s\n'           "$RABBITMQ_EXCHANGE"
+            printf 'RABBITMQ_QUEUE_PREFIX=%s\n'       "$RABBITMQ_QUEUE_PREFIX"
+            printf 'INGESTION_QUEUE_NAME=%s\n'        "$INGESTION_QUEUE_NAME"
+            printf 'WORKER_HEALTH_PORT=%s\n'          "$WORKER_HEALTH_PORT"
+            printf 'METRICS_INTERVAL_MS=%s\n'         "$METRICS_INTERVAL_MS"
+            printf 'MAPANYTIME_WEB_APP_URL=%s\n'      "$MAPANYTIME_WEB_APP_URL"
+          } > runtime.env
 
       - name: Publish env to Parameter Store
         run: |
           set -euo pipefail
+
+          # A static AWS credential in the runtime env overrides the instance
+          # role in the SDK's credential chain, and a stale one takes the deploy
+          # down at `docker login` rather than at the app. Fail here, where the
+          # message names the cause, instead of on the box where it reads as
+          # "UnrecognizedClientException".
+          if grep -qE '^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)=' runtime.env; then
+            echo "runtime.env contains static AWS credentials." >&2
+            echo "The instance role provides S3 and ECR access — remove them." >&2
+            exit 1
+          fi
+
           aws ssm put-parameter \
             --name "${{ env.SSM_ENV_PARAMETER }}" \
             --type SecureString \
