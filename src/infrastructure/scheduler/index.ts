@@ -118,8 +118,7 @@ export const startScheduler = () => {
   // has no outward-facing side effects to duplicate, so the lock would buy
   // nothing — and see the note on `withJobLock` above about RedisUtil in the
   // worker process.
-  cron.schedule('* * * * *', async () => {
-    // TEMP: was '15 * * * *'
+  cron.schedule('15 * * * *', async () => {
     try {
       const purged = await StoreService.purgeExpiredRejectedStores();
       if (purged > 0) {
