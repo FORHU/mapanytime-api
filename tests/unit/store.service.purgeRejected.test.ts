@@ -67,7 +67,7 @@ describe('StoreService.purgeExpiredRejectedStores', () => {
     });
   });
 
-  it('deletes a store rejected more than 24 hours ago', async () => {
+  it('deletes a store rejected longer ago than the deletion window', async () => {
     mockPrisma.stores.findMany.mockResolvedValue([
       { id: 'store-old', sellerId: 'org-1', storeLocations: null },
     ]);
@@ -83,7 +83,7 @@ describe('StoreService.purgeExpiredRejectedStores', () => {
 
   // The cutoff is the database's filter, so "still inside the window" shows up
   // here as the query returning nothing — and the sweep must then not write.
-  it('leaves a store rejected less than 24 hours ago alone', async () => {
+  it('leaves a store still inside the deletion window alone', async () => {
     mockPrisma.stores.findMany.mockResolvedValue([]);
 
     const purged = await StoreService.purgeExpiredRejectedStores(NOW);

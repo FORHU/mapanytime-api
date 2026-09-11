@@ -13,6 +13,22 @@ jest.mock('../../src/modules/auth/auth.service', () => ({
 jest.mock('../../src/infrastructure/rabbitmq/publisher', () => ({ publish: jest.fn() }));
 jest.mock('../../src/utils/prisma', () => ({ prisma: { $transaction: jest.fn() } }));
 
+/**
+ * Pinned, because `src/config` calls `dotenv.config()` at import and jest has no
+ * env isolation — so this suite reads whatever `.env` the developer happens to
+ * have. This assertion used to depend on `MAPANYTIME_WEB_APP_URL` being *unset*,
+ * which made it pass in CI (no .env) and fail on any machine that had configured
+ * the variable.
+ *
+ * Mocking the module is the only thing that works: `MAPANYTIME_WEB_APP_URL` is a
+ * module-level `export const` bound at import time, so setting `process.env` from
+ * a test body — the pattern `payment.service.test.ts` uses — would be too late.
+ */
+jest.mock('../../src/config', () => ({
+  ...jest.requireActual('../../src/config'),
+  MAPANYTIME_WEB_APP_URL: 'https://app.test',
+}));
+
 const mockedRepo = OrganizationRepository as unknown as {
   findUserByEmail: jest.Mock;
   getOrgStores: jest.Mock;
@@ -138,7 +154,7 @@ describe('OrganizationService.createStaffAccount', () => {
   it('builds the setup URL from the configured web app origin, not a raw env var', async () => {
     const result = await OrganizationService.createStaffAccount(ORG, base);
 
-    expect(result.setupUrl.startsWith('http://localhost:4000/set-password?')).toBe(true);
+    expect(result.setupUrl.startsWith('https://app.test/set-password?')).toBe(true);
   });
 
   describe('feature permissions', () => {
