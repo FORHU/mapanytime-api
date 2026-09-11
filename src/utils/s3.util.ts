@@ -2,20 +2,12 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import crypto from 'crypto';
 import logger from '../utils/logger';
-import {
-  AWS_REGION,
-  AWS_ACCESS_KEY_ID,
-  AWS_SECRET_ACCESS_KEY,
-  AWS_S3_BUCKET_NAME,
-  S3_CDN_URL,
-} from '../config';
+import { AWS_REGION, AWS_S3_BUCKET_NAME, S3_CDN_URL } from '../config';
 
+// No explicit credentials: the SDK's default provider chain falls through to
+// the EC2 instance role (see infra/ec2-app-runtime-policy.json).
 const s3Client = new S3Client({
   region: AWS_REGION as string,
-  credentials: {
-    accessKeyId: AWS_ACCESS_KEY_ID as string,
-    secretAccessKey: AWS_SECRET_ACCESS_KEY as string,
-  },
 });
 
 export default class S3Util {
