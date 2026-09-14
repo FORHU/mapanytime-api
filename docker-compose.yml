@@ -41,6 +41,54 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 
+  # S3 for local development. Developers are never issued AWS credentials —
+  # this is the standing rule, and it is why nothing here talks to AWS.
+  # Deployed environments use the EC2 instance role instead, which is why the
+  # app must not pass credentials unless S3_ENDPOINT is set.
+  #
+  # The root user/password below are not secrets: they are identical on every
+  # machine, grant nothing outside this container, and exist only because the
+  # S3 protocol requires a signature.
+  minio:
+    # MinIO's images were withdrawn from Docker Hub — `minio/minio` there now
+    # 404s, which Docker reports as "pull access denied … may require docker
+    # login", so it reads like an auth problem rather than a missing repo.
+    # quay.io is the publisher now, and it ships no `latest` tag for the server
+    # at all, only dated releases — hence the pin.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - '${MINIO_PORT:-9000}:9000' # S3 API
+      - '${MINIO_CONSOLE_PORT:-9001}:9001' # browser console
+    volumes:
+      - minio_data:/data
+
+  # One-shot: creates the bucket so the app never has to, and makes objects
+  # readable without a signature — matching how the real bucket is served.
+  #
+  # Retries in a loop rather than relying on a healthcheck, because the minio
+  # server image does not reliably ship a tool to health-check itself with.
+  minio-init:
+    # quay.io does publish `mc:latest`, but pinned anyway: a one-shot bootstrap
+    # that changes under you is not worth the convenience.
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    restart: 'no'
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin}; do
+        echo 'waiting for minio'; sleep 1;
+      done;
+      mc mb --ignore-existing local/${AWS_S3_BUCKET_NAME:-forhu-marketplace-dev};
+      mc anonymous set download local/${AWS_S3_BUCKET_NAME:-forhu-marketplace-dev};
+      echo 'minio ready';
+      "
+
   app:
     build: .
     restart: always
@@ -54,10 +102,33 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-node_postg_db}?schema=public
       REDIS_HOST: redis
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+
+      # Two endpoints, deliberately.
+      #
+      # S3_ENDPOINT is what this container talks to — a compose service name,
+      # resolvable only inside the network.
+      #
+      # S3_PUBLIC_ENDPOINT is what presigned URLs must be signed against,
+      # because those URLs are handed to a browser on the host, which cannot
+      # resolve "minio". A presigned URL's host is part of what it signs, so
+      # signing with the internal name produces a link the browser cannot use
+      # and the signature cannot be repaired by rewriting it afterwards.
+      #
+      # Both are unset in deployed environments, which is what makes the app
+      # fall back to real S3 and the instance role.
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:${MINIO_PORT:-9000}
+      S3_FORCE_PATH_STYLE: 'true'
+      AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-forhu-marketplace-dev}
+      # Set here rather than in .env so no developer keeps anything that looks
+      # like an AWS key on their machine.
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     depends_on:
       - db
       - redis
       - rabbitmq
+      - minio
 
   worker:
     build: .
@@ -75,13 +146,21 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-node_postg_db}?schema=public
       REDIS_HOST: redis
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:${MINIO_PORT:-9000}
+      S3_FORCE_PATH_STYLE: 'true'
+      AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-forhu-marketplace-dev}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     depends_on:
       - db
       - redis
       - rabbitmq
+      - minio
 
 volumes:
   postgres_data:
   redis_data:
   redis-insight_data:
   rabbitmq_data:
+  minio_data:

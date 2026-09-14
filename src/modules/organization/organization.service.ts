@@ -8,7 +8,7 @@ import AuthService from '../auth/auth.service';
 import { publish } from '../../infrastructure/rabbitmq/publisher';
 import { ROUTING_KEYS } from '../../events/routing-keys';
 import logger from '../../utils/logger';
-import { MAPANYTIME_WEB_APP_URL } from '../../config';
+import { MAPANYTIME_WEB_APP_EMAIL_URL } from '../../config';
 
 /**
  * How long a staff set-up code stays valid.
@@ -123,10 +123,12 @@ export default class OrganizationService {
    * merchant onboarding, i.e. letting a staff member set up as an independent
    * competitor. Their authority comes from the store assignment instead.
    *
-   * The password is random and discarded. The only way in is the set-up code,
-   * which the admin relays and the recipient exchanges for a password of their
-   * own choosing — so an administrator never holds a working credential for
-   * someone else's account, and staff actions stay attributable.
+   * The password is random and discarded. The only way in is the set-up link,
+   * emailed to the address the admin supplied and exchanged by the recipient for
+   * a password of their own choosing — so an administrator never holds a working
+   * credential for someone else's account, and staff actions stay attributable.
+   * The link and code also come back in the response, so the flow still works by
+   * hand when mail is down.
    */
   static async createStaffAccount(
     orgId: string,
@@ -197,27 +199,56 @@ export default class OrganizationService {
     });
 
     // Long and random rather than the four digits the self-service reset uses:
-    // this one is relayed by hand and lives for days.
+    // this one lives for days.
     const setupCode = crypto.randomBytes(12).toString('hex');
     await AuthService.storeResetCode(user.id, setupCode, STAFF_SETUP_TTL_MINUTES);
 
-    // Reuses the existing password-reset template and mail pipeline. The copy
-    // says "reset" rather than "welcome" — worth a dedicated template later.
-    await publish(ROUTING_KEYS.EMAIL_SEND_REQUESTED, {
-      userId: user.id,
-      email: user.email,
-      subject: 'Set up your MapAnytime staff account',
-      templateName: 'password-reset.html',
-      data: {
-        firstName: user.firstName || 'there',
-        code: setupCode,
-        expiryMinutes: STAFF_SETUP_TTL_MINUTES,
-      },
-      body:
-        `You have been added to a MapAnytime seller organization.\n\n` +
-        `Use this code to set your password: ${setupCode}\n\n` +
-        `It expires in ${STAFF_SETUP_TTL_MINUTES / 60} hours.`,
-    });
+    // Built once, then used for both the email and the response below. Two
+    // separate constructions of the same URL would be free to drift apart, and
+    // the one nobody looks at is the one that would rot.
+    const setupUrl =
+      `${(MAPANYTIME_WEB_APP_EMAIL_URL || 'http://localhost:4000').replace(/\/$/, '')}` +
+      `/set-password?email=${encodeURIComponent(user.email)}&code=${setupCode}`;
+
+    // Days, not the raw 4320 minutes the TTL is stored as — "expires in 4320
+    // minutes" is technically true and useless to read.
+    const expiresIn = `${STAFF_SETUP_TTL_MINUTES / 60 / 24} days`;
+
+    // Published after the transaction has committed, so an email never announces
+    // an account that failed to be created.
+    //
+    // Wrapped because the member already exists by this point: letting a mail
+    // problem reject would report failure for work that succeeded, and the admin
+    // would retry straight into the 409 duplicate check with no account to show
+    // for it. `publish` catches its own errors today, but that is its business
+    // and not something this invariant should rest on. The link is in the
+    // response regardless, so a failed send degrades to relaying it by hand.
+    try {
+      await publish(ROUTING_KEYS.EMAIL_SEND_REQUESTED, {
+        userId: user.id,
+        email: user.email,
+        subject: 'Set up your MapAnytime staff account',
+        templateName: 'staff-setup.html',
+        data: {
+          firstName: user.firstName || 'there',
+          setupUrl,
+          code: setupCode,
+          expiresIn,
+        },
+        body:
+          `You have been added to a MapAnytime seller organization.\n\n` +
+          `Set your password here:\n${setupUrl}\n\n` +
+          `If the link does not work, go to ${MAPANYTIME_WEB_APP_EMAIL_URL}/set-password ` +
+          `and enter this code: ${setupCode}\n\n` +
+          `It expires in ${expiresIn}.`,
+      });
+    } catch (error) {
+      logger.error(
+        `[Org] Staff account ${user.id} was created but its set-up email could not be queued. ` +
+          'Relay the set-up link from the response by hand.',
+        error,
+      );
+    }
 
     logger.info(`[Org] Staff account created for ${email} in organization ${orgId}`);
 
@@ -231,11 +262,9 @@ export default class OrganizationService {
       storeIds,
       permissions,
       setupCode,
-      // A ready-to-share link, since the code alone gives the recipient nothing
-      // to do with it. Falls back to the local dev origin when unconfigured.
-      setupUrl:
-        `${(MAPANYTIME_WEB_APP_URL || 'http://localhost:4000').replace(/\/$/, '')}` +
-        `/set-password?email=${encodeURIComponent(user.email)}&code=${setupCode}`,
+      // The same link the email carries, so an admin can relay it by hand when
+      // mail is down without the two copies being able to differ.
+      setupUrl,
       expiresInMinutes: STAFF_SETUP_TTL_MINUTES,
     };
   }
