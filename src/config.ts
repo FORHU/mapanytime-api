@@ -137,6 +137,22 @@ export const MAPANYTIME_WEB_APP_URL =
   process.env.MAPANYTIME_WEB_APP_URL || process.env.FRONTEND_URL || '';
 
 /**
+ * Origin for links a recipient clicks out of an email.
+ *
+ * Deliberately separate from `MAPANYTIME_WEB_APP_URL`. That one is constrained by
+ * Xendit, which rejects a return URL that is http, carries a port, or resolves to
+ * localhost — so in local development it has to be set to an origin a browser on
+ * the developer's machine generally cannot reach, and a setup link built from it
+ * goes nowhere. An emailed link is under no such constraint and has every reason
+ * to be clickable.
+ *
+ * Falls back to the Xendit origin when unset, which is the right answer in
+ * production where both are the same public https host.
+ */
+export const MAPANYTIME_WEB_APP_EMAIL_URL =
+  process.env.MAPANYTIME_WEB_APP_EMAIL_URL || MAPANYTIME_WEB_APP_URL || 'http://localhost:4000';
+
+/**
  * The rules Xendit enforces on a checkout return URL, as one predicate.
  *
  * This exists so startup validation and the provider agree on what "valid"
