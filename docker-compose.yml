@@ -116,8 +116,14 @@ services:
       #
       # Both are unset in deployed environments, which is what makes the app
       # fall back to real S3 and the instance role.
+      #
+      # S3_PUBLIC_ENDPOINT defers to .env when set, because "the host" is not
+      # always localhost: the Flutter app runs on a physical phone, which cannot
+      # resolve localhost and so cannot load any image signed against it. Set
+      # S3_PUBLIC_ENDPOINT to this machine's LAN IP to serve both. Default keeps
+      # the previous behaviour for anyone who leaves it unset.
       S3_ENDPOINT: http://minio:9000
-      S3_PUBLIC_ENDPOINT: http://localhost:${MINIO_PORT:-9000}
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:${MINIO_PORT:-9000}}
       S3_FORCE_PATH_STYLE: 'true'
       AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-forhu-marketplace-dev}
       # Set here rather than in .env so no developer keeps anything that looks
@@ -147,7 +153,8 @@ services:
       REDIS_HOST: redis
       RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
       S3_ENDPOINT: http://minio:9000
-      S3_PUBLIC_ENDPOINT: http://localhost:${MINIO_PORT:-9000}
+      # Defers to .env like the app service above; see the note there.
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:${MINIO_PORT:-9000}}
       S3_FORCE_PATH_STYLE: 'true'
       AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-forhu-marketplace-dev}
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}

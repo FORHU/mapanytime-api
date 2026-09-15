@@ -176,6 +176,7 @@ export default class OrganizationService {
           lastName: input.lastName.trim(),
           isEmailVerified: true,
           accountStatus: 'ACTIVE',
+          isPasswordSet: false,
           // The seller shell is gated on the platform SELLER role, so staff
           // need it to reach the dashboard at all. BUYER is deliberately left
           // off: it would trigger the dual-role prompt on every sign-in.
