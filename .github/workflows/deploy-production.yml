@@ -4,9 +4,7 @@
 # SecureString -> SSM RunCommand pulls the image, migrates, and restarts the
 # API and worker containers.
 #
-# Identical in shape to deploy-staging.yml — the on-box work is the same
-# infra/deploy-remote.sh, parameterised. The only differences are the values in
-# the `env:` block below and that this workflow is dispatch-only.
+# Runs infra/deploy-remote.sh on the box, dispatch-only.
 #
 # See infra/README.md for the AWS-side setup and the cutover checklist.
 
