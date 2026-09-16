@@ -1,6 +1,8 @@
 import AuthRepo from './auth.repository';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import axios from 'axios';
+import { OAuth2Client } from 'google-auth-library';
 import { Users } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import { DOCUMENTTYPES } from '@prisma/client';
@@ -11,6 +13,9 @@ import {
   REFRESH_TOKEN_EXPIRY,
   REFRESH_TOKEN_EXPIRY_MS,
   REFRESH_TOKEN_GRACE_MS,
+  FACEBOOK_APP_ID,
+  FACEBOOK_APP_SECRET,
+  GOOGLE_CLIENT_ID,
 } from '../../config';
 import CacheUtil from '../../utils/cache.util';
 import { resolveOrgContext } from '../organization/orgContext';
@@ -268,32 +273,194 @@ export default class AuthSvc {
   }
 
   /**
-   * Google OAuth Sign-In — NOT IMPLEMENTED, fails closed.
+   * Verifies a Facebook access token server-side and returns the identity Meta vouches
+   * for. The client hands over only the token — never email/name/id directly — so the
+   * caller cannot assert an identity the way the old googleLogin let them.
    *
-   * The previous implementation took `data.email` at face value and minted tokens for it, which
-   * is unauthenticated account takeover for any address the caller names. It was held back only
-   * by a commented-out route in auth.route.ts, and a comment is not a safety mechanism — so the
-   * body is gone and this throws instead. Registering the route now returns 501 rather than
-   * handing out sessions.
-   *
-   * To implement:
-   *   1. Take an `idToken` from the client instead of email/firstName/lastName/googleId.
-   *   2. Verify it with `new OAuth2Client(GOOGLE_CLIENT_ID).verifyIdToken({ idToken, audience:
-   *      GOOGLE_CLIENT_ID })` and reject anything failing signature, audience, issuer or expiry.
-   *   3. Read email/name/sub from the verified payload only, and require `email_verified`.
-   *   4. Find-or-create the user — mirror register()'s single transaction so an account can't be
-   *      created without its buyer profile, and hardcode the BUYER role; never let the caller
-   *      pick one, or an attacker self-provisions an admin.
-   *   5. Return `generateAuthResponse(user, 'google', true, { revokeOtherSessions: true,
-   *      providerUserId, providerAvatarUrl })` — the Session model already carries the Google
-   *      identity, since Users has no googleId column and stores avatars as Files rows.
+   * `appsecret_proof` is sent on every call regardless of whether "Require App Secret"
+   * is toggled on in the Meta app, so this stays safe if that setting ever changes.
    */
-  static async googleLogin(data: { email?: string }) {
-    logger.error(`[Auth] Blocked call to unimplemented googleLogin for ${data.email}`);
-    throw {
-      status: 501,
-      message: 'Google sign-in is not available — ID token verification is not implemented',
+  private static async verifyFacebookAccessToken(accessToken: string) {
+    const appsecretProof = crypto
+      .createHmac('sha256', FACEBOOK_APP_SECRET)
+      .update(accessToken)
+      .digest('hex');
+
+    const debug = await axios.get('https://graph.facebook.com/debug_token', {
+      params: {
+        input_token: accessToken,
+        access_token: `${FACEBOOK_APP_ID}|${FACEBOOK_APP_SECRET}`,
+      },
+    });
+
+    const tokenData = debug.data?.data;
+    const isExpired =
+      typeof tokenData?.expires_at === 'number' &&
+      tokenData.expires_at > 0 &&
+      tokenData.expires_at * 1000 <= Date.now();
+
+    if (!tokenData?.is_valid || tokenData.app_id !== FACEBOOK_APP_ID || isExpired) {
+      throw { status: 401, message: 'That Facebook session is invalid or has expired.' };
+    }
+
+    const profile = await axios.get('https://graph.facebook.com/me', {
+      params: {
+        fields: 'id,email,first_name,last_name,picture.type(large)',
+        access_token: accessToken,
+        appsecret_proof: appsecretProof,
+      },
+    });
+
+    return profile.data as {
+      id: string;
+      email?: string;
+      first_name?: string;
+      last_name?: string;
+      picture?: { data?: { url?: string } };
     };
+  }
+
+  /**
+   * Shared by every social login: finds the account for a verified email, or creates one.
+   *
+   * A new account is always BUYER — never a role the caller could pick, whatever the
+   * provider. The caller must have already verified `email` really belongs to whoever
+   * presented the token; matching an existing account by it is then safe transparent
+   * account linking, not an enumeration or takeover risk, because every provider here
+   * only ever reports an address it has itself confirmed.
+   */
+  private static async findOrCreateSocialBuyer(profile: {
+    email: string;
+    firstName?: string;
+    lastName?: string;
+  }) {
+    let user = await AuthRepo.findUserByEmail(profile.email);
+    if (user) return user;
+
+    const displayName =
+      [profile.firstName, profile.lastName].filter(Boolean).join(' ') || 'New User';
+
+    // `passwordHash` has no nullable variant in the schema, so a social-only account
+    // still needs a value in it. This one is never derived from anything the user
+    // typed — pbkdf2Sync would have to invert a random 512-bit hash to produce it —
+    // so `login()`'s ordinary password check rejects it for every input, which is
+    // exactly the "social-only account" case that check already defends against.
+    const unusablePasswordHash = `${crypto.randomBytes(16).toString('hex')}:${crypto
+      .randomBytes(64)
+      .toString('hex')}`;
+
+    await prisma.$transaction(async (tx) => {
+      const created = await tx.users.create({
+        data: {
+          email: profile.email,
+          passwordHash: unusablePasswordHash,
+          firstName: profile.firstName,
+          lastName: profile.lastName,
+          isEmailVerified: true,
+          accountStatus: 'ACTIVE',
+          roles: { connect: [{ roleName: 'BUYER' }] },
+        },
+      });
+      await tx.buyers.create({
+        data: { userId: created.id, displayName },
+      });
+    });
+
+    user = await AuthRepo.findUserByEmail(profile.email);
+    if (!user) throw { status: 500, message: 'Could not create account' };
+    return user;
+  }
+
+  /**
+   * Facebook Login. Verifies the token against the Graph API before trusting anything
+   * about it, then finds or creates an account by the verified email.
+   */
+  static async facebookLogin(data: { accessToken: string }) {
+    if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET) {
+      logger.error('[Auth] Blocked call to facebookLogin — FACEBOOK_APP_ID/SECRET not configured');
+      throw { status: 501, message: 'Facebook sign-in is not configured' };
+    }
+
+    const profile = await this.verifyFacebookAccessToken(data.accessToken);
+
+    if (!profile.email) {
+      logger.warn(`[Auth] Facebook login for ${profile.id} carried no email`);
+      throw {
+        status: 400,
+        message:
+          'Facebook did not share a verified email address. Please allow the email permission, or sign in with email and password instead.',
+      };
+    }
+
+    const user = await this.findOrCreateSocialBuyer({
+      email: profile.email,
+      firstName: profile.first_name,
+      lastName: profile.last_name,
+    });
+
+    const updatedUser = await AuthRepo.updateUserLoginStatus(user.id);
+    logger.info(`[Auth] Facebook login successful: ${updatedUser.id} (${profile.email})`);
+
+    return this.generateAuthResponse(updatedUser as Users, 'facebook', true, {
+      revokeOtherSessions: true,
+      providerUserId: profile.id,
+      providerAvatarUrl: profile.picture?.data?.url,
+    });
+  }
+
+  /**
+   * Google Sign-In.
+   *
+   * Verifies the ID token's signature, audience, and issuer against Google's own public
+   * keys before trusting anything in it — this is the fix for the account-takeover bug
+   * the old implementation had, which took `email` straight from the request body. See
+   * the removed SECURITY note this replaces for the incident.
+   */
+  static async googleLogin(data: { idToken: string }) {
+    if (!GOOGLE_CLIENT_ID) {
+      logger.error('[Auth] Blocked call to googleLogin — GOOGLE_CLIENT_ID not configured');
+      throw { status: 501, message: 'Google sign-in is not configured' };
+    }
+
+    const client = new OAuth2Client(GOOGLE_CLIENT_ID);
+    let payload;
+    try {
+      const ticket = await client.verifyIdToken({
+        idToken: data.idToken,
+        audience: GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    } catch (err) {
+      logger.warn(`[Auth] Google ID token failed verification: ${(err as Error).message}`);
+      throw { status: 401, message: 'That Google session is invalid or has expired.' };
+    }
+
+    // `verifyIdToken` already checked signature/audience/issuer/expiry; `email_verified`
+    // is the one claim it does not enforce, and an unverified address is exactly the gap
+    // the old email-from-request-body bug exploited, just moved one layer down.
+    if (!payload?.email || !payload.email_verified) {
+      logger.warn(`[Auth] Google login for ${payload?.sub} carried no verified email`);
+      throw {
+        status: 400,
+        message:
+          'Google did not share a verified email address. Please sign in with email and password instead.',
+      };
+    }
+
+    const user = await this.findOrCreateSocialBuyer({
+      email: payload.email,
+      firstName: payload.given_name,
+      lastName: payload.family_name,
+    });
+
+    const updatedUser = await AuthRepo.updateUserLoginStatus(user.id);
+    logger.info(`[Auth] Google login successful: ${updatedUser.id} (${payload.email})`);
+
+    return this.generateAuthResponse(updatedUser as Users, 'google', true, {
+      revokeOtherSessions: true,
+      providerUserId: payload.sub,
+      providerAvatarUrl: payload.picture,
+    });
   }
 
   /**

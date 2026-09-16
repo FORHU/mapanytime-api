@@ -169,29 +169,17 @@ export default class AuthController {
   }
 
   /**
-   * Google OAuth Sign-In
+   * Google Sign-In.
    *
-   * SECURITY — NOT SAFE TO REGISTER AS A ROUTE YET.
-   * This handler takes `email` at face value from the request body, so anyone who can reach it
-   * could mint tokens for any account by posting that account's address. It is deliberately not
-   * wired up in auth.route.ts, and AuthSvc.googleLogin now throws 501 unconditionally so that
-   * wiring it up fails loudly instead of opening account takeover.
-   *
-   * Before re-enabling, replace the body-supplied identity with a verified one:
-   *   1. Require an `idToken` from the client instead of `email`/`firstName`/`lastName`/`googleId`.
-   *   2. Verify it — `new OAuth2Client(GOOGLE_CLIENT_ID).verifyIdToken({ idToken, audience: GOOGLE_CLIENT_ID })`
-   *      — and reject anything that fails signature, audience, issuer, or expiry checks.
-   *   3. Read email/name/sub from the verified payload only, and require `email_verified`.
+   * Deliberately accepts only `idToken` — nothing the client might claim about its own
+   * identity. AuthSvc.googleLogin verifies the token's signature/audience/issuer against
+   * Google's own keys and derives email/name/sub from that, never from this request body.
+   * The previous handler here took `email` straight from the body and could mint tokens
+   * for any address the caller named; this replaces that bug rather than re-enabling it.
    */
   static async googleLogin(req: Request, res: Response, next: NextFunction) {
     const schema = Joi.object({
-      email: Joi.string()
-        .email({ tlds: { allow: false } })
-        .required(),
-      firstName: Joi.string().optional(),
-      lastName: Joi.string().optional(),
-      googleId: Joi.string().optional(),
-      avatarUrl: Joi.string().optional(),
+      idToken: Joi.string().required(),
     });
 
     const { error, value } = schema.validate(req.body);
@@ -200,6 +188,30 @@ export default class AuthController {
     try {
       const data = await AuthSvc.googleLogin(value);
       return responseSuccess(res, 200, data, 'Google login successful');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Facebook Login.
+   *
+   * Deliberately accepts only `accessToken` — nothing else the client might claim about
+   * its own identity. AuthSvc.facebookLogin verifies the token against the Graph API and
+   * derives email/name/id from that response, never from this request body. See the
+   * SECURITY note on googleLogin above for why that distinction matters.
+   */
+  static async facebookLogin(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({
+      accessToken: Joi.string().required(),
+    });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const data = await AuthSvc.facebookLogin(value);
+      return responseSuccess(res, 200, data, 'Facebook login successful');
     } catch (error) {
       next(error);
     }
