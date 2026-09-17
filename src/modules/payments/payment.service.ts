@@ -462,6 +462,37 @@ export default class PaymentService {
   }
 
   /**
+   * Payment and order status for the unauthenticated post-payment return page.
+   *
+   * Deliberately narrower than `getPaymentStatusByOrderId`. There is no user to
+   * scope by — the browser coming back from the gateway holds no token, and the
+   * signed `t` parameter on the URL is what establishes it was sent here by us
+   * — so this returns only the two status values that page renders, never the
+   * amount, buyer, store or line items.
+   *
+   * Returns null when no payment row exists yet, which the caller renders as
+   * "still confirming" rather than as an error: the buyer's browser routinely
+   * beats our own write.
+   */
+  static async getReturnPageStatus(orderId: string) {
+    const payment = await prisma.payments.findFirst({
+      where: { orderId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        status: true,
+        order: { select: { status: true } },
+      },
+    });
+
+    if (!payment) return null;
+
+    return {
+      paymentStatus: payment.status as string,
+      orderStatus: payment.order.status as string,
+    };
+  }
+
+  /**
    * Authoritative Webhook Processor with signature validation and deduplication.
    */
   static async processProviderWebhook(

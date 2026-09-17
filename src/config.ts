@@ -137,6 +137,22 @@ export const MAPANYTIME_WEB_APP_URL =
   process.env.MAPANYTIME_WEB_APP_URL || process.env.FRONTEND_URL || '';
 
 /**
+ * This API's own public origin, as reachable from outside the network.
+ *
+ * The post-payment return page is served by this service, not by the web app
+ * (`GET /v1/payments/xendit/return`), so the return URL Xendit sends the buyer's
+ * browser to is built from this rather than from `MAPANYTIME_WEB_APP_URL`. That
+ * matters because the web dev server is on a port Xendit will not accept.
+ *
+ * This is the deployed API origin, `https://mapanytime.com`. Xendit is tested
+ * against the live site: the return page and the webhook
+ * (`/api/v1/payments/webhook/xendit`) are both served there. Leave it unset
+ * locally — a local checkout still opens a Xendit session, but the webhook goes
+ * to the live site, so a local order never completes.
+ */
+export const MAPANYTIME_API_PUBLIC_URL = process.env.MAPANYTIME_API_PUBLIC_URL || '';
+
+/**
  * Origin for links a recipient clicks out of an email.
  *
  * Deliberately separate from `MAPANYTIME_WEB_APP_URL`. That one is constrained by
@@ -219,9 +235,23 @@ function explicitPortOf(url: string, parsed: URL): string {
  * this substitution is going to happen, so it is loud rather than silent.
  */
 export function strictCheckoutReturnUrlBase(): string {
-  return checkoutReturnUrlProblems(MAPANYTIME_WEB_APP_URL).length === 0
-    ? MAPANYTIME_WEB_APP_URL
-    : 'https://example.com';
+  const { url } = checkoutReturnUrlCandidate();
+  return checkoutReturnUrlProblems(url).length === 0 ? url : 'https://example.com';
+}
+
+/**
+ * Which origin the return URL is built from, and under which name to blame it.
+ *
+ * `MAPANYTIME_API_PUBLIC_URL` wins because the return page is served by this
+ * service. `MAPANYTIME_WEB_APP_URL` remains the fallback so an environment that
+ * only ever set that one keeps working. Deliberately no fallback *past* a set
+ * `MAPANYTIME_API_PUBLIC_URL`: if it is set but malformed, that is the value to
+ * report, not one silently swapped behind the operator's back.
+ */
+export function checkoutReturnUrlCandidate(): { url: string; source: string } {
+  return MAPANYTIME_API_PUBLIC_URL
+    ? { url: MAPANYTIME_API_PUBLIC_URL, source: 'MAPANYTIME_API_PUBLIC_URL' }
+    : { url: MAPANYTIME_WEB_APP_URL, source: 'MAPANYTIME_WEB_APP_URL' };
 }
 
 /**
@@ -246,15 +276,18 @@ export function strictCheckoutReturnUrlBase(): string {
  * to the buyer pressing Pay.
  */
 export function assertCheckoutReturnUrl(): void {
-  const problems = checkoutReturnUrlProblems(MAPANYTIME_WEB_APP_URL);
+  const { url, source } = checkoutReturnUrlCandidate();
+  const problems = checkoutReturnUrlProblems(url);
   if (problems.length === 0) return;
 
   const message =
-    `[config] MAPANYTIME_WEB_APP_URL is unusable as a checkout return URL — ` +
+    `[config] ${source} is unusable as a checkout return URL — ` +
     `${problems.join('; ')}. Xendit rejects such a session with 400 INVALID_URL, so ` +
     'checkout will fall back to https://example.com and the buyer will land there after ' +
-    'paying. Use an https origin with no port, e.g. https://<your-tailscale-ipv4> for local ' +
-    'device testing. (The legacy name FRONTEND_URL is still read if the new one is unset.)';
+    'paying. Use an https origin with no port — set MAPANYTIME_API_PUBLIC_URL to the ' +
+    'deployed API origin, e.g. https://mapanytime.com; Xendit is tested against the live ' +
+    'site, not locally. (For MAPANYTIME_WEB_APP_URL the legacy name FRONTEND_URL is ' +
+    'still read if the new one is unset.)';
 
   if (NODE_ENV === 'production') throw new Error(message);
   console.warn(message);

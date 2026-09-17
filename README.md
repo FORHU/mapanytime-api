@@ -163,18 +163,38 @@ Without `PAYMONGO_SECRET_KEY` / `XENDIT_SECRET_KEY` set, `PaymentService.getProv
 falls back to `MockProvider` so checkout still works with no real gateway — no
 hosted checkout page, no real webhook.
 
-To sandbox-test against a real gateway (e.g. Xendit's Payment Sessions API):
+#### Xendit — test on the live site
 
-1. Fill in the provider's env vars in `.env` (see `.env.example` — secret key
-   and webhook verification token/secret, from that gateway's dashboard).
+Xendit is tested against the deployed API at `https://mapanytime.com`, not
+through a local tunnel. Both the post-payment return page and the webhook are
+served there.
+
+1. Set these GitHub Actions secrets for production:
+   - `MAPANYTIME_API_PUBLIC_URL` = `https://mapanytime.com`
+   - `XENDIT_SECRET_KEY` and `XENDIT_WEBHOOK_TOKEN`. Use the
+     `xnd_development_` key while sandbox testing, and take the token from the
+     same Xendit mode as the key.
+2. In the Xendit Dashboard → Settings → Webhooks, set the URL to
+   `https://mapanytime.com/api/v1/payments/webhook/xendit`.
+3. Re-run `deploy-production.yml`.
+4. Place an order on mapanytime.com, or in the Flutter app pointed at the live
+   API. It should redirect to Xendit's hosted checkout, return to
+   `https://mapanytime.com/api/v1/payments/xendit/return`, and flip to paid
+   once the webhook arrives.
+
+A local API can still open Xendit sessions, but webhooks go to the live site,
+so a local order never completes.
+
+#### PayMongo — local tunnel
+
+1. Fill in the PayMongo env vars in `.env` (see `.env.example`).
 2. Expose your local API with `npm run tunnel` (wraps `ngrok`, already a
    devDependency) — copy the printed `https://*.ngrok-free.app` URL.
-3. In the gateway's dashboard, set the webhook URL to
-   `<ngrok-url>/api/v1/payments/webhook/<provider>` (e.g. `.../webhook/xendit`),
-   and copy its verification token/secret into `.env`.
-4. Place a real order selecting that gateway's method — it should redirect to
-   the gateway's hosted checkout page, and completing a sandbox test payment
-   should land a webhook back through the tunnel.
+3. In the PayMongo dashboard, set the webhook URL to
+   `<ngrok-url>/api/v1/payments/webhook/paymongo`, and copy its webhook secret
+   into `.env`.
+4. Place a real order with a PayMongo method — completing a sandbox test
+   payment should land a webhook back through the tunnel.
 
 `npm run tunnel` uses the default port (`4002`) — pass a different port to
 `ngrok http` directly if you've changed `PORT` in `.env`.
