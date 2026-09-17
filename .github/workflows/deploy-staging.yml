@@ -176,6 +176,9 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET || '' }}
           PAYMONGO_SECRET_KEY: ${{ secrets.PAYMONGO_SECRET_KEY || '' }}
           PAYMONGO_WEBHOOK_SECRET_KEY: ${{ secrets.PAYMONGO_WEBHOOK_SECRET_KEY || '' }}
+          XENDIT_SECRET_KEY: ${{ secrets.XENDIT_SECRET_KEY || '' }}
+          XENDIT_WEBHOOK_TOKEN: ${{ secrets.XENDIT_WEBHOOK_TOKEN || '' }}
+          XENDIT_API_URL: ${{ secrets.XENDIT_API_URL || 'https://api.xendit.co' }}
           APP_AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
           AWS_S3_BUCKET_NAME: ${{ secrets.AWS_S3_BUCKET_NAME || secrets.S3_BUCKET }}
           S3_CDN_URL: ${{ secrets.S3_CDN_URL || '' }}
@@ -186,6 +189,7 @@ jobs:
           WORKER_HEALTH_PORT: ${{ secrets.WORKER_HEALTH_PORT || '8080' }}
           METRICS_INTERVAL_MS: ${{ secrets.METRICS_INTERVAL_MS || '60000' }}
           MAPANYTIME_WEB_APP_URL: ${{ secrets.MAPANYTIME_WEB_APP_URL || '' }}
+          MAPANYTIME_API_PUBLIC_URL: ${{ secrets.MAPANYTIME_API_PUBLIC_URL || '' }}
         run: |
           cat > runtime.env << EOF
           DATABASE_URL=${DATABASE_URL}
@@ -216,6 +220,9 @@ jobs:
           GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
           PAYMONGO_SECRET_KEY=${PAYMONGO_SECRET_KEY}
           PAYMONGO_WEBHOOK_SECRET_KEY=${PAYMONGO_WEBHOOK_SECRET_KEY}
+          XENDIT_SECRET_KEY=${XENDIT_SECRET_KEY}
+          XENDIT_WEBHOOK_TOKEN=${XENDIT_WEBHOOK_TOKEN}
+          XENDIT_API_URL=${XENDIT_API_URL}
           AWS_REGION=${APP_AWS_REGION}
           AWS_S3_BUCKET_NAME=${AWS_S3_BUCKET_NAME}
           S3_CDN_URL=${S3_CDN_URL}
@@ -226,6 +233,7 @@ jobs:
           WORKER_HEALTH_PORT=${WORKER_HEALTH_PORT}
           METRICS_INTERVAL_MS=${METRICS_INTERVAL_MS}
           MAPANYTIME_WEB_APP_URL=${MAPANYTIME_WEB_APP_URL}
+          MAPANYTIME_API_PUBLIC_URL=${MAPANYTIME_API_PUBLIC_URL}
           EOF
 
       - name: Publish env to Parameter Store

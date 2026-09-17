@@ -151,6 +151,9 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET || '' }}
           PAYMONGO_SECRET_KEY: ${{ secrets.PAYMONGO_SECRET_KEY || '' }}
           PAYMONGO_WEBHOOK_SECRET_KEY: ${{ secrets.PAYMONGO_WEBHOOK_SECRET_KEY || '' }}
+          XENDIT_SECRET_KEY: ${{ secrets.XENDIT_SECRET_KEY || '' }}
+          XENDIT_WEBHOOK_TOKEN: ${{ secrets.XENDIT_WEBHOOK_TOKEN || '' }}
+          XENDIT_API_URL: ${{ secrets.XENDIT_API_URL || 'https://api.xendit.co' }}
           # No AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY here, deliberately.
           # The box authenticates as its instance role, which holds S3 on the
           # bucket below plus ECR pull. A static key in this file overrides that
@@ -170,6 +173,10 @@ jobs:
           # asserts against, and an empty value silently skips that check — which
           # is how F94 shipped green for a week.
           MAPANYTIME_WEB_APP_URL: ${{ secrets.MAPANYTIME_WEB_APP_URL }}
+          # The origin Xendit returns the buyer's browser to. Falls back to the
+          # web app origin above when unset, which is how this behaved before the
+          # return page existed.
+          MAPANYTIME_API_PUBLIC_URL: ${{ secrets.MAPANYTIME_API_PUBLIC_URL || '' }}
         run: |
           set -euo pipefail
 
@@ -209,6 +216,9 @@ jobs:
             printf 'GOOGLE_CLIENT_SECRET=%s\n'        "$GOOGLE_CLIENT_SECRET"
             printf 'PAYMONGO_SECRET_KEY=%s\n'         "$PAYMONGO_SECRET_KEY"
             printf 'PAYMONGO_WEBHOOK_SECRET_KEY=%s\n' "$PAYMONGO_WEBHOOK_SECRET_KEY"
+            printf 'XENDIT_SECRET_KEY=%s\n'           "$XENDIT_SECRET_KEY"
+            printf 'XENDIT_WEBHOOK_TOKEN=%s\n'        "$XENDIT_WEBHOOK_TOKEN"
+            printf 'XENDIT_API_URL=%s\n'              "$XENDIT_API_URL"
             printf 'AWS_REGION=%s\n'                  "$APP_AWS_REGION"
             printf 'AWS_S3_BUCKET_NAME=%s\n'          "$AWS_S3_BUCKET_NAME"
             printf 'S3_CDN_URL=%s\n'                  "$S3_CDN_URL"
@@ -219,6 +229,7 @@ jobs:
             printf 'WORKER_HEALTH_PORT=%s\n'          "$WORKER_HEALTH_PORT"
             printf 'METRICS_INTERVAL_MS=%s\n'         "$METRICS_INTERVAL_MS"
             printf 'MAPANYTIME_WEB_APP_URL=%s\n'      "$MAPANYTIME_WEB_APP_URL"
+            printf 'MAPANYTIME_API_PUBLIC_URL=%s\n'   "$MAPANYTIME_API_PUBLIC_URL"
           } > runtime.env
 
       - name: Publish env to Parameter Store
