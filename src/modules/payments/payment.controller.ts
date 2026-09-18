@@ -1,5 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import PaymentService from './payment.service';
+import {
+  isSafeOrderId,
+  verifyOrderReturnToken,
+  resolveReturnOutcome,
+  renderReturnPage,
+  MAX_REFRESHES,
+} from './payment-return';
 
 export const getActiveMethods = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -69,6 +76,51 @@ export const getPaymentStatus = async (req: Request, res: Response, next: NextFu
       success: true,
       data: status,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * The page the buyer's browser lands on after paying.
+ *
+ * Unauthenticated by necessity: the in-app browser returning from GCash is not
+ * the app's HTTP client and carries no bearer token. The signed `t` parameter,
+ * minted when the checkout session was created, stands in for that.
+ *
+ * This is a *display* endpoint. It never writes, and it never treats the
+ * `status` Xendit appended as proof of anything — the webhook is what settles a
+ * payment, and this only reports what the webhook already recorded.
+ */
+export const handleXenditReturn = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { orderId, t } = req.query;
+    const returned = req.query.status === 'cancelled' ? 'cancelled' : 'success';
+    const attempt = Number.parseInt(String(req.query.n ?? '0'), 10) || 0;
+
+    if (!isSafeOrderId(orderId) || !verifyOrderReturnToken(orderId, t)) {
+      return res
+        .status(400)
+        .type('html')
+        .send(renderReturnPage({ outcome: 'invalid', orderId: '' }));
+    }
+
+    const record = await PaymentService.getReturnPageStatus(orderId);
+    const outcome = record
+      ? resolveReturnOutcome(record.paymentStatus, record.orderStatus, returned)
+      : 'waiting';
+
+    // The redirect normally beats the webhook, so the first load usually reads
+    // PENDING. Self-refresh while that can still change, but bound it — a
+    // genuinely abandoned payment should not leave a phone reloading forever.
+    // The counter rides in the URL because there is no session to keep it in.
+    const refreshUrl =
+      outcome === 'waiting' && attempt < MAX_REFRESHES
+        ? `?orderId=${orderId}&status=${returned}&t=${encodeURIComponent(t as string)}` +
+          `&n=${attempt + 1}`
+        : undefined;
+
+    return res.status(200).type('html').send(renderReturnPage({ outcome, orderId, refreshUrl }));
   } catch (error) {
     next(error);
   }

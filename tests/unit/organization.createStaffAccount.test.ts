@@ -1,5 +1,6 @@
 import OrganizationService from '../../src/modules/organization/organization.service';
 import OrganizationRepository from '../../src/modules/organization/organization.repository';
+import { publish } from '../../src/infrastructure/rabbitmq/publisher';
 import { prisma } from '../../src/utils/prisma';
 import { SYSTEM_ROLES } from '../../src/constants/roles.constant';
 import { PERMISSIONS } from '../../src/constants/permissions.constant';
@@ -13,11 +14,34 @@ jest.mock('../../src/modules/auth/auth.service', () => ({
 jest.mock('../../src/infrastructure/rabbitmq/publisher', () => ({ publish: jest.fn() }));
 jest.mock('../../src/utils/prisma', () => ({ prisma: { $transaction: jest.fn() } }));
 
+/**
+ * Pinned, because `src/config` calls `dotenv.config()` at import and jest has no
+ * env isolation — so this suite reads whatever `.env` the developer happens to
+ * have. This assertion used to depend on `MAPANYTIME_WEB_APP_URL` being *unset*,
+ * which made it pass in CI (no .env) and fail on any machine that had configured
+ * the variable.
+ *
+ * Mocking the module is the only thing that works: `MAPANYTIME_WEB_APP_URL` is a
+ * module-level `export const` bound at import time, so setting `process.env` from
+ * a test body — the pattern `payment.service.test.ts` uses — would be too late.
+ */
+jest.mock('../../src/config', () => ({
+  ...jest.requireActual('../../src/config'),
+  MAPANYTIME_WEB_APP_URL: 'https://app.test',
+  // Links in email come from their own origin, because the one above is shaped
+  // by Xendit's rules and in development points somewhere unreachable.
+  MAPANYTIME_WEB_APP_EMAIL_URL: 'https://mail.test',
+}));
+
 const mockedRepo = OrganizationRepository as unknown as {
   findUserByEmail: jest.Mock;
   getOrgStores: jest.Mock;
 };
 const mockedPrisma = prisma as unknown as { $transaction: jest.Mock };
+const mockedPublish = publish as jest.Mock;
+
+/** The single EMAIL_SEND_REQUESTED payload, for asserting on what was sent. */
+const publishedEmail = () => mockedPublish.mock.calls[0][1];
 
 const ORG = 'org-1';
 
@@ -135,10 +159,67 @@ describe('OrganizationService.createStaffAccount', () => {
     });
   });
 
-  it('builds the setup URL from the configured web app origin, not a raw env var', async () => {
+  it('builds the setup URL from the email origin, not the Xendit-shaped one', async () => {
     const result = await OrganizationService.createStaffAccount(ORG, base);
 
-    expect(result.setupUrl.startsWith('http://localhost:4000/set-password?')).toBe(true);
+    expect(result.setupUrl.startsWith('https://mail.test/set-password?')).toBe(true);
+    expect(result.setupUrl).not.toContain('app.test');
+  });
+
+  describe('the set-up email', () => {
+    it('sends the link to the address the admin supplied', async () => {
+      const result = await OrganizationService.createStaffAccount(ORG, base);
+
+      expect(mockedPublish).toHaveBeenCalledTimes(1);
+      const email = publishedEmail();
+      expect(email.email).toBe(base.email);
+      expect(email.templateName).toBe('staff-setup.html');
+      expect(email.data.setupUrl).toBe(result.setupUrl);
+    });
+
+    /**
+     * The link used to be built twice — once for the email, once for the
+     * response. Two constructions of the same URL are free to drift, and the
+     * copy nobody reads is the one that rots.
+     */
+    it('sends the same code and link it hands back to the admin', async () => {
+      const result = await OrganizationService.createStaffAccount(ORG, base);
+      const email = publishedEmail();
+
+      expect(email.data.code).toBe(result.setupCode);
+      expect(email.data.setupUrl).toContain(result.setupCode);
+      expect(email.body).toContain(result.setupUrl);
+    });
+
+    it('states the expiry in days rather than raw minutes', async () => {
+      await OrganizationService.createStaffAccount(ORG, base);
+
+      // The TTL is stored as 4320 minutes; "expires in 4320 minutes" is true
+      // and unreadable.
+      expect(publishedEmail().data.expiresIn).toBe('3 days');
+      expect(JSON.stringify(publishedEmail().data)).not.toContain('4320');
+    });
+
+    it('sends nothing when the account could not be created', async () => {
+      mockedPrisma.$transaction.mockRejectedValue(new Error('constraint violation'));
+
+      await expect(OrganizationService.createStaffAccount(ORG, base)).rejects.toThrow();
+      // An email announcing an account that does not exist is worse than none.
+      expect(mockedPublish).not.toHaveBeenCalled();
+    });
+
+    it('still creates the member when publishing the email fails', async () => {
+      // `Once`, not `mockRejectedValue`: the suite's beforeEach uses
+      // clearAllMocks, which clears recorded calls but leaves implementations
+      // in place — a persistent rejection here would leak into every later test.
+      mockedPublish.mockRejectedValueOnce(new Error('rabbitmq down'));
+
+      // The member exists either way; mail being down must not turn a
+      // successful creation into an error the admin sees.
+      await expect(OrganizationService.createStaffAccount(ORG, base)).resolves.toMatchObject({
+        userId: 'user-new',
+      });
+    });
   });
 
   describe('feature permissions', () => {

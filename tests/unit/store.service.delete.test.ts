@@ -1,5 +1,6 @@
 import StoreService from '../../src/modules/stores/store.service';
 import StoreRepository from '../../src/modules/stores/store.repository';
+import { REJECTED_STORE_TTL_MS } from '../../src/modules/adminApprovals/storeApproval.service';
 import { prisma } from '../../src/utils/prisma';
 import { emitStoreRemoved } from '../../src/infrastructure/socket';
 import type { OrgContext } from '../../src/modules/organization/orgContext';
@@ -211,14 +212,20 @@ describe('StoreService.getMyStores deletion deadline', () => {
     jest.clearAllMocks();
   });
 
-  it('is 24 hours after the rejection', async () => {
+  // Derived from the constant, not a literal date. A hardcoded "+24h" here was a
+  // second copy of the window — the very duplication `getMyStores` avoids by
+  // computing the deadline from `REJECTED_STORE_TTL_MS` — so it broke the moment
+  // that constant was tuned. What matters is the relationship, at any window.
+  it('is one deletion window after the rejection', async () => {
     (StoreRepository.getStoresByScope as jest.Mock).mockResolvedValue([
       { id: 'store-1', approvalStatus: 'REJECTED', rejectedAt },
     ]);
 
     const [store] = await StoreService.getMyStores({});
 
-    expect(store.scheduledDeletionAt).toEqual(new Date('2026-09-10T10:00:00.000Z'));
+    expect(store.scheduledDeletionAt).toEqual(
+      new Date(rejectedAt.getTime() + REJECTED_STORE_TTL_MS),
+    );
   });
 
   it.each(['PENDING', 'UNDER_REVIEW', 'NEEDS_REVISION', 'ACTIVE'] as const)(

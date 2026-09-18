@@ -34,7 +34,7 @@ export const STALE_CLAIM_MS = 24 * 60 * 60 * 1000;
  * Lives here rather than in the store module because `dataFor` below is what
  * starts the clock, and the two must not be able to drift apart.
  */
-export const REJECTED_STORE_TTL_MS = 24 * 60 * 60 * 1000;
+export const REJECTED_STORE_TTL_MS = 60 * 1000; // TEMP: was 24 * 60 * 60 * 1000
 
 /**
  * Legal moves out of each status.

@@ -7,6 +7,7 @@ import {
   WebhookEvent,
 } from './payment-provider.interface';
 import { strictCheckoutReturnUrlBase } from '../../../config';
+import { buildReturnUrl } from '../payment-return';
 
 /**
  * Our `PaymentMethods.code` to Xendit's Payment Sessions `allowed_payment_channels`
@@ -72,7 +73,13 @@ export class XenditProvider implements PaymentProvider {
     // predicate `assertCheckoutReturnUrl` uses at startup, so a misconfigured
     // value has already been reported by then rather than silently swapped
     // here. RFC 2606 reserves example.com for the fallback.
-    const httpsFrontendUrl = strictCheckoutReturnUrlBase();
+    //
+    // The base is this API's own public origin, because the page the buyer
+    // lands on is served here (`/v1/payments/xendit/return`) rather than by the
+    // web app — the web dev server runs on a port Xendit will not accept, and a
+    // page that reads the webhook-confirmed status straight from the database
+    // needs no reachable frontend at all.
+    const returnUrlBase = strictCheckoutReturnUrlBase();
 
     const payload = {
       session_type: 'PAY',
@@ -84,9 +91,9 @@ export class XenditProvider implements PaymentProvider {
       country: 'PH',
       customer,
       success_return_url:
-        input.successUrl || `${httpsFrontendUrl}/orders/${input.orderId}?status=success`,
+        input.successUrl || buildReturnUrl(returnUrlBase, input.orderId, 'success'),
       cancel_return_url:
-        input.cancelUrl || `${httpsFrontendUrl}/orders/${input.orderId}?status=cancelled`,
+        input.cancelUrl || buildReturnUrl(returnUrlBase, input.orderId, 'cancelled'),
       ...(allowedChannels ? { allowed_payment_channels: allowedChannels } : {}),
     };
 

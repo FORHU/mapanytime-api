@@ -3,7 +3,15 @@ import { prisma } from '../../utils/prisma';
 import { SYSTEM_ROLES, type SellerOrgRoleName } from '../../constants/roles.constant';
 
 const memberInclude = {
-  user: { select: { id: true, email: true, firstName: true, lastName: true } },
+  user: {
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      isPasswordSet: true,
+    },
+  },
 } satisfies Prisma.SellerOrganizationMembersInclude;
 
 type MemberRow = Prisma.SellerOrganizationMembersGetPayload<{ include: typeof memberInclude }>;

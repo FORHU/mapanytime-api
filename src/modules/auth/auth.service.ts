@@ -88,7 +88,7 @@ export default class AuthSvc {
     const existingUser = await AuthRepo.findUserByEmail(data.email);
     if (existingUser) {
       logger.warn(`[Auth] Registration rejected — email already exists: ${data.email}`);
-      throw { status: 400, message: 'User already exists' };
+      throw { status: 400, message: 'Email already exists' };
     }
 
     const salt = crypto.randomBytes(16).toString('hex');
@@ -676,7 +676,7 @@ export default class AuthSvc {
 
       await tx.users.update({
         where: { id: user.id },
-        data: { passwordHash: `${salt}:${hash}`, activeSessionId: null },
+        data: { passwordHash: `${salt}:${hash}`, activeSessionId: null, isPasswordSet: true },
       });
 
       // Every device is signed out. Whoever forced the reset does not keep a

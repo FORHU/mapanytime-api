@@ -4,6 +4,7 @@ import {
   initiatePayment,
   getPaymentStatus,
   handleProviderWebhook,
+  handleXenditReturn,
   mockWebhook,
 } from './payment.controller';
 import { authenticate } from '../../middleware/auth.middleware';
@@ -20,6 +21,12 @@ router.get('/methods', getActiveMethods);
 // See FLAGS.md.
 router.post('/orders/:orderId/payment', authenticate, initiatePayment);
 router.get('/orders/:orderId/payment', authenticate, getPaymentStatus);
+
+// Where the gateway sends the buyer's browser after paying. Public by
+// necessity — that browser holds no bearer token — so the signed `t` on the URL
+// is the credential instead. Read-only: it reports what the webhook recorded and
+// never settles a payment itself.
+router.get('/xendit/return', handleXenditReturn);
 
 // Provider webhooks. Signature-verified inside the service, so no `authenticate`
 // — the signature is the credential.

@@ -24,6 +24,7 @@ model Users {
   userReferralId  String?
   accountStatus   USERACCOUNTSTATUS @default(ACTIVE)
   isEmailVerified Boolean           @default(false)
+  isPasswordSet   Boolean           @default(true)
   isOnBoarding    Boolean           @default(false)
   countryCode     String?
   lastLoginAt     DateTime?

@@ -703,7 +703,7 @@ export default class StoreService {
       throw { status: 404, message: 'Store not found.' };
     }
 
-    const { items, total } = await StoreRepository.getStoreProducts(storeId, limit, offset);
+    const { items, total } = await StoreRepository.getStoreProducts(store.id, limit, offset);
     const resolved = await Promise.all(
       items.map(async (product) => ({
         ...product,

@@ -1,14 +1,8 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import crypto from 'crypto';
 import logger from '../utils/logger';
-import { AWS_REGION, AWS_S3_BUCKET_NAME, S3_CDN_URL } from '../config';
-
-// No explicit credentials: the SDK's default provider chain falls through to
-// the EC2 instance role (see infra/ec2-app-runtime-policy.json).
-const s3Client = new S3Client({
-  region: AWS_REGION as string,
-});
+import { bucket, publicUrl, s3Presign } from './s3.client';
 
 export default class S3Util {
   // Generates a temporary URL the frontend can use to upload a file directly to S3.
@@ -22,15 +16,19 @@ export default class S3Util {
     const fileKey = `${folder}/${randomName}.${fileExtension}`;
 
     const command = new PutObjectCommand({
-      Bucket: AWS_S3_BUCKET_NAME,
+      Bucket: bucket(),
       Key: fileKey,
       ContentType: mimeType,
     });
 
+    // Signed with `s3Presign`, not the operations client: this URL is handed to
+    // a browser on the host, and the host it is signed against is part of the
+    // signature. See s3.client.ts.
+    //
     // URL expires in 15 minutes (900 seconds)
-    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
+    const uploadUrl = await getSignedUrl(s3Presign, command, { expiresIn: 900 });
 
-    logger.info(`[AWS S3] Generated presigned upload URL for key: ${fileKey}`);
+    logger.info(`[S3] Generated presigned upload URL for key: ${fileKey}`);
 
     return { uploadUrl, fileKey };
   }
@@ -38,24 +36,29 @@ export default class S3Util {
   // Generates a temporary URL to view/download a private file by its S3 Key.
   static async getFileUrl(fileKey: string): Promise<string> {
     const command = new GetObjectCommand({
-      Bucket: AWS_S3_BUCKET_NAME,
+      Bucket: bucket(),
       Key: fileKey,
     });
 
     // URL expires in 1 hour (3600 seconds)
-    const downloadUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    const downloadUrl = await getSignedUrl(s3Presign, command, { expiresIn: 3600 });
 
     return downloadUrl;
   }
 
-  // Generates an absolute public URL for a given S3 key
+  /**
+   * Generates an absolute public URL for a given S3 key.
+   *
+   * The two guards are the reason this is not just `publicUrl` re-exported:
+   * callers pass columns that are nullable (`store.repository.ts` logo and
+   * marker photo, `store.service.ts` logo and banner), and some rows already
+   * hold an absolute URL from before keys were stored. Choosing the host is
+   * `publicUrl`'s job; deciding whether a host is wanted at all is this one's.
+   */
   static getPublicUrl(fileKey: string | null): string | null {
     if (!fileKey) return null;
     if (fileKey.startsWith('http')) return fileKey; // Already an absolute URL
 
-    if (S3_CDN_URL) {
-      return `${S3_CDN_URL.replace(/\/$/, '')}/${fileKey}`;
-    }
-    return `https://${AWS_S3_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${fileKey}`;
+    return publicUrl(fileKey);
   }
 }
