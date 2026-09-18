@@ -788,19 +788,14 @@ export default class AuthSvc {
     user.activeSessionId = newSession.id;
 
     // The access token carries sessionId so authenticate() can tell a live session from a
-    // superseded one without a second lookup.
-    //
-    // It deliberately carries no roles. `authenticate` loads the user from the database and
-    // `permission.middleware` works from `req.user`, so authorization is server-side either
-    // way, and a roles claim that nobody verifies is only an invitation for someone to start
-    // trusting it (F105).
-    //
-    // This note used to add "and nothing ever read them", which was wrong and cost an outage:
-    // the web sidebar decoded this token for its role list, so dropping the claim left every
-    // seller with an empty navigation. Clients read roles from `GET /api/v1/users/me`, which
-    // resolves them from the database per request — do not add them back here.
+    // superseded one without a second lookup, and roles for client-side authorization / navbars.
+    const roles =
+      (user as Users & { roles?: Array<{ roleName: string } | string> }).roles?.map((r) =>
+        typeof r === 'string' ? r : r.roleName,
+      ) || [];
+
     const accessToken = jwt.sign(
-      { userId: user.id, sessionId: newSession.id },
+      { userId: user.id, sessionId: newSession.id, roles },
       ACCESS_TOKEN_SECRET,
       {
         expiresIn: ACCESS_TOKEN_EXPIRY as jwt.SignOptions['expiresIn'],

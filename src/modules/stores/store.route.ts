@@ -12,6 +12,7 @@ const router = express.Router();
 
 // Specific named routes MUST come before the /:id wildcard
 router.get('/nearby', StoreController.getNearby);
+router.get('/public-sitemap', StoreController.getPublicSitemap);
 router.get('/my-stores', authenticate, requireSellerOrg, StoreController.getMyStores);
 
 // Public storefront — buyer views a store by id (no auth required)

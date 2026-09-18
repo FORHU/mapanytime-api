@@ -1,4 +1,4 @@
-﻿import CategoryRepository from '../categories/category.repository';
+import CategoryRepository from '../categories/category.repository';
 import StoreRepository from './store.repository';
 import { redisConnection } from '../../infrastructure/redis/connection';
 import { emitStoreRemoved, emitStoreUpserted } from '../../infrastructure/socket';
@@ -722,5 +722,9 @@ export default class StoreService {
       offset,
       hasMore: offset + items.length < total,
     };
+  }
+
+  static async getPublicSitemapStores() {
+    return StoreRepository.getPublicSitemapStores();
   }
 }

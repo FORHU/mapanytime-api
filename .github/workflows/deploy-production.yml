@@ -4,9 +4,7 @@
 # SecureString -> SSM RunCommand pulls the image, migrates, and restarts the
 # API and worker containers.
 #
-# Identical in shape to deploy-staging.yml — the on-box work is the same
-# infra/deploy-remote.sh, parameterised. The only differences are the values in
-# the `env:` block below and that this workflow is dispatch-only.
+# Runs infra/deploy-remote.sh on the box, dispatch-only.
 #
 # See infra/README.md for the AWS-side setup and the cutover checklist.
 
@@ -149,6 +147,8 @@ jobs:
           CHAT_WONDER_API_URL: ${{ secrets.CHAT_WONDER_API_URL || '' }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID || '' }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET || '' }}
+          FACEBOOK_APP_ID: ${{ secrets.FACEBOOK_APP_ID || '' }}
+          FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET || '' }}
           PAYMONGO_SECRET_KEY: ${{ secrets.PAYMONGO_SECRET_KEY || '' }}
           PAYMONGO_WEBHOOK_SECRET_KEY: ${{ secrets.PAYMONGO_WEBHOOK_SECRET_KEY || '' }}
           XENDIT_SECRET_KEY: ${{ secrets.XENDIT_SECRET_KEY || '' }}
@@ -214,6 +214,8 @@ jobs:
             printf 'CHAT_WONDER_API_URL=%s\n'         "$CHAT_WONDER_API_URL"
             printf 'GOOGLE_CLIENT_ID=%s\n'            "$GOOGLE_CLIENT_ID"
             printf 'GOOGLE_CLIENT_SECRET=%s\n'        "$GOOGLE_CLIENT_SECRET"
+            printf 'FACEBOOK_APP_ID=%s\n'             "$FACEBOOK_APP_ID"
+            printf 'FACEBOOK_APP_SECRET=%s\n'         "$FACEBOOK_APP_SECRET"
             printf 'PAYMONGO_SECRET_KEY=%s\n'         "$PAYMONGO_SECRET_KEY"
             printf 'PAYMONGO_WEBHOOK_SECRET_KEY=%s\n' "$PAYMONGO_WEBHOOK_SECRET_KEY"
             printf 'XENDIT_SECRET_KEY=%s\n'           "$XENDIT_SECRET_KEY"
