@@ -300,4 +300,13 @@ export default class StoreController {
       next(error);
     }
   }
+
+  static async getPublicSitemap(req: Request, res: Response, next: NextFunction) {
+    try {
+      const stores = await StoreService.getPublicSitemapStores();
+      return responseSuccess(res, 200, stores);
+    } catch (error) {
+      next(error);
+    }
+  }
 }

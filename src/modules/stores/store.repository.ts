@@ -1,4 +1,4 @@
-﻿import { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import S3Util from '../../utils/s3.util';
 import { liveWindowFilter } from '../merchantAds/adWindow';
@@ -225,9 +225,13 @@ export default class StoreRepository {
   // findFirst rather than findUnique so the soft-delete filter can sit in the
   // WHERE: a deleted store must read as absent to every caller, including the
   // seller-facing ones that deliberately skip the isActive/approvalStatus gates.
+  // Supports lookup by internal id or human-readable slug.
   static async getStoreById(id: string) {
     return prisma.stores.findFirst({
-      where: { id, deletedAt: null },
+      where: {
+        OR: [{ id }, { slug: id }],
+        deletedAt: null,
+      },
       include: {
         storeLocations: true,
         storeHours: {
@@ -275,5 +279,27 @@ export default class StoreRepository {
       }),
     ]);
     return { items, total };
+  }
+
+  /**
+   * Retrieves all approved, active, public stores for sitemap generation.
+   * Excludes deleted, pending, and rejected stores.
+   */
+  static async getPublicSitemapStores() {
+    return prisma.stores.findMany({
+      where: {
+        approvalStatus: 'ACTIVE',
+        isActive: true,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        slug: true,
+        storeName: true,
+        updatedAt: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 2000,
+    });
   }
 }

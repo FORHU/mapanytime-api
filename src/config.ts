@@ -122,6 +122,22 @@ export const AWS_REGION = process.env.AWS_REGION || 'ap-southeast-1';
 export const AWS_S3_BUCKET_NAME = process.env.AWS_S3_BUCKET_NAME || process.env.S3_BUCKET || '';
 export const S3_CDN_URL = process.env.S3_CDN_URL || '';
 
+/**
+ * Facebook Login. Both empty by default so `AuthSvc.facebookLogin` can fail
+ * closed with a 501 — same shape as the disabled `googleLogin` — instead of
+ * calling the Graph API with an empty app id/secret.
+ */
+export const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID || '';
+export const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET || '';
+
+/**
+ * Google Sign-In. Only a client ID — ID token verification is a signature
+ * check against Google's public keys, not an OAuth code exchange, so there is
+ * no client secret to hold. Empty by default so `AuthSvc.googleLogin` fails
+ * closed with a 501 instead of verifying against an empty audience.
+ */
+export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+
 export const isDev = NODE_ENV === 'development';
 
 /**
