@@ -124,8 +124,16 @@ export default class StoreRepository {
     // A rejected store is forced isActive=false, so the deletedAt test is
     // currently redundant here. Stated anyway: "deleted stores are off the map"
     // should be a property of this query, not a consequence of another one.
+    //
+    // approvalStatus is tested independently of isActive for the same reason
+    // getStoreById does (store.service.ts): isActive is the seller's own
+    // open/closed toggle via PATCH /stores/:id, and NEEDS_REVISION is in
+    // EDITABLE_STATUSES — so a store sent back for revision could self-activate
+    // and reappear on the map while its detail endpoint still 404s. That
+    // mismatch renders a pin whose store page cannot load.
     const inViewport = Prisma.sql`
       s."isActive" = true
+      AND s."approvalStatus" = 'ACTIVE'
       AND s."deletedAt" IS NULL
       AND l."latitude" BETWEEN ${south} AND ${north}
       AND l."longitude" BETWEEN ${west} AND ${east}
