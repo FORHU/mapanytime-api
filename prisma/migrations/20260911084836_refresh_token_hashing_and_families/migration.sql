@@ -6,10 +6,10 @@
 
 */
 -- DropForeignKey
-ALTER TABLE "CommissionRules" DROP CONSTRAINT "CommissionRules_categoryId_fkey";
+ALTER TABLE IF EXISTS "CommissionRules" DROP CONSTRAINT IF EXISTS "CommissionRules_categoryId_fkey";
 
 -- AlterTable
-ALTER TABLE "Orders" DROP COLUMN "taxAmount";
+ALTER TABLE "Orders" DROP COLUMN IF EXISTS "taxAmount";
 
 -- DropTable
-DROP TABLE "CommissionRules";
+DROP TABLE IF EXISTS "CommissionRules";
