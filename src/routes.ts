@@ -32,6 +32,7 @@ import wishlistRoute from './modules/wishlists/wishlist.route';
 import notificationRoute from './modules/notifications/notification.route';
 import sellerRoute from './modules/sellers/seller.route';
 import rewardRoute from './modules/rewards/reward.route';
+import mobilityRoute from './modules/mobility/mobility.route';
 
 const router = express.Router();
 
@@ -72,5 +73,6 @@ router.use('/v1/reviews', reviewRoute);
 router.use('/v1/wishlist', wishlistRoute);
 router.use('/v1/notifications', notificationRoute);
 router.use('/v1/rewards', rewardRoute);
+router.use('/v1/mobility', mobilityRoute);
 
 export default router;

@@ -205,6 +205,31 @@ export function emitStoreRemoved(id: string, lat: number, lng: number): void {
   logger.info(`[Socket] store:removed → ${room} (${id})`);
 }
 
+export interface VehicleEventPayload {
+  id: string;
+  plateNumber: string;
+  typeCode: string;
+  lat: number;
+  lng: number;
+  heading: number | null;
+  speed: number | null;
+  ts: number;
+}
+
+/**
+ * God's Eye: a vehicle's latest position, to the cell it is in. A vehicle that
+ * leaves a cell sends nothing there — clients drop vehicles not heard from in 60s.
+ */
+export function emitVehicleMoved(vehicle: VehicleEventPayload): void {
+  if (!io) return;
+  io.to(cellKey(vehicle.lat, vehicle.lng)).emit('vehicle:moved', vehicle);
+}
+
+export function emitVehicleRemoved(id: string, lat: number, lng: number): void {
+  if (!io) return;
+  io.to(cellKey(lat, lng)).emit('vehicle:removed', { id });
+}
+
 export function emitNotificationToUser(
   userId: string,
   notification: NotificationEventPayload,

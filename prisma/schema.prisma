@@ -47,6 +47,8 @@ model Users {
   userReferral       Users?                      @relation("UserReferrals", fields: [userReferralId], references: [id])
   userReferrals      Users[]                     @relation("UserReferrals")
   orgMemberships     SellerOrganizationMembers[]
+  transportMemberships TransportOperatorMembers[]
+  drivenVehicle      Vehicles?                   @relation("VehicleDriver")
 
   @@unique([userReferralId, id])
   @@index([userReferralId])
@@ -1948,4 +1950,65 @@ model AnalyticsEvents {
   @@index([sessionId, occurredAt])
   @@index([userId, occurredAt])
   @@index([occurredAt])
+}
+
+// ── Mobility ────────────────────────────────────────────────────────────────
+// Vehicle-agnostic: a new transport mode is a VehicleTypes row, not a code path.
+
+model TransportOperators {
+  id        String   @id @default(cuid())
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members  TransportOperatorMembers[]
+  vehicles Vehicles[]
+}
+
+model TransportOperatorMembers {
+  id         String   @id @default(cuid())
+  operatorId String
+  userId     String
+  role       String // "OPERATOR_ADMIN" | "DRIVER"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  operator TransportOperators @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+  user     Users              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([operatorId, userId])
+  @@index([userId])
+}
+
+model VehicleTypes {
+  id            String   @id @default(cuid())
+  code          String   @unique // JEEPNEY, TRICYCLE, TAXI…
+  name          String
+  markerIconUrl String?
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  vehicles Vehicles[]
+}
+
+model Vehicles {
+  id              String   @id @default(cuid())
+  operatorId      String
+  vehicleTypeId   String
+  // Unique: a driver tracks one vehicle, so the tracking endpoint can resolve
+  // the vehicle from the caller instead of trusting a vehicleId in the body.
+  driverUserId    String?  @unique
+  plateNumber     String   @unique
+  trackingEnabled Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  operator    TransportOperators @relation(fields: [operatorId], references: [id])
+  vehicleType VehicleTypes       @relation(fields: [vehicleTypeId], references: [id])
+  driver      Users?             @relation("VehicleDriver", fields: [driverUserId], references: [id])
+
+  @@index([operatorId])
 }
