@@ -8,8 +8,9 @@ import { PORT, NODE_ENV, assertCheckoutReturnUrl } from './config';
 import { prisma } from './utils/prisma';
 import { redis } from './infrastructure/redis';
 import { rabbitmq } from './infrastructure/rabbitmq';
-import { initSocket } from './infrastructure/socket';
+import { attachRedisAdapter, closeRedisAdapter, initSocket } from './infrastructure/socket';
 import RedisUtil from './utils/redis.util';
+import MobilityService from './modules/mobility/mobility.service';
 
 const server = http.createServer(app);
 
@@ -26,6 +27,15 @@ const startServer = async () => {
     // Initialize infrastructure before opening the port to traffic
     await RedisUtil.initialize();
     await rabbitmq.connect();
+
+    // Without Redis this instance still serves its own sockets, just not other replicas'.
+    if (RedisUtil.client?.isOpen) {
+      await attachRedisAdapter(RedisUtil.client).catch((err) =>
+        logger.error('[Socket] Redis adapter failed; emits stay local to this instance:', err),
+      );
+    }
+    // God's Eye: takes vehicles silent for 60s off viewers' maps.
+    MobilityService.startSweeper();
 
     // Explicit 0.0.0.0: this runs in a container (see Dockerfile), and the
     // published port is only reachable if the server binds every interface.
@@ -52,6 +62,8 @@ const gracefulShutdown = async (signal: string) => {
 
     try {
       // Disconnect from all infrastructure
+      MobilityService.stopSweeper();
+      await closeRedisAdapter();
       await rabbitmq.close();
       await redis.close();
       await prisma.$disconnect();

@@ -63,6 +63,7 @@ We have cataloged **8 core flags (M1 through M8)** that need architectural align
 - **Recommendation:**
   - **Phase 1 (MVP):** Support `POST /mobility/tracking/location` with a stripped-down, ultra-fast middleware bypass (no heavy session loading, minimal JWT verification).
   - **Phase 2 (Scale):** Support bidirectional **WebSocket** or **MQTT** ingestion for operator/driver apps so a single persistent TCP connection streams binary or compact JSON packets (`[lat, lng, speed, heading, timestamp]`).
+- **Status (2026-09-25, [realtime tracking plan](MOBILITY_REALTIME_TRACKING_PLAN.md)):** Mitigated for Phase 1. The app sends one fix per 10s while moving and a 30s heartbeat while parked, instead of every 4s. The driver → vehicle lookup is cached in Redis for 60s, so a ping costs the auth lookup only. WebSocket/MQTT ingestion stays open for scale.
 
 ---
 
@@ -82,6 +83,11 @@ We have cataloged **8 core flags (M1 through M8)** that need architectural align
     GEOADD mobility:geo:vehicles <lng> <lat> <vehicleId>
     ```
     This allows querying "all active vehicles within $R$ km of user" in $O(\log(N))$ time.
+- **Status (2026-09-25):** Resolved.
+  - Live state is in Redis: `mobility:vehicle:{id}` with EX 60, the `mobility:geo:vehicles` GEO index, and `mobility:seen` for the expiry sweeper.
+  - Emits go to the vehicle's cell only. A cell change also sends `vehicle:removed` to the old cell, except to sockets watching both cells.
+  - The Socket.IO Redis adapter carries emits across API replicas.
+  - See `src/modules/mobility/mobility.live-store.ts`.
 
 ---
 
@@ -160,6 +166,9 @@ We have cataloged **8 core flags (M1 through M8)** that need architectural align
     - Single GeoJSON feature collection for all vehicles in the viewport.
     - Update the GeoJSON source data in-place on each socket tick.
   - Implement smooth bearing and coordinate animation (linear interpolation / tween) so vehicles glide between GPS reports rather than jumping abruptly.
+- **Status (2026-09-25):** Resolved for coordinates.
+  - `VehicleLayer` already used one GeoJSON source. It now glides moves under ~1 km over one 1s render cycle (5 frames), and dims stopped vehicles.
+  - Bearing is not interpolated.
 
 ---
 

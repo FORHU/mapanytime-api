@@ -51,6 +51,8 @@ const locationSchema = () =>
     lng: Joi.number().min(-180).max(180).required(),
     speed: Joi.number().min(0).max(160).allow(null), // km/h
     heading: Joi.number().min(0).max(360).allow(null),
+    // Metres. Optional so app builds from before it was sent keep working.
+    accuracy: Joi.number().min(0).max(10_000).allow(null),
     timestamp: Joi.number()
       .integer()
       .min(Date.now() - 30_000)
@@ -172,7 +174,8 @@ export default class MobilityController {
     withValid(
       boundsSchema,
       (req) => req.query,
-      async (v: Bounds, _req, res) => responseSuccess(res, 200, MobilityService.liveInBounds(v)),
+      async (v: Bounds, _req, res) =>
+        responseSuccess(res, 200, await MobilityService.liveInBounds(v)),
     ),
   );
 }

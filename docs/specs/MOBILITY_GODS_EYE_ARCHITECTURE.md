@@ -420,6 +420,21 @@ Recommended initial live-state TTL:
 
 This prevents ghost vehicles.
 
+## 10.1 As implemented (2026-09-25)
+
+See [MOBILITY_REALTIME_TRACKING_PLAN.md](MOBILITY_REALTIME_TRACKING_PLAN.md) for the full design. `src/modules/mobility/mobility.live-store.ts` is the only code that touches these keys:
+
+| Key                     | Type          | Holds                                                  | Expiry                   |
+| ----------------------- | ------------- | ------------------------------------------------------ | ------------------------ |
+| `mobility:vehicle:{id}` | string (JSON) | the `vehicle:moved` payload, incl. `status`/`accuracy` | `EX 60`                  |
+| `mobility:geo:vehicles` | GEO           | vehicle ids at their last position                     | removed by the sweeper   |
+| `mobility:seen`         | zset          | id → server time of the last fix                       | removed by the sweeper   |
+| `mobility:driver:{uid}` | string (JSON) | driver → vehicle lookup, or `none`                     | `EX 60`, cleared on edit |
+
+- **Why the sweeper.** A GEO member can't carry a TTL. Every API instance runs a sweep every 5s that takes ids from `mobility:seen` older than 60s. A Lua script then claims each one atomically, removing it only if no ping refreshed it in the meantime. The instance that claimed the id emits `vehicle:removed` to its cell, so each vehicle's removal is emitted exactly once, however many replicas run.
+- **Snapshot.** `GET /mobility/vehicles/live` runs `GEOSEARCH BYBOX` (at most 500 results) and then `MGET`. Ids whose JSON key has already expired are dropped.
+- **Horizontal scaling.** The API attaches `@socket.io/redis-adapter`. Because web clients start on HTTP long-polling, running more than one replica behind a load balancer **requires sticky sessions** (ALB target-group stickiness). The Flutter client connects over websocket only.
+
 ---
 
 # 11. Spatial Filtering

@@ -1,17 +1,24 @@
 /**
- * Drives a fake jeepney in a ~300 m circle so God's Eye can be tested with one
- * phone. Dev-only: uses the seeded admin and dual@example.com accounts.
+ * Drives a fake jeepney so God's Eye can be tested with one phone. Dev-only:
+ * uses the seeded admin and dual@example.com accounts.
  *
- *   npx ts-node scripts/simulate-vehicle.ts <lat> <lng> [apiBase]
+ *   npx ts-node scripts/simulate-vehicle.ts <lat> <lng> [apiBase] [--cross]
  *   npx ts-node scripts/simulate-vehicle.ts 16.4023 120.596
+ *   npx ts-node scripts/simulate-vehicle.ts 16.4023 120.596 --cross
+ *
+ * Default: a ~300 m circle. --cross: back and forth across the nearest 0.1° cell
+ * edge, parking 30s at each end, so one run shows stopped → moving and the
+ * vehicle:removed / vehicle:moved pair a cell change emits (see watch-vehicles.ts).
  *
  * First run creates operator "Simulator Transport Co" and vehicle SIM-001 with
  * dual@example.com as its driver. Ctrl+C stops sharing (vehicle leaves the map).
  */
-const [latArg, lngArg, baseArg] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const cross = args.includes('--cross');
+const [latArg, lngArg, baseArg] = args.filter((a) => !a.startsWith('--'));
 const center = { lat: Number(latArg), lng: Number(lngArg) };
 if (!Number.isFinite(center.lat) || !Number.isFinite(center.lng)) {
-  console.error('Usage: npx ts-node scripts/simulate-vehicle.ts <lat> <lng> [apiBase]');
+  console.error('Usage: npx ts-node scripts/simulate-vehicle.ts <lat> <lng> [apiBase] [--cross]');
   process.exit(1);
 }
 const API = `${baseArg ?? 'http://localhost:4002'}/api/v1`;
@@ -19,7 +26,51 @@ const API = `${baseArg ?? 'http://localhost:4002'}/api/v1`;
 const PLATE = 'SIM-001';
 const RADIUS_M = 300;
 const SPEED_KMH = 25;
-const PING_MS = 3_000;
+// Matches the driver app while moving.
+const PING_MS = 10_000;
+// Must match CELL_SIZE in src/infrastructure/socket.
+const CELL_DEG = 0.1;
+const PARK_PINGS = 3;
+
+const mPerDegLat = 111_320;
+const mPerDegLng = mPerDegLat * Math.cos((center.lat * Math.PI) / 180);
+
+interface Fix {
+  lat: number;
+  lng: number;
+  speed: number;
+  heading: number;
+}
+
+function* circleRoute(): Generator<Fix> {
+  const stepRad = ((SPEED_KMH / 3.6) * (PING_MS / 1000)) / RADIUS_M;
+  for (let angle = 0; ; angle += stepRad) {
+    yield {
+      lat: center.lat + (RADIUS_M * Math.sin(angle)) / mPerDegLat,
+      lng: center.lng + (RADIUS_M * Math.cos(angle)) / mPerDegLng,
+      speed: SPEED_KMH,
+      // Counter-clockwise travel: heading is the tangent, as a compass bearing.
+      heading: ((((-angle * 180) / Math.PI) % 360) + 360) % 360,
+    };
+  }
+}
+
+function* crossRoute(): Generator<Fix> {
+  const edge = Math.round(center.lat / CELL_DEG) * CELL_DEG;
+  const reach = 0.004; // ~450 m either side of the edge
+  const step = ((SPEED_KMH / 3.6) * (PING_MS / 1000)) / mPerDegLat;
+  let lat = edge + reach;
+  let dir = -1;
+  for (;;) {
+    const heading = dir < 0 ? 180 : 0;
+    for (let i = 0; i < PARK_PINGS; i++) yield { lat, lng: center.lng, speed: 0, heading };
+    while (dir < 0 ? lat > edge - reach : lat < edge + reach) {
+      lat += dir * step;
+      yield { lat, lng: center.lng, speed: SPEED_KMH, heading };
+    }
+    dir = -dir;
+  }
+}
 
 async function call(method: string, path: string, token?: string, body?: unknown) {
   const res = await fetch(API + path, {
@@ -69,11 +120,6 @@ async function main() {
   const driverId = JSON.parse(Buffer.from(driver.split('.')[1], 'base64url').toString()).userId;
   await provision(admin, driverId);
 
-  const stepRad = ((SPEED_KMH / 3.6) * (PING_MS / 1000)) / RADIUS_M;
-  const mPerDegLat = 111_320;
-  const mPerDegLng = mPerDegLat * Math.cos((center.lat * Math.PI) / 180);
-  let angle = 0;
-
   const stop = async () => {
     await call('POST', '/mobility/tracking/stop', driver).catch(() => undefined);
     console.log(`\n${PLATE} stopped sharing — it should vanish from the map now.`);
@@ -81,27 +127,24 @@ async function main() {
   };
   process.on('SIGINT', () => void stop());
 
+  const where = cross ? 'across the cell edge near' : 'around';
   console.log(
-    `Driving ${PLATE} around ${center.lat}, ${center.lng} every ${PING_MS / 1000}s. Ctrl+C to stop.`,
+    `Driving ${PLATE} ${where} ${center.lat}, ${center.lng} every ${PING_MS / 1000}s. Ctrl+C to stop.`,
   );
-  for (;;) {
-    const lat = center.lat + (RADIUS_M * Math.sin(angle)) / mPerDegLat;
-    const lng = center.lng + (RADIUS_M * Math.cos(angle)) / mPerDegLng;
-    // Counter-clockwise travel: heading is the tangent, as a compass bearing.
-    const heading = ((((-angle * 180) / Math.PI) % 360) + 360) % 360;
+  for (const fix of cross ? crossRoute() : circleRoute()) {
     try {
-      await call('POST', '/mobility/tracking/location', driver, {
-        lat,
-        lng,
-        speed: SPEED_KMH,
-        heading,
+      const point = await call('POST', '/mobility/tracking/location', driver, {
+        ...fix,
+        accuracy: Math.round(5 + Math.random() * 15),
         timestamp: Date.now(),
       });
-      process.stdout.write(`\rping ${lat.toFixed(5)}, ${lng.toFixed(5)}  `);
+      const cell = `${Math.floor(fix.lat / CELL_DEG)}:${Math.floor(fix.lng / CELL_DEG)}`;
+      console.log(
+        `ping ${fix.lat.toFixed(5)}, ${fix.lng.toFixed(5)}  cell ${cell}  ${point?.status}`,
+      );
     } catch (e) {
-      console.error(`\n${(e as Error).message}`);
+      console.error((e as Error).message);
     }
-    angle += stepRad;
     await new Promise((r) => setTimeout(r, PING_MS));
   }
 }
