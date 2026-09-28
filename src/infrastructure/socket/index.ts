@@ -1,5 +1,7 @@
 import { Server as HttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import type { RedisClientType } from 'redis';
 import logger from '../../utils/logger';
 import { allowedOrigins, isOriginAllowed, rejectOrigin } from '../../middleware/cors.middleware';
 
@@ -189,6 +191,31 @@ export function initSocket(server: HttpServer): Server {
   return io;
 }
 
+let adapterClients: RedisClientType[] = [];
+
+/**
+ * Routes every emit through Redis pub/sub so `io.to(room)` reaches sockets on
+ * all API replicas, not just this one. Web clients start on HTTP long-polling,
+ * so more than one replica behind a load balancer also needs sticky sessions.
+ */
+export async function attachRedisAdapter(client: RedisClientType): Promise<void> {
+  if (!io) return;
+  const pub = client.duplicate();
+  const sub = client.duplicate();
+  for (const c of [pub, sub]) {
+    c.on('error', (err: Error) => logger.error(`[Socket] Redis adapter client: ${err.message}`));
+  }
+  await Promise.all([pub.connect(), sub.connect()]);
+  io.adapter(createAdapter(pub, sub));
+  adapterClients = [pub, sub];
+  logger.info('[Socket] Redis adapter attached');
+}
+
+export async function closeRedisAdapter(): Promise<void> {
+  await Promise.all(adapterClients.filter((c) => c.isOpen).map((c) => c.close()));
+  adapterClients = [];
+}
+
 /** Broadcast a created/updated store to the cell it sits in. */
 export function emitStoreUpserted(store: StoreEventPayload): void {
   if (!io) return;
@@ -203,6 +230,46 @@ export function emitStoreRemoved(id: string, lat: number, lng: number): void {
   const room = cellKey(lat, lng);
   io.to(room).emit('store:removed', { id });
   logger.info(`[Socket] store:removed → ${room} (${id})`);
+}
+
+export interface VehicleEventPayload {
+  id: string;
+  plateNumber: string;
+  typeCode: string;
+  lat: number;
+  lng: number;
+  heading: number | null;
+  speed: number | null;
+  /** Metres (68% radius) as reported by the device; null from older app builds. */
+  accuracy: number | null;
+  status: 'moving' | 'stopped';
+  /** Device time the vehicle came to a stop; null while moving. */
+  stoppedSince: number | null;
+  ts: number;
+}
+
+/**
+ * God's Eye: a vehicle's latest position, to the cell it is in. When it has
+ * crossed into a new cell, the old cell gets `vehicle:removed` first, so viewers
+ * there drop it now rather than on their 60s fallback prune. Sockets watching
+ * both cells are excepted — they'd only see the marker blink.
+ */
+export function emitVehicleMoved(
+  vehicle: VehicleEventPayload,
+  prev?: { lat: number; lng: number } | null,
+): void {
+  if (!io) return;
+  const room = cellKey(vehicle.lat, vehicle.lng);
+  if (prev) {
+    const oldRoom = cellKey(prev.lat, prev.lng);
+    if (oldRoom !== room) io.to(oldRoom).except(room).emit('vehicle:removed', { id: vehicle.id });
+  }
+  io.to(room).emit('vehicle:moved', vehicle);
+}
+
+export function emitVehicleRemoved(id: string, lat: number, lng: number): void {
+  if (!io) return;
+  io.to(cellKey(lat, lng)).emit('vehicle:removed', { id });
 }
 
 export function emitNotificationToUser(
