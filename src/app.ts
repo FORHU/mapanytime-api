@@ -1,5 +1,5 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import helmet from 'helmet';
 import router from './routes';
 import { isDev } from './config';
@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/error.middleware';
 import { correlationMiddleware } from './middleware/correlation.middleware';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './utils/swagger';
+import { clientIp } from './utils/client-ip.util';
 import { assertConfigured, corsMiddleware, logConfiguration } from './middleware/cors.middleware';
 
 const app = express();
@@ -66,12 +67,17 @@ app.use(express.urlencoded({ extended: true }));
  *     OPTIONS first, so the real budget was roughly half the stated one. They're skipped now.
  *   - Shared egress IPs (office NAT, mobile carriers) pool their users into one budget.
  */
+// Keyed on the real visitor, not the Cloudflare edge in front of us; see client-ip.util.ts.
+// ipKeyGenerator groups IPv6 addresses by subnet so one host can't rotate through its /64.
+const keyGenerator = (req: express.Request) => ipKeyGenerator(clientIp(req) ?? '');
+
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 1000,
   standardHeaders: true, // expose RateLimit-* so clients can back off before being cut off
   legacyHeaders: false,
   skip: (req) => req.method === 'OPTIONS',
+  keyGenerator,
   // JSON, not the library's plain-text default — the web client parses every error body as JSON
   // and a text body surfaced to users as a generic "Request failed".
   message: { status: 429, message: 'Too many requests. Please slow down and try again shortly.' },
@@ -88,6 +94,7 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => req.method === 'OPTIONS',
+  keyGenerator,
   skipSuccessfulRequests: true, // only failed attempts count toward the limit
   message: { status: 429, message: 'Too many attempts. Please try again in a few minutes.' },
 });
