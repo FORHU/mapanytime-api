@@ -77,6 +77,38 @@ function parseDuration(value: string): number {
  */
 export const REFRESH_TOKEN_GRACE_MS = parseInt(process.env.REFRESH_TOKEN_GRACE_MS || '10000');
 
+/**
+ * A positive whole number from the environment, or `fallback` when unset.
+ *
+ * Throws on anything else rather than resolving to `NaN` — these feed rate
+ * limits, and a typo in a limit must stop the process at startup, not quietly
+ * weaken or disable the protection.
+ */
+export function positiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  if (!/^\d+$/.test(raw) || Number(raw) < 1) {
+    throw new Error(`Invalid ${name} "${raw}". Expected a positive whole number.`);
+  }
+  return Number(raw);
+}
+
+/**
+ * Rate limits. Windows are 15 minutes unless named otherwise; all but the reset-email
+ * limit are per client IP. See middleware/rate-limit.middleware.ts for how they combine.
+ */
+export const GLOBAL_RATE_LIMIT_MAX = positiveIntEnv('GLOBAL_RATE_LIMIT_MAX', 1000);
+/** Every request to a credential route, successful or not. */
+export const CREDENTIAL_RATE_LIMIT_MAX = positiveIntEnv('CREDENTIAL_RATE_LIMIT_MAX', 100);
+/** Failed requests to a credential route — the password-guessing brake. */
+export const CREDENTIAL_FAILURE_LIMIT_MAX = positiveIntEnv('CREDENTIAL_FAILURE_LIMIT_MAX', 20);
+/** Forgot-password requests per email address, whether or not an account exists. */
+export const PASSWORD_RESET_EMAIL_LIMIT_MAX = positiveIntEnv('PASSWORD_RESET_EMAIL_LIMIT_MAX', 5);
+export const PASSWORD_RESET_EMAIL_LIMIT_WINDOW_MINUTES = positiveIntEnv(
+  'PASSWORD_RESET_EMAIL_LIMIT_WINDOW_MINUTES',
+  60,
+);
+
 export const DATABASE_URL = process.env.DATABASE_URL;
 
 export const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
