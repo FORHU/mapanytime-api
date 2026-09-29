@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import logger from '../utils/logger';
+import { clientIp } from '../utils/client-ip.util';
 
 interface AppError {
   status?: number;
@@ -39,7 +40,7 @@ export const errorHandler = (err: AppError, req: Request, res: Response, _next: 
   // Always log the full error server-side (message + Prisma code) for diagnostics,
   // regardless of what we return to the client.
   logger.error(
-    `${err.status || err.statusCode || 500} - ${err.message} - ${req.originalUrl} - ${req.method} - ${req.ip}${
+    `${err.status || err.statusCode || 500} - ${err.message} - ${req.originalUrl} - ${req.method} - ${clientIp(req)}${
       err.code ? ` - prisma:${err.code}` : ''
     }`,
   );
