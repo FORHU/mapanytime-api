@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import MerchantAdsService from './merchantAds.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
+import { clientIp } from '../../utils/client-ip.util';
 import { money, MAX_MONEY } from '../../helpers/money.helper';
 import { MIN_WINDOW_MS, MAX_HORIZON_MS } from './adWindow';
 import type { AuthUser } from '../auth/auth.repository';
@@ -268,7 +269,7 @@ export default class MerchantAdsController {
       await MerchantAdsService.trackEvent(req.params.id, {
         ...value,
         buyerId,
-        ipAddress: req.ip,
+        ipAddress: clientIp(req),
         userAgent: req.headers['user-agent'],
       });
       return responseSuccess(res, 200, null, 'Ad event logged successfully');

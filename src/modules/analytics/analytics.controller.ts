@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import AnalyticsService from './analytics.service';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
+import { clientIp } from '../../utils/client-ip.util';
 import { ANALYTICSEVENTTYPE } from './analytics.types';
 
 /** Guards against a single request trying to write an unbounded batch. */
@@ -46,7 +47,7 @@ export default class AnalyticsController {
         // Authentication is optional on this route; anonymous events are the
         // normal case and are tied together by the client's sessionId instead.
         userId: (req.user as { id: string } | undefined)?.id ?? null,
-        ipAddress: req.ip ?? null,
+        ipAddress: clientIp(req) ?? null,
         userAgent: req.get('user-agent') ?? null,
       });
 
