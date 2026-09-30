@@ -1,10 +1,12 @@
 import type { Express, Request } from 'express';
+import jwt from 'jsonwebtoken';
 import rateLimit, {
   ipKeyGenerator,
   RateLimitExceededEventHandler,
   RateLimitRequestHandler,
 } from 'express-rate-limit';
 import {
+  ACCESS_TOKEN_SECRET,
   CREDENTIAL_FAILURE_LIMIT_MAX,
   CREDENTIAL_RATE_LIMIT_MAX,
   GLOBAL_RATE_LIMIT_MAX,
@@ -41,6 +43,38 @@ const configuredLimits: RateLimits = {
 // Keyed on the real visitor, not the Cloudflare edge in front of us; see client-ip.util.ts.
 // ipKeyGenerator groups IPv6 addresses by subnet so one host can't rotate through its /64.
 const ipKey = (req: Request) => ipKeyGenerator(clientIp(req) ?? '');
+
+/** The user a bearer token was signed for, or undefined if it doesn't verify. */
+function bearerUserId(req: Request): string | undefined {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return undefined;
+  try {
+    const { userId } = jwt.verify(token, ACCESS_TOKEN_SECRET, { ignoreExpiration: true }) as {
+      userId?: unknown;
+    };
+    return typeof userId === 'string' && userId ? userId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Signed-in callers get a bucket of their own; everyone else shares one per address.
+ *
+ * The token is only signature-checked — no session or account lookup. A token from a
+ * logged-out session still names a real user and `authenticate` 401s it afterwards,
+ * while a forged one fails here and falls back to the address, so nobody can claim
+ * another user's bucket or mint new ones. Expiry is ignored on purpose: access tokens
+ * last 15 minutes, and keying an expired one on a full address bucket would answer 429
+ * instead of the 401 that makes clients refresh — the lockout this key exists to end.
+ *
+ * Anonymous IPv6 is grouped by /64, not the library's /56: carriers hand each phone its
+ * own /64, so a /56 on mobile data spans hundreds of subscribers.
+ */
+const globalKey = (req: Request) => {
+  const userId = bearerUserId(req);
+  return userId ? `user:${userId}` : `ip:${ipKeyGenerator(clientIp(req) ?? '', 64)}`;
+};
 
 const skipPreflight = (req: Request) => req.method === 'OPTIONS';
 
@@ -80,9 +114,11 @@ export function createRateLimiters(limits: RateLimits = configuredLimits): RateL
    *     OPTIONS first, so the real budget was roughly half the stated one. They're skipped now.
    *   - Shared egress IPs (office NAT, mobile carriers) pool their users into one budget.
    *
-   * That pooling is also why credential routes are skipped: on mobile data carriers put many
-   * subscribers behind one CGNAT IPv4, and ipKeyGenerator pools IPv6 by /56, so other traffic
-   * on a shared IP would otherwise lock someone out of logging in. Credential routes have
+   * On mobile data carriers put many subscribers behind one CGNAT IPv4, so keying on the
+   * address let strangers' traffic fill a signed-in user's budget: login (skipped here) still
+   * worked, then the map, every other screen and even logout answered 429. Signed-in traffic
+   * is therefore keyed on the user (see globalKey), and only anonymous traffic on the address.
+   * Credential routes stay skipped so a full address bucket can't block signing in; they have
    * their own limiters below.
    */
   const global = rateLimit({
@@ -91,8 +127,8 @@ export function createRateLimiters(limits: RateLimits = configuredLimits): RateL
     standardHeaders: true, // expose RateLimit-* so clients can back off before being cut off
     legacyHeaders: false,
     skip: (req) => skipPreflight(req) || isCredentialPath(req.path),
-    keyGenerator: ipKey,
-    handler: logBlocked('global', ipKey),
+    keyGenerator: globalKey,
+    handler: logBlocked('global', globalKey),
     // JSON, not the library's plain-text default — the web client parses every error body as
     // JSON and a text body surfaced to users as a generic "Request failed".
     message: { status: 429, message: 'Too many requests. Please slow down and try again shortly.' },
