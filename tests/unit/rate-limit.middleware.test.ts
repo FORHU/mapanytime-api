@@ -1,5 +1,7 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import request from 'supertest';
+import { ACCESS_TOKEN_SECRET } from '../../src/config';
 import { applyRateLimits, createRateLimiters } from '../../src/middleware/rate-limit.middleware';
 
 jest.mock('../../src/utils/logger', () => ({
@@ -40,6 +42,14 @@ async function send(times: number, call: () => request.Test) {
   for (let i = 0; i < times; i++) statuses.push((await call()).status);
   return statuses;
 }
+
+const tokenFor = (userId: string, secret = ACCESS_TOKEN_SECRET) => jwt.sign({ userId }, secret);
+
+/** GET /api/v1/stores as it arrives through Cloudflare from `ip`, optionally signed in. */
+const getStores = (app: express.Express, ip: string, token?: string) => {
+  const req = request(app).get('/api/v1/stores').set('CF-Connecting-IP', ip);
+  return token ? req.set('Authorization', `Bearer ${token}`) : req;
+};
 
 describe('rate limits', () => {
   it('counts successful credential requests, not only failures', async () => {
@@ -103,5 +113,57 @@ describe('rate limits', () => {
     const app = buildApp();
     await send(LIMITS.global + 1, () => request(app).get('/api/v1/stores'));
     expect((await request(app).post('/api/v1/auth/login').send({})).status).toBe(200);
+  });
+
+  describe('global key', () => {
+    const CGNAT_IP = '203.0.113.7';
+
+    it('gives each signed-in user their own budget behind one shared address', async () => {
+      const app = buildApp();
+      const alice = await send(LIMITS.global + 1, () =>
+        getStores(app, CGNAT_IP, tokenFor('alice')),
+      );
+      expect(alice.at(-1)).toBe(429);
+
+      const bob = await send(LIMITS.global, () => getStores(app, CGNAT_IP, tokenFor('bob')));
+      expect(bob.every((s) => s === 200)).toBe(true);
+      // Nor did the signed-in traffic use up the address's anonymous budget.
+      expect((await getStores(app, CGNAT_IP)).status).toBe(200);
+    });
+
+    it('follows a signed-in user across addresses', async () => {
+      const app = buildApp();
+      const token = tokenFor('alice');
+      await send(LIMITS.global, () => getStores(app, '198.51.100.1', token));
+      expect((await getStores(app, '198.51.100.2', token)).status).toBe(429);
+    });
+
+    it('counts a forged or malformed token against the address', async () => {
+      const app = buildApp();
+      const forged = tokenFor('alice', 'not-the-secret');
+      await send(LIMITS.global - 1, () => getStores(app, CGNAT_IP, forged));
+      expect((await getStores(app, CGNAT_IP, 'garbage')).status).toBe(200);
+      expect((await getStores(app, CGNAT_IP)).status).toBe(429);
+      // The forged token claimed alice but never touched her bucket.
+      expect((await getStores(app, CGNAT_IP, tokenFor('alice'))).status).toBe(200);
+    });
+
+    it('keys an expired token on its user, so a full address bucket cannot block the refresh', async () => {
+      const app = buildApp();
+      await send(LIMITS.global, () => getStores(app, CGNAT_IP));
+      expect((await getStores(app, CGNAT_IP)).status).toBe(429);
+
+      const expired = jwt.sign({ userId: 'alice' }, ACCESS_TOKEN_SECRET, { expiresIn: -10 });
+      expect((await getStores(app, CGNAT_IP, expired)).status).toBe(200);
+    });
+
+    it('groups anonymous IPv6 by /64, so neighbouring phones in a /56 stay apart', async () => {
+      const app = buildApp();
+      await send(LIMITS.global, () => getStores(app, '2001:db8:0:a1::1'));
+      // Same /64: same device network, same bucket.
+      expect((await getStores(app, '2001:db8:0:a1::2')).status).toBe(429);
+      // Different /64 inside the same /56: another subscriber.
+      expect((await getStores(app, '2001:db8:0:a2::1')).status).toBe(200);
+    });
   });
 });
