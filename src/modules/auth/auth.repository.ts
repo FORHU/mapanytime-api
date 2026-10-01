@@ -188,6 +188,17 @@ export default class AuthRepo {
         });
       }
 
+      // `@@unique([provider, providerUserId])` spans every row, and rows are kept, not deleted,
+      // so the same Facebook/Google account signing in a second time would collide with its own
+      // earlier session (P2002 → 409). Only the newest row carries the provider id; nothing reads
+      // it from older ones. Postgres treats NULLs as distinct, so clearing them frees the pair.
+      if (params.providerUserId) {
+        await tx.session.updateMany({
+          where: { provider: params.provider || 'local', providerUserId: params.providerUserId },
+          data: { providerUserId: null },
+        });
+      }
+
       const session = await tx.session.create({
         data: {
           userId: params.userId,
