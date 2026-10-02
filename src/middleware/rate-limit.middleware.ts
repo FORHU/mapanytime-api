@@ -192,6 +192,24 @@ export function createRateLimiters(limits: RateLimits = configuredLimits): RateL
   return { global, credential, credentialFailures, resetEmail };
 }
 
+/**
+ * Per-address budget for the public APK download (GET /v1/app/download). Each hit presigns a URL
+ * to a large object, so this sits well under the global budget while leaving room for retries
+ * and a household behind one address. Mounted on the route itself rather than in applyRateLimits.
+ */
+export function createDownloadLimiter(limit = 20): RateLimitRequestHandler {
+  return rateLimit({
+    windowMs: FIFTEEN_MINUTES_MS,
+    limit,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: skipPreflight,
+    keyGenerator: ipKey,
+    handler: logBlocked('apk-download', ipKey),
+    message: { status: 429, message: 'Too many downloads. Please try again in a few minutes.' },
+  });
+}
+
 /** Mounts the limiters. Must run after the body parsers — the reset-email key reads the body. */
 export function applyRateLimits(app: Express, limiters: RateLimiters = createRateLimiters()) {
   for (const path of CREDENTIAL_PATHS) {

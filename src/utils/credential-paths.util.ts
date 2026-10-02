@@ -2,6 +2,8 @@
  * Every endpoint that accepts or issues a credential, not just the two obvious
  * ones. `/reset-password` is the sharp omission: it checks a one-time code, and
  * the global bucket gave a guesser a thousand tries per window. See F104.
+ * `/facebook` and `/google` issue sessions too; left in the global bucket, an
+ * anonymous map session on the same address could 429 social sign-in.
  */
 export const CREDENTIAL_PATHS = [
   'login',
@@ -9,6 +11,8 @@ export const CREDENTIAL_PATHS = [
   'refresh-token',
   'forgot-password',
   'reset-password',
+  'facebook',
+  'google',
 ].map((path) => `/api/v1/auth/${path}`);
 
 export const FORGOT_PASSWORD_PATH = '/api/v1/auth/forgot-password';

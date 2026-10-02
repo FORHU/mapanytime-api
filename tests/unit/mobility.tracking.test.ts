@@ -304,4 +304,50 @@ describe('MobilityController.recordLocation validation', () => {
     expect(await post({ ...BAGUIO, accuracy: 12.5, timestamp: Date.now() })).toBe(200);
     expect(store.putLive.mock.calls[0][0]).toMatchObject({ accuracy: 12.5 });
   });
+
+  it('answers a service 4xx itself instead of passing it to next', async () => {
+    findVehicle.mockResolvedValue(null);
+    const json = jest.fn();
+    const res = { status: jest.fn(() => ({ json })) } as unknown as Response;
+    const next = jest.fn();
+
+    await MobilityController.recordLocation(
+      { body: { ...BAGUIO, timestamp: Date.now() }, user: { id: 'u1' } } as unknown as Request,
+      res,
+      next,
+    );
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(json).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'error', statusCode: 403 }),
+    );
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe('MobilityController.myVehicle', () => {
+  const get = async () => {
+    const json = jest.fn();
+    const res = { status: jest.fn(() => ({ json })) } as unknown as Response;
+    await MobilityController.myVehicle(
+      { user: { id: 'u1' } } as unknown as Request,
+      res,
+      jest.fn(),
+    );
+    return { status: (res.status as jest.Mock).mock.calls[0][0] as number, json };
+  };
+
+  it('answers 404 when no vehicle is assigned', async () => {
+    findByDriver.mockResolvedValue(null);
+    const { status, json } = await get();
+    expect(status).toBe(404);
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }));
+  });
+
+  it('answers 200 with the assigned vehicle', async () => {
+    findByDriver.mockResolvedValue({ id: 'v1' });
+    const { status, json } = await get();
+    expect(status).toBe(200);
+    expect(json).toHaveBeenCalledWith(expect.objectContaining({ data: { id: 'v1' } }));
+  });
 });
