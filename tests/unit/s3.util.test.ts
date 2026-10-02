@@ -122,6 +122,61 @@ describe('S3Util against real S3', () => {
   });
 });
 
+describe('S3Util APK presigning', () => {
+  let S3Util: S3UtilModule;
+
+  beforeEach(async () => {
+    S3Util = await loadWith(AWS_ENV);
+  });
+
+  it('presigns a PUT for the exact key it is given', async () => {
+    const url = new URL(
+      await S3Util.presignPut(
+        'apks/v1.0.0/abc/app.apk',
+        'application/vnd.android.package-archive',
+        1800,
+      ),
+    );
+
+    expect(url.pathname).toBe('/apks/v1.0.0/abc/app.apk');
+    expect(url.searchParams.get('X-Amz-Expires')).toBe('1800');
+  });
+
+  /**
+   * Without these response overrides the browser saves the file under its random key, or tries
+   * to display it — a download that doesn't look like an installable app.
+   */
+  it('signs the download as an attachment with a friendly name and APK type', async () => {
+    const url = new URL(
+      await S3Util.presignDownload('apks/v1.0.0/abc/app.apk', {
+        fileName: 'MapAnytime-v1.0.0.apk',
+        contentType: 'application/vnd.android.package-archive',
+      }),
+    );
+
+    expect(url.searchParams.get('response-content-disposition')).toBe(
+      'attachment; filename="MapAnytime-v1.0.0.apk"',
+    );
+    expect(url.searchParams.get('response-content-type')).toBe(
+      'application/vnd.android.package-archive',
+    );
+    expect(url.searchParams.get('X-Amz-Expires')).toBe('300');
+  });
+
+  it('strips characters that would break the Content-Disposition header', async () => {
+    const url = new URL(
+      await S3Util.presignDownload('apks/x.apk', {
+        fileName: 'evil"\r\nname.apk',
+        contentType: 'application/vnd.android.package-archive',
+      }),
+    );
+
+    expect(url.searchParams.get('response-content-disposition')).toBe(
+      'attachment; filename="evilname.apk"',
+    );
+  });
+});
+
 describe('S3Util.getPublicUrl guards', () => {
   let S3Util: S3UtilModule;
 

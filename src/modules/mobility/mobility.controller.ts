@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import { Prisma } from '@prisma/client';
 import MobilityService, { Bounds, LocationInput } from './mobility.service';
-import { responseSuccess, responseError } from '../../helpers/response.helper';
+import { responseSuccess, responseError, ErrorStatus } from '../../helpers/response.helper';
 
 const vehicleTypeSchema = Joi.object({
   code: Joi.string()
@@ -66,6 +66,12 @@ const handle = (fn: Handler) => async (req: Request, res: Response, next: NextFu
   try {
     await fn(req, res);
   } catch (error) {
+    const err = error as { status?: number; message?: string; code?: string };
+    if (err.status && err.status < 500) {
+      return responseError(res, err.status as ErrorStatus, err.message || 'An error occurred', {
+        ...(err.code ? { code: err.code } : {}),
+      });
+    }
     next(error);
   }
 };
@@ -155,9 +161,11 @@ export default class MobilityController {
     ),
   );
 
-  static myVehicle = handle(async (req, res) =>
-    responseSuccess(res, 200, await MobilityService.getDriverVehicle(userId(req))),
-  );
+  static myVehicle = handle(async (req, res) => {
+    const vehicle = await MobilityService.getDriverVehicle(userId(req));
+    if (!vehicle) return responseError(res, 404, 'No vehicle assigned to you');
+    return responseSuccess(res, 200, vehicle);
+  });
 
   static recordLocation = handle(
     withValid(locationSchema, body, async (v: LocationInput, req, res) =>

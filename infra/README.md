@@ -104,6 +104,14 @@ to S3. Two consequences:
    origins. This is bucket configuration, not IAM, and no amount of policy fixing
    will surface a useful error when it is missing — the browser just fails.
 
+**Android APKs** (`/admin/app-releases`) use the same path: the admin's browser PUTs
+the APK (~116 MB) to `apks/v{version}/…` with `Content-Type:
+application/vnd.android.package-archive`, so the CORS rule must allow that header
+and the admin origin. Downloads never touch CORS — `GET /api/v1/app/download`
+302-redirects to a 5-minute presigned GET — and the bucket stays private. The API
+checks an upload with `HeadObject` (covered by `s3:GetObject`) and never deletes
+objects, so the runtime policy needs no new actions; old APKs stay in the bucket.
+
 ---
 
 ## 4. SSM cutover — both environments are converted
