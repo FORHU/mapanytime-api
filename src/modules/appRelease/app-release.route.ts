@@ -2,22 +2,29 @@ import express from 'express';
 import {
   getLatestRelease,
   getPublicReleaseHistory,
-  getAdminReleaseHistory,
+  downloadLatestApk,
+  listReleases,
+  createUploadUrl,
   createRelease,
+  updateRelease,
+  setDownloadable,
   rollbackRelease,
-  setLatestRelease,
+  getReleaseDownloadUrl,
 } from './app-release.controller';
 import { authenticate } from '../../middleware/auth.middleware';
 import { requireAdmin } from '../../middleware/admin.middleware';
+import { createDownloadLimiter } from '../../middleware/rate-limit.middleware';
 
 /**
- * Unauthenticated. Feeds the web download modal and the Flutter update checker.
- * Never expose FAILED releases here — a pulled build is not something to advertise.
+ * Unauthenticated. Feeds the landing page's install button, QR code and download dialog.
+ * Never expose FAILED releases or S3 keys here.
  */
 export const publicAppReleaseRouter = express.Router();
 
 publicAppReleaseRouter.get('/latest', getLatestRelease);
 publicAppReleaseRouter.get('/history', getPublicReleaseHistory);
+// Each hit presigns a URL to a ~116 MB object; the limiter keeps one client from hammering it.
+publicAppReleaseRouter.get('/download', createDownloadLimiter(), downloadLatestApk);
 
 /**
  * Admin-only release management. Kept as a separate router so the mutation routes are not
@@ -27,12 +34,15 @@ publicAppReleaseRouter.get('/history', getPublicReleaseHistory);
 export const adminAppReleaseRouter = express.Router();
 
 // Still the coarse role check rather than a permission code: nothing in
-// SYSTEM_PERMISSIONS describes publishing or rolling back a mobile release, and
-// inventing a code here would mean seeding a permission no role has been
-// designed around. Revisit if a `releases.manage` code is ever added.
+// SYSTEM_PERMISSIONS describes publishing a mobile release, and inventing a code here would
+// mean seeding a permission no role has been designed around. Revisit if a `releases.manage`
+// code is ever added.
 adminAppReleaseRouter.use(authenticate, requireAdmin);
 
-adminAppReleaseRouter.get('/history', getAdminReleaseHistory);
+adminAppReleaseRouter.get('/', listReleases);
+adminAppReleaseRouter.post('/upload-url', createUploadUrl);
 adminAppReleaseRouter.post('/', createRelease);
+adminAppReleaseRouter.patch('/:id', updateRelease);
+adminAppReleaseRouter.post('/:id/set-downloadable', setDownloadable);
 adminAppReleaseRouter.post('/:id/rollback', rollbackRelease);
-adminAppReleaseRouter.post('/:id/set-latest', setLatestRelease);
+adminAppReleaseRouter.get('/:id/download-url', getReleaseDownloadUrl);

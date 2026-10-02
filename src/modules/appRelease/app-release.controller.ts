@@ -1,61 +1,81 @@
 import { Request, Response, NextFunction } from 'express';
-import Joi from 'joi';
-import { AppReleaseService } from './app-release.service';
+import { AppReleaseService, toAdminRelease, toPublicRelease } from './app-release.service';
+import { createReleaseSchema, updateReleaseSchema, uploadUrlSchema } from './app-release.schema';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
 
+/* ── Public ─────────────────────────────────────────────────────────────── */
+
+/**
+ * The version visitors would download right now. `available: false` with a null release means
+ * no admin has made a version downloadable yet; clients show their "coming soon" state.
+ */
 export const getLatestRelease = async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const latest = await AppReleaseService.getLatestRelease();
-    return responseSuccess(res, 200, latest);
+    const release = await AppReleaseService.getDownloadable();
+    return responseSuccess(res, 200, {
+      available: Boolean(release && (release.s3Key || release.apkUrl)),
+      release: release ? toPublicRelease(release) : null,
+    });
   } catch (error) {
     next(error);
   }
 };
 
 /**
- * Public history. `includeFailed` is deliberately not read from the query here — honouring it
- * on an unauthenticated route let anyone list pulled builds by asking for them.
+ * Public history. FAILED releases are never listed — a pulled build is not something to
+ * advertise — and the query string is not read, so nobody can ask for them.
  */
 export const getPublicReleaseHistory = async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const history = await AppReleaseService.getReleaseHistory(false);
-    return responseSuccess(res, 200, history);
+    const history = await AppReleaseService.getPublicHistory();
+    return responseSuccess(res, 200, history.map(toPublicRelease));
   } catch (error) {
     next(error);
   }
 };
 
-/** Admin history — may include FAILED releases, which the console needs to show rollbacks. */
-export const getAdminReleaseHistory = async (req: Request, res: Response, next: NextFunction) => {
+/**
+ * The install link. Redirects to a freshly presigned, short-lived S3 URL for the downloadable
+ * version, so the bucket stays private and the link itself (in buttons and QR codes) never
+ * expires or names a version.
+ */
+export const downloadLatestApk = async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const includeFailed = req.query.includeFailed === 'true';
-    const history = await AppReleaseService.getReleaseHistory(includeFailed);
-    return responseSuccess(res, 200, history);
+    const url = await AppReleaseService.getDownloadUrl();
+    if (!url) {
+      return responseError(res, 404, 'No version is available for download yet.');
+    }
+    res.set('Cache-Control', 'no-store');
+    return res.redirect(302, url);
   } catch (error) {
     next(error);
   }
 };
 
-const createReleaseSchema = Joi.object({
-  version: Joi.string().trim().required(),
-  buildNumber: Joi.number().integer().min(1).required(),
-  channel: Joi.string().valid('Stable', 'Beta').optional(),
-  apkUrl: Joi.string().trim().required(),
-  fileSize: Joi.string().trim().optional(),
-  minAndroidVersion: Joi.string().trim().optional(),
-  architecture: Joi.string().trim().optional(),
-  // Checksums are shown to users as a tamper check, so a malformed one is worse than none.
-  sha256: Joi.string()
-    .lowercase()
-    .pattern(/^[a-f0-9]{64}$/)
-    .optional()
-    .messages({ 'string.pattern.base': 'sha256 must be 64 hexadecimal characters.' }),
-  // Must be a real list — the old code coerced any scalar into a one-element array, so a typo
-  // silently became the release notes.
-  whatsNew: Joi.array().items(Joi.string().trim().min(1)).min(1).required(),
-  isLatest: Joi.boolean().optional(),
-  forceUpdate: Joi.boolean().optional(),
-});
+/* ── Admin ──────────────────────────────────────────────────────────────── */
+
+export const listReleases = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const releases = await AppReleaseService.listForAdmin();
+    return responseSuccess(res, 200, releases.map(toAdminRelease));
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createUploadUrl = async (req: Request, res: Response, next: NextFunction) => {
+  const { error, value } = uploadUrlSchema.validate(req.body);
+  if (error) {
+    return responseError(res, 400, error.message);
+  }
+
+  try {
+    const result = await AppReleaseService.createUploadUrl(value);
+    return responseSuccess(res, 201, result);
+  } catch (error) {
+    next(error);
+  }
+};
 
 export const createRelease = async (req: Request, res: Response, next: NextFunction) => {
   const { error, value } = createReleaseSchema.validate(req.body);
@@ -64,13 +84,31 @@ export const createRelease = async (req: Request, res: Response, next: NextFunct
   }
 
   try {
-    const release = await AppReleaseService.createRelease({
-      ...value,
-      isLatest: value.isLatest ?? true,
-      forceUpdate: value.forceUpdate ?? false,
-    });
-
+    const release = await AppReleaseService.createRelease(value, req.user?.id);
     return responseSuccess(res, 201, release, 'App release created successfully');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateRelease = async (req: Request, res: Response, next: NextFunction) => {
+  const { error, value } = updateReleaseSchema.validate(req.body);
+  if (error) {
+    return responseError(res, 400, error.message);
+  }
+
+  try {
+    const release = await AppReleaseService.updateRelease(req.params.id, value);
+    return responseSuccess(res, 200, release, 'Release updated');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const setDownloadable = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const release = await AppReleaseService.setDownloadable(req.params.id);
+    return responseSuccess(res, 200, release, `Version ${release.version} is now downloadable`);
   } catch (error) {
     next(error);
   }
@@ -78,24 +116,34 @@ export const createRelease = async (req: Request, res: Response, next: NextFunct
 
 export const rollbackRelease = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const result = await AppReleaseService.rollbackRelease(id);
+    const result = await AppReleaseService.rollbackRelease(req.params.id);
     return responseSuccess(
       res,
       200,
       result,
-      'Release marked as FAILED. Successfully rolled back to previous active release.',
+      result.activeRelease
+        ? `Release marked as FAILED. Version ${result.activeRelease.version} is downloadable.`
+        : 'Release marked as FAILED. No version is downloadable now.',
     );
   } catch (error) {
     next(error);
   }
 };
 
-export const setLatestRelease = async (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Lets an admin fetch any stored version, e.g. to test an older build before re-selecting it.
+ *
+ * JSON rather than a redirect: this route needs the bearer token, so the console calls it with
+ * fetch, and a browser can't read a redirect target from fetch. The console opens the URL itself.
+ */
+export const getReleaseDownloadUrl = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const release = await AppReleaseService.setLatestRelease(id);
-    return responseSuccess(res, 200, release, 'Set as latest release successfully');
+    const url = await AppReleaseService.getDownloadUrl(req.params.id);
+    if (!url) {
+      return responseError(res, 404, 'This release has no APK file.');
+    }
+    res.set('Cache-Control', 'no-store');
+    return responseSuccess(res, 200, { url });
   } catch (error) {
     next(error);
   }
