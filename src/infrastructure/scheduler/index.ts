@@ -5,6 +5,7 @@ import SettlementService from '../../modules/settlements/settlement.service';
 import MerchantAdsService from '../../modules/merchantAds/merchantAds.service';
 import RewardService from '../../modules/rewards/reward.service';
 import StoreService from '../../modules/stores/store.service';
+import OrderService from '../../modules/orders/order.service';
 import RedisUtil from '../../utils/redis.util';
 
 /**
@@ -51,6 +52,18 @@ export const startScheduler = () => {
       }
     } catch (err) {
       logger.error('[Scheduler] Failed to process expired reservations:', err);
+    }
+  });
+
+  // ── Stale Pending Orders Expiry (F44) — runs every 2 minutes ────────────────
+  cron.schedule('*/2 * * * *', async () => {
+    try {
+      const expiredCount = await OrderService.expireStalePendingOrders(15);
+      if (expiredCount > 0) {
+        logger.info(`[Scheduler] Expired ${expiredCount} stale pending order(s) and released holds.`);
+      }
+    } catch (err) {
+      logger.error('[Scheduler] Failed to process expired pending orders:', err);
     }
   });
 

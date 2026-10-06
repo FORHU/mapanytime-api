@@ -4,7 +4,10 @@ import rateLimit, {
   ipKeyGenerator,
   RateLimitExceededEventHandler,
   RateLimitRequestHandler,
+  Store,
 } from 'express-rate-limit';
+import { RedisStore } from 'rate-limit-redis';
+import RedisUtil from '../utils/redis.util';
 import {
   ACCESS_TOKEN_SECRET,
   CREDENTIAL_FAILURE_LIMIT_MAX,
@@ -79,14 +82,22 @@ const globalKey = (req: Request) => {
 const skipPreflight = (req: Request) => req.method === 'OPTIONS';
 
 /**
- * The library's default response, plus one log line per blocked request. The stores are in
- * memory, so without this there is no record of whose traffic filled a bucket.
+ * The library's default response, plus one log line per blocked request with rich diagnostic metadata.
  */
 const logBlocked =
   (name: string, keyOf: (req: Request) => string | undefined): RateLimitExceededEventHandler =>
   (req, res, _next, options) => {
+    const correlationId = (req.headers['x-correlation-id'] ||
+      req.headers['x-request-id'] ||
+      '') as string;
+    const userId = bearerUserId(req);
+    const retryAfter = res.getHeader('Retry-After');
     logger.warn(
-      `[RateLimit] ${name} blocked ${req.method} ${req.originalUrl} ip=${ipKey(req)} key=${keyOf(req)}`,
+      `[RateLimit] ${name} blocked ${req.method} ${req.originalUrl} ` +
+        `ip=${ipKey(req)} key=${keyOf(req)}` +
+        (userId ? ` user=${userId}` : '') +
+        (correlationId ? ` correlationId=${correlationId}` : '') +
+        (retryAfter ? ` retryAfter=${retryAfter}` : ''),
     );
     res.status(options.statusCode).json(options.message);
   };
@@ -99,11 +110,44 @@ export interface RateLimiters {
 }
 
 /**
- * Every store here is express-rate-limit's in-memory one: it can't become unavailable, so
- * no limiter can quietly stop counting. The cost is that counts are per process and reset on
- * deploy — fine for one API container; a shared store is needed before running several.
+ * Creates rate limiters backed by Redis (rate-limit-redis) when available,
+ * falling back gracefully to express-rate-limit's in-memory store in dev or unit tests.
  */
-export function createRateLimiters(limits: RateLimits = configuredLimits): RateLimiters {
+export function createRateLimiters(
+  limits: RateLimits = configuredLimits,
+  customStore?: Store,
+): RateLimiters {
+  const isRedisHealthy = () => Boolean(customStore || RedisUtil.client?.isOpen);
+
+  // In production, when Redis is unavailable, apply a restrictive local emergency limit
+  // on security-sensitive auth endpoints and log a security alert.
+  const emergencyAuthLimit = (normalLimit: number, emergencyCap = 5): number => {
+    if (isRedisHealthy() || process.env.NODE_ENV === 'test') {
+      return normalLimit;
+    }
+    logger.warn(
+      `[RateLimit:EMERGENCY] Redis unavailable! Enforcing restrictive emergency auth limit (${Math.min(
+        normalLimit,
+        emergencyCap,
+      )}) instead of ${normalLimit}.`,
+    );
+    return Math.min(normalLimit, emergencyCap);
+  };
+
+  const storeFor = (prefix: string): Store | undefined => {
+    if (customStore) return customStore;
+    if (RedisUtil.client?.isOpen) {
+      return new RedisStore({
+        sendCommand: (...args: string[]) =>
+          RedisUtil.client.sendCommand(args) as Promise<
+            boolean | number | string | (boolean | number | string)[]
+          >,
+        prefix: `rl:${prefix}:`,
+      });
+    }
+    return undefined;
+  };
+
   /**
    * Global throttle — a blunt guard against abuse, not a per-feature budget.
    *
@@ -124,6 +168,7 @@ export function createRateLimiters(limits: RateLimits = configuredLimits): RateL
   const global = rateLimit({
     windowMs: FIFTEEN_MINUTES_MS,
     limit: limits.global,
+    store: storeFor('global'),
     standardHeaders: true, // expose RateLimit-* so clients can back off before being cut off
     legacyHeaders: false,
     skip: (req) => skipPreflight(req) || isCredentialPath(req.path),
@@ -141,7 +186,8 @@ export function createRateLimiters(limits: RateLimits = configuredLimits): RateL
    */
   const credential = rateLimit({
     windowMs: FIFTEEN_MINUTES_MS,
-    limit: limits.credential,
+    limit: emergencyAuthLimit(limits.credential, 5),
+    store: storeFor('credential'),
     standardHeaders: true,
     legacyHeaders: false,
     skip: skipPreflight,
@@ -158,7 +204,8 @@ export function createRateLimiters(limits: RateLimits = configuredLimits): RateL
    */
   const credentialFailures = rateLimit({
     windowMs: FIFTEEN_MINUTES_MS,
-    limit: limits.credentialFailures,
+    limit: emergencyAuthLimit(limits.credentialFailures, 3),
+    store: storeFor('credential-failures'),
     // Off so these don't overwrite `credential`'s headers on the same response.
     standardHeaders: false,
     legacyHeaders: false,
@@ -176,7 +223,8 @@ export function createRateLimiters(limits: RateLimits = configuredLimits): RateL
    */
   const resetEmail = rateLimit({
     windowMs: limits.resetEmailWindowMinutes * 60 * 1000,
-    limit: limits.resetEmail,
+    limit: emergencyAuthLimit(limits.resetEmail, 2),
+    store: storeFor('reset-email'),
     standardHeaders: false,
     legacyHeaders: false,
     // No usable email: validation answers 400, and the IP limiters have already counted it.

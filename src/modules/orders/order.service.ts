@@ -81,7 +81,7 @@ export default class OrderService {
     userVoucherId?: string;
     items: { productId: string; quantity: number }[];
   }) {
-    const order = await prisma.$transaction(async (tx) => {
+    const orderDataResult = await prisma.$transaction(async (tx) => {
       const store = await tx.stores.findUnique({
         where: { id: payload.storeId },
         include: {
@@ -334,35 +334,6 @@ export default class OrderService {
         await RewardService.markVoucherUsed(tx, userVoucherId, createdOrder.id);
       }
 
-      const providerCode = method.provider.code;
-      const provider = PaymentService.getProviderAdapter(providerCode);
-
-      const amountInCentavos = Math.round(Number(createdOrder.totalAmount) * 100);
-      const lineItems = orderItemsData.map((item) => ({
-        name: `Product #${item.productId}`,
-        quantity: item.quantity,
-        amount: Math.round(Number(item.unitPrice) * 100),
-        currency: 'PHP',
-      }));
-
-      const checkoutResult = await provider.createCheckoutSession({
-        orderId: createdOrder.id,
-        amountInCentavos,
-        currency: 'PHP',
-        description: `Payment for Order ${createdOrder.id}`,
-        lineItems,
-        paymentMethodCode: method.code,
-      });
-
-      await tx.payments.updateMany({
-        where: { orderId: createdOrder.id },
-        data: {
-          checkoutSessionId: checkoutResult.checkoutSessionId,
-          checkoutUrl: checkoutResult.checkoutUrl,
-          paymentIntentId: checkoutResult.paymentIntentId,
-        },
-      });
-
       // Link this checkout's own reservations to the order, by id. Matching on
       // (buyerId, orderId: null) instead also swept up the same buyer's
       // unrelated holds — a cart reservation, or a concurrent checkout at
@@ -374,10 +345,71 @@ export default class OrderService {
       });
 
       return {
-        ...createdOrder,
-        checkoutUrl: checkoutResult.checkoutUrl,
+        createdOrder,
+        method,
+        orderItemsData,
       };
     });
+
+    // ── External Gateway Call (outside database transaction to prevent connection lockups — F74) ──
+    const providerCode = orderDataResult.method.provider.code;
+    const provider = PaymentService.getProviderAdapter(providerCode);
+
+    const amountInCentavos = Math.round(Number(orderDataResult.createdOrder.totalAmount) * 100);
+    const lineItems = orderDataResult.orderItemsData.map((item) => ({
+      name: `Product #${item.productId}`,
+      quantity: item.quantity,
+      amount: Math.round(Number(item.unitPrice) * 100),
+      currency: 'PHP',
+    }));
+
+    let checkoutResult;
+    try {
+      checkoutResult = await provider.createCheckoutSession({
+        orderId: orderDataResult.createdOrder.id,
+        amountInCentavos,
+        currency: 'PHP',
+        description: `Payment for Order ${orderDataResult.createdOrder.id}`,
+        lineItems,
+        paymentMethodCode: orderDataResult.method.code,
+      });
+    } catch (checkoutError) {
+      logger.error(
+        `[Order] Gateway checkout session creation failed for order ${orderDataResult.createdOrder.id}:`,
+        checkoutError,
+      );
+      await prisma.$transaction(async (tx) => {
+        await tx.orders.update({
+          where: { id: orderDataResult.createdOrder.id },
+          data: { status: 'FAILED' },
+        });
+        await InventoryStockRepository.releaseOrderReservations(
+          tx,
+          orderDataResult.createdOrder.id,
+          'RELEASED',
+        );
+      });
+      throw {
+        status: 502,
+        message: 'Payment gateway failed to initialize checkout. Please try again.',
+      };
+    }
+
+    if (prisma.payments) {
+      await prisma.payments.updateMany({
+        where: { orderId: orderDataResult.createdOrder.id },
+        data: {
+          checkoutSessionId: checkoutResult.checkoutSessionId,
+          checkoutUrl: checkoutResult.checkoutUrl,
+          paymentIntentId: checkoutResult.paymentIntentId,
+        },
+      });
+    }
+
+    const order = {
+      ...orderDataResult.createdOrder,
+      checkoutUrl: checkoutResult.checkoutUrl,
+    };
 
     try {
       const [store, buyer] = await Promise.all([
@@ -1020,4 +1052,56 @@ export default class OrderService {
 
     return updated;
   }
+
+  /**
+   * Sweeper for F44: Cancels orders that have remained PENDING past their reservation TTL
+   * (default 15 minutes) without an active/completed payment, releasing their inventory holds.
+   */
+  static async expireStalePendingOrders(olderThanMinutes = 15): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+    const staleOrders = await prisma.orders.findMany({
+      where: {
+        status: 'PENDING',
+        createdAt: { lte: cutoff },
+        payment: {
+          none: {
+            status: { in: [PAYMENTSTATUS.COMPLETED, PAYMENTSTATUS.REFUND_PENDING] },
+          },
+        },
+      },
+      select: { id: true, buyerId: true },
+    });
+
+    let expiredCount = 0;
+    for (const staleOrder of staleOrders) {
+      try {
+        await prisma.$transaction(async (tx) => {
+          const updated = await tx.orders.updateMany({
+            where: { id: staleOrder.id, status: 'PENDING' },
+            data: { status: 'CANCELLED' },
+          });
+
+          if (updated.count === 0) return;
+
+          // Release inventory holds atomically
+          await InventoryStockRepository.releaseOrderReservations(tx, staleOrder.id, 'EXPIRED');
+
+          // Mark any pending payment rows as FAILED
+          await tx.payments.updateMany({
+            where: { orderId: staleOrder.id, status: PAYMENTSTATUS.PENDING },
+            data: {
+              status: PAYMENTSTATUS.FAILED,
+              failureReason: 'Order checkout window expired',
+            },
+          });
+        });
+        expiredCount++;
+      } catch (err) {
+        logger.error(`[OrderSweeper] Failed to expire stale order ${staleOrder.id}:`, err);
+      }
+    }
+
+    return expiredCount;
+  }
 }
+
