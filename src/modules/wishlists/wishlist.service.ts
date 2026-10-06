@@ -145,6 +145,80 @@ export default class WishlistService {
     return [...new Set(items.map((item) => item.productId))];
   }
 
+  /**
+   * The caller's saved stores, newest first, in the same shape as a
+   * `/stores/nearby` item so a client can reuse one store parser. Distance is
+   * 0 — there is no viewer position here. Deleted or unpublished stores are
+   * left out rather than shown with a store page that cannot load.
+   */
+  static async getSavedStores(userId: string) {
+    const buyerId = await this.resolveBuyerId(userId);
+
+    const rows = await prisma.savedStores.findMany({
+      where: {
+        buyerId,
+        store: { deletedAt: null, isActive: true, approvalStatus: 'ACTIVE' },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        store: {
+          select: {
+            id: true,
+            storeName: true,
+            ratingAverage: true,
+            ratingCount: true,
+            primaryCategoryId: true,
+            primaryCategory: { select: { name: true } },
+            logoFile: { select: { path: true } },
+            storeLocations: {
+              select: { latitude: true, longitude: true, currentAddress: true },
+            },
+          },
+        },
+      },
+    });
+
+    return rows.map(({ store }) => ({
+      id: store.id,
+      storeName: store.storeName,
+      logoUrl: S3Util.getPublicUrl(store.logoFile?.path ?? null),
+      rating: store.ratingAverage,
+      ratingCount: store.ratingCount,
+      categoryId: store.primaryCategoryId,
+      categoryName: store.primaryCategory?.name ?? null,
+      distanceKm: 0,
+      coordinates: {
+        lat: store.storeLocations?.latitude ?? 0,
+        lng: store.storeLocations?.longitude ?? 0,
+      },
+      address: { currentAddress: store.storeLocations?.currentAddress ?? '' },
+    }));
+  }
+
+  /** Save a store. Idempotent, like [addItem]. */
+  static async addStore(userId: string, storeId: string) {
+    const buyerId = await this.resolveBuyerId(userId);
+
+    const store = await prisma.stores.findFirst({
+      where: { id: storeId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!store) throw { status: 404, message: 'Store not found.' };
+
+    return prisma.savedStores.upsert({
+      where: { buyerId_storeId: { buyerId, storeId } },
+      create: { buyerId, storeId },
+      update: {},
+    });
+  }
+
+  static async removeStore(userId: string, storeId: string) {
+    const buyerId = await this.resolveBuyerId(userId);
+
+    const result = await prisma.savedStores.deleteMany({ where: { buyerId, storeId } });
+    return { removed: result.count };
+  }
+
   static async clear(userId: string) {
     const buyerId = await this.resolveBuyerId(userId);
 

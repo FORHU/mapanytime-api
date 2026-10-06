@@ -40,7 +40,6 @@ router.get(
   authenticate,
   InventoryReservationController.getActiveReservations,
 );
-router.post('/reservations/:id/confirm', authenticate, InventoryReservationController.confirm);
 router.post('/reservations/:id/release', authenticate, InventoryReservationController.release);
 
 export default router;

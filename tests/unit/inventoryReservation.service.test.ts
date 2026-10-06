@@ -89,7 +89,7 @@ describe('InventoryReservationService', () => {
   });
 
   describe('releaseReservation', () => {
-    it('releases reservation via repository', async () => {
+    it('releases reservation via repository when no userId is passed', async () => {
       const mockReleased = {
         id: 'res-123',
         status: 'RELEASED',
@@ -102,6 +102,60 @@ describe('InventoryReservationService', () => {
       const result = await InventoryReservationService.releaseReservation('res-123');
       expect(result).toEqual(mockReleased);
       expect(InventoryReservationRepository.releaseReservation).toHaveBeenCalledWith('res-123');
+    });
+
+    it('releases reservation when caller owns the reservation', async () => {
+      const mockReservation = {
+        id: 'res-123',
+        buyerId: 'buyer-1',
+        status: 'RESERVED',
+      };
+      const mockReleased = {
+        id: 'res-123',
+        status: 'RELEASED',
+      };
+
+      (InventoryReservationRepository.findReservationById as jest.Mock).mockResolvedValue(
+        mockReservation,
+      );
+      (InventoryReservationRepository.releaseReservation as jest.Mock).mockResolvedValue(
+        mockReleased,
+      );
+
+      const result = await InventoryReservationService.releaseReservation('res-123', 'buyer-1');
+      expect(result).toEqual(mockReleased);
+      expect(InventoryReservationRepository.findReservationById).toHaveBeenCalledWith('res-123');
+      expect(InventoryReservationRepository.releaseReservation).toHaveBeenCalledWith('res-123');
+    });
+
+    it('throws 404 if reservation does not exist', async () => {
+      (InventoryReservationRepository.findReservationById as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        InventoryReservationService.releaseReservation('res-999', 'buyer-1'),
+      ).rejects.toEqual({
+        status: 404,
+        message: 'Reservation not found.',
+      });
+    });
+
+    it('throws 403 if caller does not own the reservation', async () => {
+      const mockReservation = {
+        id: 'res-123',
+        buyerId: 'other-buyer',
+        status: 'RESERVED',
+      };
+
+      (InventoryReservationRepository.findReservationById as jest.Mock).mockResolvedValue(
+        mockReservation,
+      );
+
+      await expect(
+        InventoryReservationService.releaseReservation('res-123', 'buyer-1'),
+      ).rejects.toEqual({
+        status: 403,
+        message: 'You are not authorized to release this reservation.',
+      });
     });
   });
 

@@ -71,6 +71,47 @@ export default class WishlistController {
     }
   }
 
+  static async stores(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
+      const data = await WishlistService.getSavedStores(userId);
+      return responseSuccess(res, 200, data, 'Saved stores fetched successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async addStore(req: Request, res: Response, next: NextFunction) {
+    const schema = Joi.object({ storeId: Joi.string().required() });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
+      const data = await WishlistService.addStore(userId, value.storeId);
+      return responseSuccess(res, 201, data, 'Store saved');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async removeStore(req: Request, res: Response, next: NextFunction) {
+    try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
+      const data = await WishlistService.removeStore(userId, req.params.storeId);
+      return responseSuccess(res, 200, data, 'Store removed from saved');
+    } catch (error) {
+      next(error);
+    }
+  }
+
   static async clear(req: Request, res: Response, next: NextFunction) {
     try {
       const userId = (req.user as { id: string })?.id;

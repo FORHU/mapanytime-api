@@ -90,3 +90,61 @@ describe('XenditProvider.parseWebhookEvent', () => {
     expect(result.orderId).toBeNull();
   });
 });
+
+describe('XenditProvider.refundPayment', () => {
+  const provider = new XenditProvider();
+
+  it('posts a refund to Xendit API and returns normalized RefundResult', async () => {
+    const axios = require('axios');
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      data: {
+        id: 'ref-12345',
+        amount: 50.0,
+        status: 'SUCCEEDED',
+      },
+    });
+
+    const result = await provider.refundPayment('pr-session-999', 5000, 'requested_by_customer');
+
+    expect(axios.post).toHaveBeenCalledWith(
+      expect.stringContaining('/refunds'),
+      expect.objectContaining({
+        payment_request_id: 'pr-session-999',
+        amount: 50,
+        reason: 'requested_by_customer',
+        currency: 'PHP',
+      }),
+      expect.any(Object),
+    );
+
+    expect(result.refundId).toBe('ref-12345');
+    expect(result.amount).toBe(5000);
+    expect(result.status).toBe('SUCCEEDED');
+  });
+
+  it('uses payment_id when reference is not a payment_request_id (no pr- prefix)', async () => {
+    const axios = require('axios');
+    jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      data: {
+        id: 'ref-67890',
+        amount: 25.5,
+        status: 'PENDING',
+      },
+    });
+
+    const result = await provider.refundPayment('ps-session-123', 2550);
+
+    expect(axios.post).toHaveBeenCalledWith(
+      expect.stringContaining('/refunds'),
+      expect.objectContaining({
+        payment_id: 'ps-session-123',
+        amount: 25.5,
+        reason: 'REQUESTED_BY_CUSTOMER',
+      }),
+      expect.any(Object),
+    );
+
+    expect(result.refundId).toBe('ref-67890');
+    expect(result.amount).toBe(2550);
+  });
+});

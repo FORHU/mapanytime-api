@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Branch, tag or SHA to deploy"
+        description: 'Branch, tag or SHA to deploy'
         required: true
         default: staging
   # Uncomment once a dev branch exists and the team wants push-to-deploy.
@@ -35,17 +35,15 @@ concurrency:
 
 env:
   AWS_REGION: ap-southeast-1
-  ACCOUNT_ID: "617163942417"
+  ACCOUNT_ID: '617163942417'
   INSTANCE_ID: i-0f95a93145ea25e7a
   ECR_REPOSITORY: mapanytime
   CONTAINER: mapanytime-api
   WORKER: mapanytime-api-worker
   NETWORK: forhu-dev
-  HOST_PORT: "4001"
-  APP_PORT: "3000"
-  WORKER_HOST_PORT: "4002"
-  WORKER_PORT: "8080"
-  ENV_PARAM: /forhu-dev/mapanytime-api/env
+  HOST_PORT: '4001'
+  APP_PORT: '3000'
+  ENV_PARAM: /forhu-dev/mapanytime/env
   SHARED_ENV: /opt/forhu-dev/credentials/mapanytime.env
   MERGED_ENV: /opt/forhu-dev/mapanytime-api.env
 
