@@ -24,7 +24,7 @@ on:
       ref:
         description: "Branch, tag or SHA to deploy"
         required: true
-        default: main
+        default: staging
   # Uncomment once a dev branch exists and the team wants push-to-deploy.
   # push:
   #   branches: [dev]
@@ -53,7 +53,7 @@ jobs:
     # amd64, pulls cleanly, then dies with "exec format error". Do not
     # cross-build under QEMU — Node and Prisma builds take hours and look hung.
     runs-on: ubuntu-24.04-arm
-    environment: dev
+    environment: staging
 
     permissions:
       id-token: write
