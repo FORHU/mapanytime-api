@@ -11,5 +11,9 @@ router.get('/saved', authenticate, WishlistController.saved);
 router.post('/items', authenticate, WishlistController.add);
 router.delete('/items/:productId', authenticate, WishlistController.remove);
 router.delete('/', authenticate, WishlistController.clear);
+// Saved stores — same per-buyer scoping as the product routes above.
+router.get('/stores', authenticate, WishlistController.stores);
+router.post('/stores', authenticate, WishlistController.addStore);
+router.delete('/stores/:storeId', authenticate, WishlistController.removeStore);
 
 export default router;

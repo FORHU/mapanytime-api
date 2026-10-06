@@ -356,6 +356,7 @@ model Buyers {
   reviews         ProductReviews[]
   cart            Carts?
   wishlist        Wishlists?
+  savedStores     SavedStores[]
   returnRequests  ReturnRequests[]
   reservations    InventoryReservations[]
   rewardWallet    RewardWallet?
@@ -472,6 +473,7 @@ model Stores {
   inventoryMovements    InventoryMovements[]
   productProperties     ProductProperties[]     @relation("StoreProperties")
   merchantAds           MerchantAds[]
+  savedBy               SavedStores[]
 
   @@index([sellerId])
   @@index([isActive])
@@ -1746,6 +1748,22 @@ model WishlistItems {
   @@index([wishlistId])
   @@index([productId])
   @@index([variantId])
+}
+
+/// Stores a buyer has hearted (Profile → Saved → Stores). Kept apart from
+/// WishlistItems, which is product-only and keyed on productId.
+model SavedStores {
+  id        String   @id @default(cuid())
+  buyerId   String
+  storeId   String
+  createdAt DateTime @default(now())
+
+  buyer Buyers @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  store Stores @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([buyerId, storeId])
+  @@index([buyerId])
+  @@index([storeId])
 }
 
 enum INVENTORYMOVEMENTTYPE {
