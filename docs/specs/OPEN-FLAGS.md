@@ -27,14 +27,14 @@ down do not survive it.
 
 ## ✅ Closed 2026-10-06 — Critical Reliability, Gateway Concurrency & Rate Limiting
 
-| Flag     | Outcome                                                                                                                                           |
-| :------- | :------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **F44**  | Orders stuck in `PENDING` are now swept by `OrderService.expireStalePendingOrders`, cancelled, reservations released, payments marked `FAILED`    |
-| **F74**  | External gateway call (`provider.createCheckoutSession`) moved outside `prisma.$transaction`, eliminating DB connection exhaustion & rollback bug |
-| **F76**  | Flutter client now generates & transmits `Idempotency-Key` header on checkout, preventing duplicate orders under network retries                  |
-| **F91**  | Reservation TTL sweeper wired into server startup/shutdown (`InventoryReservationService.startSweeper()`), actively releasing expired holds      |
-| **F92**  | Closed rogue public confirm endpoint, enforced authenticated buyer ownership on reservation release                                               |
-| **Resil**| Mobile app honors `Retry-After` header; API implements emergency in-memory fallback rate limiting during Redis outages                            |
+| Flag      | Outcome                                                                                                                                           |
+| :-------- | :------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **F44**   | Orders stuck in `PENDING` are now swept by `OrderService.expireStalePendingOrders`, cancelled, reservations released, payments marked `FAILED`    |
+| **F74**   | External gateway call (`provider.createCheckoutSession`) moved outside `prisma.$transaction`, eliminating DB connection exhaustion & rollback bug |
+| **F76**   | Flutter client now generates & transmits `Idempotency-Key` header on checkout, preventing duplicate orders under network retries                  |
+| **F91**   | Reservation TTL sweeper wired into server startup/shutdown (`InventoryReservationService.startSweeper()`), actively releasing expired holds       |
+| **F92**   | Closed rogue public confirm endpoint, enforced authenticated buyer ownership on reservation release                                               |
+| **Resil** | Mobile app honors `Retry-After` header; API implements emergency in-memory fallback rate limiting during Redis outages                            |
 
 Suite: **982 tests / 83 suites passing** on API, **122 / 122 tests passing** on Flutter app, `tsc` clean, `flutter analyze` clean (0 issues).
 
@@ -412,7 +412,7 @@ leaving money captured with no order row.
 **Fixed:** Separated database writes from external network calls.
 `prisma.$transaction` creates and commits the order, pricing snapshot, and reservation
 links first (<10ms). The external call `provider.createCheckoutSession(...)` runs
-*outside* the transaction. If the gateway fails or times out, the order is caught,
+_outside_ the transaction. If the gateway fails or times out, the order is caught,
 marked `FAILED`, and inventory reservations are cleanly released back to stock.
 Pinned by `tests/unit/order.service.charges.test.ts`.
 

@@ -121,7 +121,9 @@ export default class InventoryReservationService {
           }
         })
         .catch((err) => {
-          logger.warn(`[ReservationSweeper] Sweep failed: ${(err as { message?: string }).message}`);
+          logger.warn(
+            `[ReservationSweeper] Sweep failed: ${(err as { message?: string }).message}`,
+          );
         });
     }, intervalMs);
     sweeper.unref();
