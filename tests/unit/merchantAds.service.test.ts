@@ -5,6 +5,7 @@ import {
   resolveAccessibleStoreIds,
 } from '../../src/modules/organization/storeAccess';
 import type { AuthUser } from '../../src/modules/auth/auth.repository';
+import StoreService from '../../src/modules/stores/store.service';
 
 jest.mock('../../src/modules/merchantAds/merchantAds.repository');
 jest.mock('../../src/modules/organization/storeAccess');
@@ -455,5 +456,50 @@ describe('MerchantAdsService.deleteAd', () => {
     await MerchantAdsService.deleteAd(user, 'ad-1');
 
     expect(MerchantAdsRepository.deleteAd).toHaveBeenCalledWith('ad-1');
+  });
+});
+
+describe('MerchantAdsService.getNearbyDeals', () => {
+  const nearbyAd = {
+    id: 'ad-1',
+    storeId: 'store-1',
+    store: { storeName: 'Kalye Roasters', slug: 'kalye' },
+    title: 'Morning brew',
+    description: '',
+    badgeLabel: null,
+    ctaLabel: null,
+    discountType: 'PERCENTAGE',
+    discountValue: '20',
+    buyQuantity: null,
+    freeQuantity: null,
+    imageUrl: null,
+    startAt: null,
+    expiresAt: null,
+    dailyBudget: null,
+    products: [
+      {
+        variant: null,
+        product: {
+          id: 'prod-1',
+          name: 'Latte',
+          price: '380.00',
+          productImages: [],
+          inventory: [{ quantityOnHand: 5, quantityReserved: 0 }],
+        },
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    jest.spyOn(StoreService, 'getNearbyStores').mockResolvedValue({
+      items: [{ id: 'store-1', storeName: 'Kalye Roasters', distanceKm: 0.4 }],
+    } as never);
+    (MerchantAdsRepository.findManyForStores as jest.Mock).mockResolvedValue([nearbyAd]);
+  });
+
+  it("includes the ad's first linked product with a numeric price", async () => {
+    const [deal] = await MerchantAdsService.getNearbyDeals(1, 0, 1, 0);
+
+    expect(deal.product).toEqual({ id: 'prod-1', name: 'Latte', price: 380, imageUrl: null });
   });
 });

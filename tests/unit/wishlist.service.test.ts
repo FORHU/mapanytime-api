@@ -12,6 +12,16 @@ jest.mock('../../src/utils/prisma', () => ({
       create: jest.fn(),
       deleteMany: jest.fn(),
     },
+    stores: { findFirst: jest.fn() },
+    savedStores: { findMany: jest.fn(), upsert: jest.fn(), deleteMany: jest.fn() },
+  },
+}));
+
+jest.mock('../../src/utils/s3.util', () => ({
+  __esModule: true,
+  default: {
+    getPublicUrl: (key: string | null) => (key ? `https://cdn.test/${key}` : null),
+    getFileUrl: jest.fn(),
   },
 }));
 
@@ -125,5 +135,94 @@ describe('WishlistService', () => {
     const result = await WishlistService.getSavedProductIds(USER_ID, ['prod-1', 'prod-2']);
 
     expect(result).toEqual(['prod-1', 'prod-2']);
+  });
+});
+
+describe('WishlistService saved stores', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.buyers.findUnique.mockResolvedValue({ id: BUYER_ID });
+  });
+
+  it('rejects a caller with no buyer profile', async () => {
+    mockPrisma.buyers.findUnique.mockResolvedValue(null);
+
+    await expect(WishlistService.addStore(USER_ID, 'store-1')).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(mockPrisma.savedStores.upsert).not.toHaveBeenCalled();
+  });
+
+  it('404s when the store does not exist', async () => {
+    mockPrisma.stores.findFirst.mockResolvedValue(null);
+
+    await expect(WishlistService.addStore(USER_ID, 'missing')).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(mockPrisma.savedStores.upsert).not.toHaveBeenCalled();
+  });
+
+  it('saves idempotently with an upsert on (buyer, store)', async () => {
+    mockPrisma.stores.findFirst.mockResolvedValue({ id: 'store-1' });
+    mockPrisma.savedStores.upsert.mockResolvedValue({ id: 'saved-1' });
+
+    await WishlistService.addStore(USER_ID, 'store-1');
+
+    expect(mockPrisma.savedStores.upsert).toHaveBeenCalledWith({
+      where: { buyerId_storeId: { buyerId: BUYER_ID, storeId: 'store-1' } },
+      create: { buyerId: BUYER_ID, storeId: 'store-1' },
+      update: {},
+    });
+  });
+
+  it("removes only the caller's row for that store", async () => {
+    mockPrisma.savedStores.deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(WishlistService.removeStore(USER_ID, 'store-1')).resolves.toEqual({
+      removed: 1,
+    });
+    expect(mockPrisma.savedStores.deleteMany).toHaveBeenCalledWith({
+      where: { buyerId: BUYER_ID, storeId: 'store-1' },
+    });
+  });
+
+  it('returns saved stores in the nearby-store shape', async () => {
+    mockPrisma.savedStores.findMany.mockResolvedValue([
+      {
+        store: {
+          id: 'store-1',
+          storeName: 'Kalye Roasters',
+          ratingAverage: 4.8,
+          ratingCount: 12,
+          primaryCategoryId: 'cat-1',
+          primaryCategory: { name: 'Food & Beverage' },
+          logoFile: { path: 'logos/kr.png' },
+          storeLocations: { latitude: 16.41, longitude: 120.59, currentAddress: 'Session Rd' },
+        },
+      },
+    ]);
+
+    const [store] = await WishlistService.getSavedStores(USER_ID);
+
+    expect(store).toEqual({
+      id: 'store-1',
+      storeName: 'Kalye Roasters',
+      logoUrl: 'https://cdn.test/logos/kr.png',
+      rating: 4.8,
+      ratingCount: 12,
+      categoryId: 'cat-1',
+      categoryName: 'Food & Beverage',
+      distanceKm: 0,
+      coordinates: { lat: 16.41, lng: 120.59 },
+      address: { currentAddress: 'Session Rd' },
+    });
+    expect(mockPrisma.savedStores.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          buyerId: BUYER_ID,
+          store: { deletedAt: null, isActive: true, approvalStatus: 'ACTIVE' },
+        },
+      }),
+    );
   });
 });

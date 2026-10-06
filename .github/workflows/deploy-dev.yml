@@ -1,0 +1,237 @@
+name: Deploy Dev
+
+# FORHU/mapanytime-api → the shared dev host (ap-southeast-1).
+#
+# One EC2 instance runs every project's dev environment. This workflow owns
+# only its own container; it cannot touch another project's, and the deploy
+# role cannot reach any host but this one.
+#
+# BEFORE THE FIRST RUN
+#   1. Repository variable:
+#        AWS_DEV_DEPLOY_ROLE_ARN = arn:aws:iam::617163942417:role/forhu-deploy
+#      A new name on purpose: AWS_DEPLOY_ROLE_ARN already points at production
+#      in several repos, and in gate-closes-api it switches the deploy target.
+#   2. Check APP_PORT against this repo's Dockerfile — it is the port the
+#      process listens on inside the container. HOST_PORT is allocated per
+#      project and must not change; see /etc/caddy/sites/00-PORTS.md.
+#   3. Put this project's own secrets in the `dev` environment, and list them
+#      in the "Publish project env" step. DATABASE_URL, REDIS_URL and
+#      RABBITMQ_URL come from the host — do NOT set them here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or SHA to deploy'
+        required: true
+        default: staging
+  # Uncomment once a dev branch exists and the team wants push-to-deploy.
+  # push:
+  #   branches: [dev]
+
+concurrency:
+  group: forhu-dev-mapanytime
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-1
+  ACCOUNT_ID: '617163942417'
+  INSTANCE_ID: i-0f95a93145ea25e7a
+  ECR_REPOSITORY: mapanytime
+  CONTAINER: mapanytime-api
+  WORKER: mapanytime-api-worker
+  NETWORK: forhu-dev
+  HOST_PORT: '4001'
+  APP_PORT: '3000'
+  ENV_PARAM: /forhu-dev/mapanytime/env
+  SHARED_ENV: /opt/forhu-dev/credentials/mapanytime.env
+  MERGED_ENV: /opt/forhu-dev/mapanytime-api.env
+
+jobs:
+  deploy:
+    name: Build and deploy (mapanytime dev)
+    # Native arm64: the host is Graviton. An image built on ubuntu-latest is
+    # amd64, pulls cleanly, then dies with "exec format error". Do not
+    # cross-build under QEMU — Node and Prisma builds take hours and look hung.
+    runs-on: ubuntu-24.04-arm
+    environment: staging
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEV_DEPLOY_ROLE_ARN || 'arn:aws:iam::617163942417:role/forhu-deploy' }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          # dev- prefix so a dev image can never be mistaken for, or overwrite,
+          # a production tag in the same ECR repository.
+          echo "tag=dev-$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "registry=${{ env.ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com" >> "$GITHUB_OUTPUT"
+
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region "${{ env.AWS_REGION }}" \
+            | docker login --username AWS --password-stdin "${{ steps.tag.outputs.registry }}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/arm64
+          provenance: false
+          tags: ${{ steps.tag.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}
+
+      # This project's own config and secrets. DATABASE_URL, REDIS_* and
+      # RABBITMQ_URL are deliberately absent: the host supplies them from
+      # /opt/forhu-dev/credentials/mapanytime.env and they are merged in at
+      # deploy time. Setting them here would override the shared values and
+      # point dev at the wrong database.
+      #
+      # Anything unset is omitted rather than written empty — an empty value
+      # looks configured and silently disables whatever reads it.
+      - name: Publish project env to Parameter Store
+        env:
+          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
+          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PAYMONGO_SECRET_KEY: ${{ secrets.PAYMONGO_SECRET_KEY }}
+          PAYMONGO_WEBHOOK_SECRET_KEY: ${{ secrets.PAYMONGO_WEBHOOK_SECRET_KEY }}
+          XENDIT_SECRET_KEY: ${{ secrets.XENDIT_SECRET_KEY }}
+          XENDIT_WEBHOOK_TOKEN: ${{ secrets.XENDIT_WEBHOOK_TOKEN }}
+          MAILER_PASSWORD: ${{ secrets.MAILER_PASSWORD }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          cat > env.tmp <<ENVEOF
+          NODE_ENV=production
+          PORT=${{ env.APP_PORT }}
+          AWS_REGION=${{ env.AWS_REGION }}
+          CORS_ORIGIN=${{ vars.CORS_ORIGIN }}
+          MAPANYTIME_API_PUBLIC_URL=${{ vars.MAPANYTIME_API_PUBLIC_URL }}
+          MAPANYTIME_WEB_APP_URL=${{ vars.MAPANYTIME_WEB_APP_URL }}
+          ACCESS_TOKEN_EXPIRY=${{ vars.ACCESS_TOKEN_EXPIRY }}
+          REFRESH_TOKEN_EXPIRY=${{ vars.REFRESH_TOKEN_EXPIRY }}
+          REDIS_TTL_SECONDS=${{ vars.REDIS_TTL_SECONDS }}
+          REDIS_TLS=false
+          RABBITMQ_EXCHANGE=${{ vars.RABBITMQ_EXCHANGE }}
+          RABBITMQ_QUEUE_PREFIX=${{ vars.RABBITMQ_QUEUE_PREFIX }}
+          INGESTION_QUEUE_NAME=${{ vars.INGESTION_QUEUE_NAME }}
+          WORKER_HEALTH_PORT=${{ vars.WORKER_HEALTH_PORT }}
+          METRICS_INTERVAL_MS=${{ vars.METRICS_INTERVAL_MS }}
+          AWS_S3_BUCKET_NAME=${{ vars.AWS_S3_BUCKET_NAME }}
+          S3_CDN_URL=${{ vars.S3_CDN_URL }}
+          GOOGLE_CLIENT_ID=${{ vars.GOOGLE_CLIENT_ID }}
+          FACEBOOK_APP_ID=${{ vars.FACEBOOK_APP_ID }}
+          MAILER_EMAIL=${{ vars.MAILER_EMAIL }}
+          MAILER_TRANSPORT_HOST=${{ vars.MAILER_TRANSPORT_HOST }}
+          MAILER_TRANSPORT_PORT=${{ vars.MAILER_TRANSPORT_PORT }}
+          MAILER_TRANSPORT_SECURE=${{ vars.MAILER_TRANSPORT_SECURE }}
+          SMTP_HOST=${{ vars.SMTP_HOST }}
+          SMTP_PORT=${{ vars.SMTP_PORT }}
+          SMTP_USER=${{ vars.SMTP_USER }}
+          XENDIT_API_URL=${{ vars.XENDIT_API_URL }}
+          ENVEOF
+
+          for k in ACCESS_TOKEN_SECRET REFRESH_TOKEN_SECRET GOOGLE_CLIENT_SECRET \
+                   FACEBOOK_APP_SECRET OPENAI_API_KEY PAYMONGO_SECRET_KEY \
+                   PAYMONGO_WEBHOOK_SECRET_KEY XENDIT_SECRET_KEY XENDIT_WEBHOOK_TOKEN \
+                   MAILER_PASSWORD SMTP_PASS; do
+            v="${!k:-}"
+            [ -n "$v" ] && printf '%s=%s\n' "$k" "$v" >> env.tmp
+          done
+
+          aws ssm put-parameter \
+            --name "${{ env.ENV_PARAM }}" \
+            --type SecureString --overwrite \
+            --value "file://env.tmp" \
+            --region "${{ env.AWS_REGION }}" > /dev/null
+          rm -f env.tmp
+
+      - name: Deploy via SSM
+        id: send
+        env:
+          REGISTRY: ${{ steps.tag.outputs.registry }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${{ env.ECR_REPOSITORY }}:${TAG}"
+
+          COMMANDS=(
+            "set -euo pipefail"
+            "cat ${{ env.SHARED_ENV }} > ${{ env.MERGED_ENV }}"
+            "aws ssm get-parameter --name ${{ env.ENV_PARAM }} --with-decryption --region ${{ env.AWS_REGION }} --query Parameter.Value --output text >> ${{ env.MERGED_ENV }}"
+            "chmod 600 ${{ env.MERGED_ENV }}"
+            "aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${REGISTRY}"
+            "docker container prune -f || true"
+            "docker image prune -af || true"
+            "docker pull --platform linux/arm64 ${IMAGE}"
+            "docker rm -f ${{ env.CONTAINER }} 2>/dev/null || true"
+            "docker run --rm --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} --entrypoint npx ${IMAGE} prisma migrate deploy"
+            "docker run -d --name ${{ env.CONTAINER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} -p 127.0.0.1:${{ env.HOST_PORT }}:${{ env.APP_PORT }} ${IMAGE}"
+            # Production runs a worker beside the API from the same image
+            # (mapanytime-api-worker, `npm run worker`). Without it anything
+            # queued on RabbitMQ is accepted and never processed, which reads
+            # as the API silently dropping jobs rather than as a missing
+            # container.
+            "docker rm -f ${{ env.WORKER }} 2>/dev/null || true"
+            "docker run -d --name ${{ env.WORKER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} -p 127.0.0.1:${{ env.WORKER_HOST_PORT }}:${{ env.WORKER_PORT }} ${IMAGE} npm run worker"
+          )
+
+          # jq builds the JSON, so a quote inside any command cannot break it.
+          PARAMS=$(printf '%s\n' "${COMMANDS[@]}" | jq -R . | jq -sc '{commands: .}')
+
+          CMD_ID=$(aws ssm send-command \
+            --region "${{ env.AWS_REGION }}" \
+            --instance-ids "${{ env.INSTANCE_ID }}" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${{ env.CONTAINER }} ${TAG}" \
+            --timeout-seconds 900 \
+            --parameters "${PARAMS}" \
+            --query Command.CommandId --output text)
+
+          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+          echo "SSM command: $CMD_ID"
+
+      - name: Wait for the deploy
+        run: |
+          set -uo pipefail
+          STATUS=Pending
+          for i in $(seq 1 90); do
+            STATUS=$(aws ssm get-command-invocation \
+              --region "${{ env.AWS_REGION }}" \
+              --command-id "${{ steps.send.outputs.command_id }}" \
+              --instance-id "${{ env.INSTANCE_ID }}" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            echo "status: $STATUS"
+            case "$STATUS" in Success|Failed|Cancelled|TimedOut) break ;; esac
+            sleep 10
+          done
+
+          aws ssm get-command-invocation \
+            --region "${{ env.AWS_REGION }}" \
+            --command-id "${{ steps.send.outputs.command_id }}" \
+            --instance-id "${{ env.INSTANCE_ID }}" \
+            --query '[StandardOutputContent,StandardErrorContent]' --output text
+
+          [ "$STATUS" = "Success" ] || { echo "::error::deploy $STATUS"; exit 1; }

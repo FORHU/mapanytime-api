@@ -641,6 +641,16 @@ export default class MerchantAdsService {
           startAt: ad.startAt,
           expiresAt: ad.expiresAt,
           isPromoted: ad.dailyBudget ? Number(ad.dailyBudget) > 0 : false,
+          // The ad's first linked product, so a deal card can show its price
+          // next to the discount.
+          product: firstProduct
+            ? {
+                id: firstProduct.id,
+                name: firstProduct.name,
+                price: Number(firstProduct.price),
+                imageUrl: productImageUrl,
+              }
+            : null,
         };
       }),
     );
