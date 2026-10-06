@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Branch, tag, or SHA to deploy'
+        description: "Branch, tag, or SHA to deploy"
         required: true
         default: main
 
