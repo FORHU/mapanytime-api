@@ -24,7 +24,7 @@ on:
       ref:
         description: 'Branch, tag or SHA to deploy'
         required: true
-        default: main
+        default: staging
   # Uncomment once a dev branch exists and the team wants push-to-deploy.
   # push:
   #   branches: [dev]
@@ -39,12 +39,13 @@ env:
   INSTANCE_ID: i-0f95a93145ea25e7a
   ECR_REPOSITORY: mapanytime
   CONTAINER: mapanytime-api
+  WORKER: mapanytime-api-worker
   NETWORK: forhu-dev
   HOST_PORT: '4001'
   APP_PORT: '3000'
   ENV_PARAM: /forhu-dev/mapanytime/env
   SHARED_ENV: /opt/forhu-dev/credentials/mapanytime.env
-  MERGED_ENV: /opt/forhu-dev/mapanytime.env
+  MERGED_ENV: /opt/forhu-dev/mapanytime-api.env
 
 jobs:
   deploy:
@@ -53,7 +54,7 @@ jobs:
     # amd64, pulls cleanly, then dies with "exec format error". Do not
     # cross-build under QEMU — Node and Prisma builds take hours and look hung.
     runs-on: ubuntu-24.04-arm
-    environment: dev
+    environment: staging
 
     permissions:
       id-token: write
@@ -68,7 +69,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEV_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_DEV_DEPLOY_ROLE_ARN || 'arn:aws:iam::617163942417:role/forhu-deploy' }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Resolve image tag
@@ -97,21 +98,68 @@ jobs:
           provenance: false
           tags: ${{ steps.tag.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}
 
-      # This project's own secrets only. Anything unset is omitted rather than
-      # written empty: an empty value looks configured and silently disables
-      # whatever reads it, which is how three features were found dead on the
-      # UK stack.
+      # This project's own config and secrets. DATABASE_URL, REDIS_* and
+      # RABBITMQ_URL are deliberately absent: the host supplies them from
+      # /opt/forhu-dev/credentials/mapanytime.env and they are merged in at
+      # deploy time. Setting them here would override the shared values and
+      # point dev at the wrong database.
+      #
+      # Anything unset is omitted rather than written empty — an empty value
+      # looks configured and silently disables whatever reads it.
       - name: Publish project env to Parameter Store
         env:
-          # EDIT ME — one line per secret this project needs.
-          EXAMPLE_API_KEY: ${{ secrets.EXAMPLE_API_KEY }}
+          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
+          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PAYMONGO_SECRET_KEY: ${{ secrets.PAYMONGO_SECRET_KEY }}
+          PAYMONGO_WEBHOOK_SECRET_KEY: ${{ secrets.PAYMONGO_WEBHOOK_SECRET_KEY }}
+          XENDIT_SECRET_KEY: ${{ secrets.XENDIT_SECRET_KEY }}
+          XENDIT_WEBHOOK_TOKEN: ${{ secrets.XENDIT_WEBHOOK_TOKEN }}
+          MAILER_PASSWORD: ${{ secrets.MAILER_PASSWORD }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
         run: |
           set -euo pipefail
           umask 077
-          printf 'NODE_ENV=development\n' > env.tmp
 
-          # EDIT ME — append each secret, skipping blanks:
-          # [ -n "${EXAMPLE_API_KEY:-}" ] && printf 'EXAMPLE_API_KEY=%s\n' "$EXAMPLE_API_KEY" >> env.tmp
+          cat > env.tmp <<ENVEOF
+          NODE_ENV=production
+          PORT=${{ env.APP_PORT }}
+          AWS_REGION=${{ env.AWS_REGION }}
+          CORS_ORIGIN=${{ vars.CORS_ORIGIN }}
+          MAPANYTIME_API_PUBLIC_URL=${{ vars.MAPANYTIME_API_PUBLIC_URL }}
+          MAPANYTIME_WEB_APP_URL=${{ vars.MAPANYTIME_WEB_APP_URL }}
+          ACCESS_TOKEN_EXPIRY=${{ vars.ACCESS_TOKEN_EXPIRY }}
+          REFRESH_TOKEN_EXPIRY=${{ vars.REFRESH_TOKEN_EXPIRY }}
+          REDIS_TTL_SECONDS=${{ vars.REDIS_TTL_SECONDS }}
+          REDIS_TLS=false
+          RABBITMQ_EXCHANGE=${{ vars.RABBITMQ_EXCHANGE }}
+          RABBITMQ_QUEUE_PREFIX=${{ vars.RABBITMQ_QUEUE_PREFIX }}
+          INGESTION_QUEUE_NAME=${{ vars.INGESTION_QUEUE_NAME }}
+          WORKER_HEALTH_PORT=${{ vars.WORKER_HEALTH_PORT }}
+          METRICS_INTERVAL_MS=${{ vars.METRICS_INTERVAL_MS }}
+          AWS_S3_BUCKET_NAME=${{ vars.AWS_S3_BUCKET_NAME }}
+          S3_CDN_URL=${{ vars.S3_CDN_URL }}
+          GOOGLE_CLIENT_ID=${{ vars.GOOGLE_CLIENT_ID }}
+          FACEBOOK_APP_ID=${{ vars.FACEBOOK_APP_ID }}
+          MAILER_EMAIL=${{ vars.MAILER_EMAIL }}
+          MAILER_TRANSPORT_HOST=${{ vars.MAILER_TRANSPORT_HOST }}
+          MAILER_TRANSPORT_PORT=${{ vars.MAILER_TRANSPORT_PORT }}
+          MAILER_TRANSPORT_SECURE=${{ vars.MAILER_TRANSPORT_SECURE }}
+          SMTP_HOST=${{ vars.SMTP_HOST }}
+          SMTP_PORT=${{ vars.SMTP_PORT }}
+          SMTP_USER=${{ vars.SMTP_USER }}
+          XENDIT_API_URL=${{ vars.XENDIT_API_URL }}
+          ENVEOF
+
+          for k in ACCESS_TOKEN_SECRET REFRESH_TOKEN_SECRET GOOGLE_CLIENT_SECRET \
+                   FACEBOOK_APP_SECRET OPENAI_API_KEY PAYMONGO_SECRET_KEY \
+                   PAYMONGO_WEBHOOK_SECRET_KEY XENDIT_SECRET_KEY XENDIT_WEBHOOK_TOKEN \
+                   MAILER_PASSWORD SMTP_PASS; do
+            v="${!k:-}"
+            [ -n "$v" ] && printf '%s=%s\n' "$k" "$v" >> env.tmp
+          done
 
           aws ssm put-parameter \
             --name "${{ env.ENV_PARAM }}" \
@@ -138,9 +186,16 @@ jobs:
             "docker container prune -f || true"
             "docker image prune -af || true"
             "docker pull --platform linux/arm64 ${IMAGE}"
-            "docker run --rm --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} --entrypoint npx ${IMAGE} prisma migrate deploy"
             "docker rm -f ${{ env.CONTAINER }} 2>/dev/null || true"
+            "docker run --rm --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} --entrypoint npx ${IMAGE} prisma migrate deploy"
             "docker run -d --name ${{ env.CONTAINER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} -p 127.0.0.1:${{ env.HOST_PORT }}:${{ env.APP_PORT }} ${IMAGE}"
+            # Production runs a worker beside the API from the same image
+            # (mapanytime-api-worker, `npm run worker`). Without it anything
+            # queued on RabbitMQ is accepted and never processed, which reads
+            # as the API silently dropping jobs rather than as a missing
+            # container.
+            "docker rm -f ${{ env.WORKER }} 2>/dev/null || true"
+            "docker run -d --name ${{ env.WORKER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} -p 127.0.0.1:${{ env.WORKER_HOST_PORT }}:${{ env.WORKER_PORT }} ${IMAGE} npm run worker"
           )
 
           # jq builds the JSON, so a quote inside any command cannot break it.
