@@ -1,5 +1,8 @@
 import InventoryReservationRepository from './inventoryReservation.repository';
 import { prisma } from '../../utils/prisma';
+import logger from '../../utils/logger';
+
+let sweeper: NodeJS.Timeout | null = null;
 
 export default class InventoryReservationService {
   /**
@@ -66,12 +69,25 @@ export default class InventoryReservationService {
 
   /**
    * Explicitly release a reservation (e.g. buyer abandoned checkout).
+   * When `userId` is provided, ensures the caller owns the reservation.
    */
-  static async releaseReservation(reservationId: string) {
+  static async releaseReservation(reservationId: string, userId?: string) {
+    if (userId) {
+      const buyerId = await this.resolveBuyerId(userId);
+      const reservation = await InventoryReservationRepository.findReservationById(reservationId);
+      if (!reservation) {
+        throw { status: 404, message: 'Reservation not found.' };
+      }
+      if (reservation.buyerId !== buyerId) {
+        throw { status: 403, message: 'You are not authorized to release this reservation.' };
+      }
+    }
+
     try {
       return await InventoryReservationRepository.releaseReservation(reservationId);
     } catch (error) {
-      const err = error as { message?: string };
+      const err = error as { status?: number; message?: string };
+      if (err.status) throw err;
       throw { status: 400, message: err.message || 'Failed to release reservation.' };
     }
   }
@@ -90,5 +106,29 @@ export default class InventoryReservationService {
   static async getActiveReservations(userId: string) {
     const buyerId = await this.resolveBuyerId(userId);
     return InventoryReservationRepository.findActiveReservationsByBuyer(buyerId);
+  }
+
+  /**
+   * Periodic background sweeper to release expired reservations (F91).
+   */
+  static startSweeper(intervalMs = 60_000) {
+    if (sweeper) return;
+    sweeper = setInterval(() => {
+      InventoryReservationService.processExpiredReservations()
+        .then((count) => {
+          if (count > 0) {
+            logger.info(`[ReservationSweeper] Released ${count} expired stock reservation(s).`);
+          }
+        })
+        .catch((err) => {
+          logger.warn(`[ReservationSweeper] Sweep failed: ${(err as { message?: string }).message}`);
+        });
+    }, intervalMs);
+    sweeper.unref();
+  }
+
+  static stopSweeper() {
+    if (sweeper) clearInterval(sweeper);
+    sweeper = null;
   }
 }

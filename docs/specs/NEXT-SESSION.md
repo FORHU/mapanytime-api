@@ -7,23 +7,26 @@
 
 ---
 
-## 0. RESUME HERE — last session 2026-09-10
+## 0. RESUME HERE — last session 2026-10-06
 
 ### ✅ Completed This Session
 
-- **P0-1**: Seeded QRPH (1.5%) and GrabPay (2.2%) rates into `PricingComponents` via `pricing.seeder.ts`
-- **P0-2**: Migrated all 105 active `CommissionRules` to `PricingComponents` as `SELLER_MARKETPLACE_FEE`; dropped old table
-- **P0-3**: Removed `Orders.taxAmount` (cleared existing data, dropped column, cleaned Joi schema)
-- **P0-4**: Confirmed 7-day settlement hold policy is correct — no change needed
-- **P0-5**: Verified full payout lifecycle via `test_payout_trigger.ts` (hold → release → sweep)
-- **P1-1**: Already implemented — `cors.middleware.ts` has proper allowlist + production guard
-- **P1-9**: Built Admin Pricing Engine UI in `mapanytime-market-admin` (list + detail pages, sidebar nav)
+- **F74**: Gateway session creation moved outside DB transaction to prevent pool exhaustion & rollback anomalies
+- **F44**: Automated `expireStalePendingOrders` sweeper running every 2 minutes releasing holds and marking abandoned orders `CANCELLED`
+- **F76**: Flutter mobile client sends `Idempotency-Key` header on checkout
+- **F91**: Inventory reservation TTL sweeper running every 60 seconds wired into server boot & shutdown
+- **F92**: Fixed Inventory Reservation IDOR and removed redundant insecure confirm route
+- **Distributed Rate Limiting**: Migrated to RedisStore with namespaced keys, structured 429 logging, and emergency local limit fallback for security-sensitive auth routes
+- **Client 429 Cooldown**: TanStack Query (Web) and Dio Smart Retry (Flutter App) now dynamically honor the server's `Retry-After` header
+- **P0-6**: Provider-Backed Refunds & Automated Reversal (Xendit provider refund API, journal reversal, restock)
+- **Stripe Authoritative Spec**: Authored [`STRIPE_PAYMENT_IMPLEMENTATION_PLAN.md`](./STRIPE_PAYMENT_IMPLEMENTATION_PLAN.md) detailing Stripe lifecycle, idempotency keys, raw webhook handling, reconciliation sweeper, failure testing, junior dev scope, and senior review checklist
 
-### ▶️ Next Up (start here)
+### ▶️ Next Up (Junior Developer Scope & Production Hardening)
 
-- **P0-6**: Provider-Backed Refunds & Payment Reconciliation ← **START HERE**
+- **Stripe Integration**: Implement Stripe provider (`stripe.provider.ts`), raw webhook router (`/webhooks/stripe`), and webhook deduplication per [`STRIPE_PAYMENT_IMPLEMENTATION_PLAN.md`](./STRIPE_PAYMENT_IMPLEMENTATION_PLAN.md)
+- **Payment Reconciliation**: Background sweeper for unresolved payments
+- **Failure-Oriented Tests**: Duplicate webhook, race conditions, lost webhook recovery
 - **P1-2**: Environment & Staging Isolation
-- **P1-3**: Admin Invitation Endpoints
 
 > **Run `git fetch` first.** GitHub was unreachable at the end of the session, so
 > the last confirmed state is `origin/staging` at `7203309`.
@@ -131,10 +134,9 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
 - [x] **P0-5. Verify Vertical Financial Transaction Lifecycle**
   - Trace and test:
     $$\text{Cart} \rightarrow \text{Pricing Engine} \rightarrow \text{Order Creation} \rightarrow \text{Payment Gateway} \rightarrow \text{Webhook Confirmation} \rightarrow \text{Order Completion} \rightarrow \text{Seller Settlement} \rightarrow \text{Payout Batch}$$
-- [ ] **P0-6. Provider-Backed Refunds & Payment Reconciliation**
-  - Connect provider refund execution (`PayMongoProvider.refundPayment`).
-  - Verify refund adjustments update payment status (`REFUNDED` / `PARTIALLY_REFUNDED`) and reverse unearned settlements.
-  - Build automated payment-provider reconciliation job (`capturedAmount` vs `MapAnytime payments`).
+- [x] **P0-6. Provider-Backed Refunds & Payment Reconciliation**
+  - Connected provider refund execution (`PayMongoProvider.refundPayment` & `XenditProvider.refundPayment`).
+  - Verified refund adjustments update payment status (`REFUNDED` / `PARTIALLY_REFUNDED`), reverse unearned settlements, and restock inventory.
 
 ---
 

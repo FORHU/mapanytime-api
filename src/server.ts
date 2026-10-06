@@ -11,6 +11,7 @@ import { rabbitmq } from './infrastructure/rabbitmq';
 import { attachRedisAdapter, closeRedisAdapter, initSocket } from './infrastructure/socket';
 import RedisUtil from './utils/redis.util';
 import MobilityService from './modules/mobility/mobility.service';
+import InventoryReservationService from './modules/inventory/inventoryReservation.service';
 
 const server = http.createServer(app);
 
@@ -36,6 +37,8 @@ const startServer = async () => {
     }
     // God's Eye: takes vehicles silent for 60s off viewers' maps.
     MobilityService.startSweeper();
+    // Reclaim expired inventory reservations (F91)
+    InventoryReservationService.startSweeper();
 
     // Explicit 0.0.0.0: this runs in a container (see Dockerfile), and the
     // published port is only reachable if the server binds every interface.
@@ -63,6 +66,7 @@ const gracefulShutdown = async (signal: string) => {
     try {
       // Disconnect from all infrastructure
       MobilityService.stopSweeper();
+      InventoryReservationService.stopSweeper();
       await closeRedisAdapter();
       await rabbitmq.close();
       await redis.close();

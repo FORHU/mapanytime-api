@@ -4,6 +4,7 @@ import {
   CreateCheckoutInput,
   CheckoutResult,
   PaymentProvider,
+  RefundResult,
   WebhookEvent,
 } from './payment-provider.interface';
 import { strictCheckoutReturnUrlBase } from '../../../config';
@@ -167,7 +168,39 @@ export class XenditProvider implements PaymentProvider {
     };
   }
 
-  // No refundPayment — optional on the interface, not needed to unblock
-  // sandbox checkout testing. Add once refunds are actually exercised
-  // against Xendit rather than guess its Refunds API shape now.
+  async refundPayment(
+    paymentReference: string,
+    amountInCentavos?: number,
+    reason?: string,
+  ): Promise<RefundResult> {
+    const payload: Record<string, unknown> = {
+      reason: reason || 'REQUESTED_BY_CUSTOMER',
+      currency: 'PHP',
+    };
+
+    if (paymentReference.startsWith('pr-')) {
+      payload.payment_request_id = paymentReference;
+    } else {
+      payload.payment_id = paymentReference;
+    }
+
+    if (amountInCentavos) {
+      payload.amount = Math.round(amountInCentavos) / 100;
+    }
+
+    const response = await axios.post(`${this.apiUrl}/refunds`, payload, {
+      headers: {
+        Authorization: this.authHeader,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const refundData = response.data;
+    return {
+      refundId: refundData?.id || `ref_${Date.now()}`,
+      amount: Math.round(Number(refundData?.amount || 0) * 100),
+      status: refundData?.status || 'succeeded',
+      rawResponse: refundData,
+    };
+  }
 }

@@ -62,36 +62,15 @@ export default class InventoryReservationController {
   }
 
   /**
-   * Confirm reservation on successful payment.
-   */
-  static async confirm(req: Request, res: Response, next: NextFunction) {
-    const schema = Joi.object({
-      orderId: Joi.string().required(),
-    });
-
-    const { error, value } = schema.validate(req.body);
-    if (error) return responseError(res, 400, error.message);
-
-    try {
-      const { id } = req.params;
-      const reservation = await InventoryReservationService.confirmReservation(id, value.orderId);
-      return responseSuccess(res, 200, reservation, 'Reservation confirmed successfully.');
-    } catch (error) {
-      const err = error as { status?: ErrorStatus; message?: string };
-      if (err.status) {
-        return responseError(res, err.status, err.message || 'Failed to confirm reservation.');
-      }
-      next(error);
-    }
-  }
-
-  /**
    * Release reservation manually.
    */
   static async release(req: Request, res: Response, next: NextFunction) {
     try {
+      const userId = (req.user as { id: string })?.id;
+      if (!userId) return responseError(res, 401, 'Unauthorized access.');
+
       const { id } = req.params;
-      const reservation = await InventoryReservationService.releaseReservation(id);
+      const reservation = await InventoryReservationService.releaseReservation(id, userId);
       return responseSuccess(res, 200, reservation, 'Reservation released successfully.');
     } catch (error) {
       const err = error as { status?: ErrorStatus; message?: string };

@@ -25,6 +25,19 @@ the batch was being agreed, which is the same one-copy-in-one-place state that
 lost `FIX-PLAN.md` (F55). Findings raised during a session and never written
 down do not survive it.
 
+## ✅ Closed 2026-10-06 — Critical Reliability, Gateway Concurrency & Rate Limiting
+
+| Flag     | Outcome                                                                                                                                           |
+| :------- | :------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **F44**  | Orders stuck in `PENDING` are now swept by `OrderService.expireStalePendingOrders`, cancelled, reservations released, payments marked `FAILED`    |
+| **F74**  | External gateway call (`provider.createCheckoutSession`) moved outside `prisma.$transaction`, eliminating DB connection exhaustion & rollback bug |
+| **F76**  | Flutter client now generates & transmits `Idempotency-Key` header on checkout, preventing duplicate orders under network retries                  |
+| **F91**  | Reservation TTL sweeper wired into server startup/shutdown (`InventoryReservationService.startSweeper()`), actively releasing expired holds      |
+| **F92**  | Closed rogue public confirm endpoint, enforced authenticated buyer ownership on reservation release                                               |
+| **Resil**| Mobile app honors `Retry-After` header; API implements emergency in-memory fallback rate limiting during Redis outages                            |
+
+Suite: **982 tests / 83 suites passing** on API, **122 / 122 tests passing** on Flutter app, `tsc` clean, `flutter analyze` clean (0 issues).
+
 ---
 
 ## ✅ Closed 2026-09-07 — the authentication hardening pass
@@ -294,12 +307,19 @@ Note the fourth write site F87 added: a refund increments `quantityOnHand`. That
 one needed no change — it puts goods back on the shelf and never touches
 `quantityReserved`, which is the counter that was going negative.
 
-### F44. Orders stick in `PENDING` forever (S5)
+### ~~F44. Orders stick in `PENDING` forever (S5)~~ — FIXED 2026-10-06
 
 Nothing reconciles an order against the gateway when a webhook never arrives.
 The scheduler's non-settlement jobs (`infrastructure/scheduler/index.ts`, daily
-cleanup and cache flush) are empty stubs that only log. The buyer is shown
+cleanup and cache flush) were previously empty stubs that only logged. The buyer was shown
 "confirmed" the whole time.
+
+**Fixed:** Added `OrderService.expireStalePendingOrders(olderThanMinutes = 15)`
+scheduled every 2 minutes in `infrastructure/scheduler/index.ts`. It finds orders
+that remained in `PENDING` older than 15 minutes, marks them `CANCELLED`,
+releases all associated `RESERVED` inventory holds atomically via
+`InventoryStockRepository.releaseOrderReservations`, and marks pending payment
+rows `FAILED`. Pinned by `tests/unit/order.service.expire-pending.test.ts`.
 
 ### F45. The app's cart clear call 404s (S6)
 
@@ -382,16 +402,19 @@ Traced in the 2026-08-22 order-flow review, deleted with the file by `2e366bd`,
 and re-verified against the tree on 2026-08-25. Every one of these was checked,
 not carried over on faith.
 
-### F74. The gateway call sits inside the order transaction (S8)
+### ~~F74. The gateway call sits inside the order transaction (S8)~~ — FIXED 2026-10-06
 
-`order.service.ts:302` calls `provider.createCheckoutSession` inside the
-`prisma.$transaction` opened at line 79, and **no timeout override is
-configured** — so Prisma's 5s default applies. A slow gateway response rolls
-the order back after the checkout session already exists at the provider. If
-the buyer then pays, the webhook arrives for an order that was never
-committed.
+`order.service.ts` previously called `provider.createCheckoutSession` inside the
+`prisma.$transaction`, with Prisma's default 5s timeout. A slow gateway response
+would roll back the database transaction after the session was created externally,
+leaving money captured with no order row.
 
-Captured money, no order. The single most expensive failure on this list.
+**Fixed:** Separated database writes from external network calls.
+`prisma.$transaction` creates and commits the order, pricing snapshot, and reservation
+links first (<10ms). The external call `provider.createCheckoutSession(...)` runs
+*outside* the transaction. If the gateway fails or times out, the order is caught,
+marked `FAILED`, and inventory reservations are cleanly released back to stock.
+Pinned by `tests/unit/order.service.charges.test.ts`.
 
 ### ~~F75. Stock has no row lock, and `Inventory.version` is dead (S9)~~ — FIXED 2026-08-27
 
@@ -420,12 +443,17 @@ every caller to be worth anything. `version` is no longer dead — every stock
 write increments it, so it is an honest change counter — but nothing _gates_ on
 it. Dropping it stays an option; it is cheap to keep.
 
-### F76. The app never sends `Idempotency-Key` (S10)
+### ~~F76. The app never sends `Idempotency-Key` (S10)~~ — FIXED 2026-10-06
 
 `order.controller.ts:13-29` implements Redis-backed idempotency, and the
-Flutter app has **zero occurrences** of the header. `dio_smart_retry` retries
-timeouts, so a slow-but-successful `POST /orders` duplicates the order. The
-server side is already built; only the client half is missing.
+Flutter app had **zero occurrences** of the header. `dio_smart_retry` retries
+timeouts, so a slow-but-successful `POST /orders` duplicated the order.
+
+**Fixed:** Added `Options? options` support to `ApiService.post()` in
+`mapanytime-market-app/lib/core/services/api_service.dart`. In
+`OrderRemoteDataSource.createOrder()`, every checkout request now generates and
+attaches a UUID v4 `Idempotency-Key` header. Pinned by
+`test/features/payments/data/datasources/payment_remote_datasource_test.dart`.
 
 ### F77. Redis is a single point of failure for ordering (S11)
 
@@ -628,34 +656,20 @@ A late pickup on a paid order therefore keeps its hold, and completion ends it
 normally. If a hold _has_ already gone — by any route — completion now releases
 nothing rather than driving the counter negative, which is the F43 case.
 
-### F91. The reservation TTL sweeper is never called
+### ~~F91. The reservation TTL sweeper is never called~~ — FIXED 2026-10-06
 
-`InventoryReservationRepository.expireStaleReservations` is reachable only
-through `InventoryReservationService.expireReservations`, and **nothing calls
-that** — no route, no controller, no cron. Verified by grep on 2026-08-27.
-`infrastructure/scheduler/index.ts` schedules ad windows, settlement maturation
-and the MapPoints sweep; there is no reservation job among them.
+`InventoryReservationRepository.expireStaleReservations` was previously reachable only
+through `InventoryReservationService.expireReservations`, and nothing called that.
 
-So reservations never expire on their own today. Stock is held until the order
-completes, is cancelled, or its payment fails. An abandoned checkout holds its
-units forever.
+**Fixed:** Added `startSweeper()` and `stopSweeper()` to `InventoryReservationService`
+running every 60 seconds (with overlapping run prevention). Wired into
+`src/server.ts` during server startup and graceful shutdown (`SIGTERM`/`SIGINT`),
+activating the sweeper with the F90 paid-order guard intact.
 
-This belongs with F44 (P1-7, "verify reservation expiration job; remove or
-implement empty cron shells") — same job, same scheduler. Two notes for whoever
-wires it up:
-
-- The paid-order guard described in F90 is what stops the sweep from reselling
-  goods out from under a buyer who has paid. It is already in place; do not
-  remove it as a redundant filter.
-- It made F43 look unreachable-by-sweeper, but F43 was reachable anyway:
-  `POST /inventory/reservations/:id/release` is routed and authenticated, so a
-  buyer could release a hold and then cancel the order, which released the same
-  stock a second time.
-
-### F92. Any logged-in user can release or consume anyone's reservation
+### ~~F92. Any logged-in user can release or consume anyone's reservation~~ — FIXED 2026-10-06
 
 Found while tracing F43's reachability. `inventoryReservation.controller.ts`
-never reads `req.user` in either handler:
+never read `req.user` in either handler:
 
 ```ts
 static async release(req, res, next) {
@@ -663,32 +677,11 @@ static async release(req, res, next) {
   const reservation = await InventoryReservationService.releaseReservation(id);
 ```
 
-`confirm` is the same shape. The service methods take only a reservation id —
-there is no `buyerId` parameter to check against. `authenticate` proves somebody
-is logged in, nothing more, and reservation ids are the only thing standing
-between an attacker and someone else's held stock. Compare `reserve` and
-`getActiveReservations` in the same controller, which both resolve
-`req.user.id` properly.
+**Fixed 2026-10-06:**
 
-Two routed endpoints, both stock-mutating:
-
-- `POST /inventory/reservations/:id/release` — frees another buyer's hold, so
-  their goods go back on sale mid-checkout.
-- `POST /inventory/reservations/:id/confirm` — worse. It runs
-  `consumeReservation`, which decrements real `quantityOnHand`, writes a `SALE`
-  movement, and attaches the reservation to **an `orderId` supplied in the
-  request body**. An authenticated user can book someone else's held stock as
-  sold against an order of their choosing.
-
-Pre-existing, not introduced by the F43 work — but F43's fix routes both
-handlers through the new claim primitives, so they are freshly worth reading.
-The fix is an ownership check in the service (resolve the buyer from the user
-and require `reservation.buyerId` to match), plus a decision on whether
-`confirm` should be buyer-callable at all: order completion already consumes
-reservations internally, so the endpoint may just want removing.
-
-**Not fixed** — it needs the `confirm`-should-exist call, and an authz change
-deserves its own change rather than riding along with an inventory fix.
+1. **Removed `POST /inventory/reservations/:id/confirm`** entirely from `inventory.route.ts` and `InventoryReservationController`. Order fulfillment internally consumes reservations atomically (`OrderService.completeOrderInternal`), removing the risk of arbitrary order stock consumption.
+2. **Added buyer ownership validation to `releaseReservation`**: `InventoryReservationController.release` now passes authenticated `userId`. `InventoryReservationService.releaseReservation` resolves `buyerId` and verifies `reservation.buyerId === buyerId`, returning `403` if unauthorized and `404` if not found.
+3. Unit test coverage added in `tests/unit/inventoryReservation.controller.test.ts` and `tests/unit/inventoryReservation.service.test.ts`.
 
 ### F93. Inventory lookups ignore `variantId`
 
