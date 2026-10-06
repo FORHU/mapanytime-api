@@ -39,10 +39,10 @@ This document details the end-to-end design and implementation rules for integra
 Every payment transaction must transition strictly through deterministic states.
 
 ```text
-[ INITIALIZED ] 
+[ INITIALIZED ]
        │  (createCheckoutSession / PaymentIntent)
        ▼
-   [ PENDING ] 
+   [ PENDING ]
        │
        ├────────────────────────┬────────────────────────┐
        │ (Webhook / Recon)      │ (Payment Failed)       │ (Expired / Timeout)
@@ -59,15 +59,15 @@ Every payment transaction must transition strictly through deterministic states.
 
 ### State Transition Invariants
 
-| From State | Allowed Target State | Trigger | Invariants |
-| :--- | :--- | :--- | :--- |
-| `PENDING` | `COMPLETED` | Webhook (`payment_intent.succeeded`) or Reconciliation | Must atomically consume inventory hold and credit seller ledger. |
-| `PENDING` | `FAILED` | Webhook (`payment_intent.payment_failed`) | Must release inventory hold back to stock. |
-| `PENDING` | `EXPIRED` | Reconciliation / Sweeper (15m hold expiration) | Must release inventory hold. |
-| `COMPLETED` | `REFUND_PROCESSING` | Return approved (`return.service.ts`) | Provider refund call dispatched with idempotency key. |
-| `REFUND_PROCESSING`| `REFUNDED` | Webhook (`charge.refunded`) or Direct Confirmation | Reverses settlement ledger entry, restocks inventory. |
-| `COMPLETED` | `FAILED` | **FORBIDDEN** | Terminal state cannot regress to failure. |
-| `REFUNDED` | Any | **FORBIDDEN** | Terminal state. |
+| From State          | Allowed Target State | Trigger                                                | Invariants                                                       |
+| :------------------ | :------------------- | :----------------------------------------------------- | :--------------------------------------------------------------- |
+| `PENDING`           | `COMPLETED`          | Webhook (`payment_intent.succeeded`) or Reconciliation | Must atomically consume inventory hold and credit seller ledger. |
+| `PENDING`           | `FAILED`             | Webhook (`payment_intent.payment_failed`)              | Must release inventory hold back to stock.                       |
+| `PENDING`           | `EXPIRED`            | Reconciliation / Sweeper (15m hold expiration)         | Must release inventory hold.                                     |
+| `COMPLETED`         | `REFUND_PROCESSING`  | Return approved (`return.service.ts`)                  | Provider refund call dispatched with idempotency key.            |
+| `REFUND_PROCESSING` | `REFUNDED`           | Webhook (`charge.refunded`) or Direct Confirmation     | Reverses settlement ledger entry, restocks inventory.            |
+| `COMPLETED`         | `FAILED`             | **FORBIDDEN**                                          | Terminal state cannot regress to failure.                        |
+| `REFUNDED`          | Any                  | **FORBIDDEN**                                          | Terminal state.                                                  |
 
 ---
 
@@ -124,11 +124,7 @@ import { handleStripeWebhook } from './stripe-webhook.controller';
 const router = Router();
 
 // Ensure raw body buffer is preserved
-router.post(
-  '/webhooks/stripe',
-  express.raw({ type: 'application/json' }),
-  handleStripeWebhook
-);
+router.post('/webhooks/stripe', express.raw({ type: 'application/json' }), handleStripeWebhook);
 
 export default router;
 ```
@@ -143,7 +139,7 @@ try {
   event = stripe.webhooks.constructEvent(
     req.body, // Buffer
     sig as string,
-    process.env.STRIPE_WEBHOOK_SECRET!
+    process.env.STRIPE_WEBHOOK_SECRET!,
   );
 } catch (err: any) {
   logger.error(`[Stripe Webhook] Signature verification failed: ${err.message}`);
@@ -189,18 +185,19 @@ Every money-moving operation must have a deterministic idempotency key.
 
 ### Key Naming Conventions
 
-| Domain | Key Pattern | Purpose |
-| :--- | :--- | :--- |
-| **Payment Creation** | `payment:order:{orderId}` | Prevents duplicate PaymentIntents for the same order. |
-| **Payment Capture** | `capture:payment:{paymentId}` | Prevents double capture if manual capture is used. |
-| **Refund Processing** | `refund:return:{returnId}` | Guarantees only one Stripe refund is created per return request. |
-| **Merchant Settlement** | `settle:merchant:{merchantId}:{period}` | Prevents duplicate journal entries during settlement batches. |
+| Domain                  | Key Pattern                             | Purpose                                                          |
+| :---------------------- | :-------------------------------------- | :--------------------------------------------------------------- |
+| **Payment Creation**    | `payment:order:{orderId}`               | Prevents duplicate PaymentIntents for the same order.            |
+| **Payment Capture**     | `capture:payment:{paymentId}`           | Prevents double capture if manual capture is used.               |
+| **Refund Processing**   | `refund:return:{returnId}`              | Guarantees only one Stripe refund is created per return request. |
+| **Merchant Settlement** | `settle:merchant:{merchantId}:{period}` | Prevents duplicate journal entries during settlement batches.    |
 
 ---
 
 ## 7. Atomic Database State Transitions (Concurrency Guards)
 
 Never write read-then-write code:
+
 ```typescript
 // ❌ WRONG: VULNERABLE TO RACE CONDITIONS
 const payment = await prisma.payment.findUnique({ where: { id } });
@@ -211,6 +208,7 @@ if (payment.status === 'PENDING') {
 ```
 
 Always use conditional atomic updates with Prisma count verification:
+
 ```typescript
 // ✅ CORRECT: ATOMIC CONDITIONAL TRANSITION
 const result = await prisma.$transaction(async (tx) => {
@@ -300,25 +298,27 @@ The reconciliation logic must use the **exact same atomic transition methods** a
 
 ## 10. Failure Scenarios & Self-Healing Matrix
 
-| Failure Event | System Behavior & Self-Healing Mechanism |
-| :--- | :--- |
-| **Duplicate Webhook Delivered** | Webhook deduplication detects `event.id` or atomic `updateMany` returns `count: 0`. Returns `200 OK` without duplicate side effects. |
-| **Webhook Lost / Never Arrives** | Payment reconciliation job detects `PENDING` payment after 10m, polls Stripe, and finishes order completion. |
-| **Concurrent Webhook & Reconciliation** | Handled atomically via database precondition `WHERE status = 'PENDING'`. First caller wins; second caller gets `count: 0` and exits safely. |
-| **Stripe API Timeout on Intent Create** | Safe retry using identical `idempotencyKey: payment:order:{orderId}`. Stripe returns existing PaymentIntent rather than charging again. |
-| **Duplicate Refund Request** | Stripe idempotency key `refund:return:{returnId}` prevents duplicate card credit; returns existing refund object. |
-| **Worker / Container Crashes Mid-Processing** | Next reconciliation poll or webhook retry recovers the transaction using database transactions (`prisma.$transaction`). |
-| **Redis Outage** | Rate limit middleware falls back to emergency in-memory limits for auth routes (`Math.min(limit, 5)`) with structured security alerts. |
+| Failure Event                                 | System Behavior & Self-Healing Mechanism                                                                                                    |
+| :-------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Duplicate Webhook Delivered**               | Webhook deduplication detects `event.id` or atomic `updateMany` returns `count: 0`. Returns `200 OK` without duplicate side effects.        |
+| **Webhook Lost / Never Arrives**              | Payment reconciliation job detects `PENDING` payment after 10m, polls Stripe, and finishes order completion.                                |
+| **Concurrent Webhook & Reconciliation**       | Handled atomically via database precondition `WHERE status = 'PENDING'`. First caller wins; second caller gets `count: 0` and exits safely. |
+| **Stripe API Timeout on Intent Create**       | Safe retry using identical `idempotencyKey: payment:order:{orderId}`. Stripe returns existing PaymentIntent rather than charging again.     |
+| **Duplicate Refund Request**                  | Stripe idempotency key `refund:return:{returnId}` prevents duplicate card credit; returns existing refund object.                           |
+| **Worker / Container Crashes Mid-Processing** | Next reconciliation poll or webhook retry recovers the transaction using database transactions (`prisma.$transaction`).                     |
+| **Redis Outage**                              | Rate limit middleware falls back to emergency in-memory limits for auth routes (`Math.min(limit, 5)`) with structured security alerts.      |
 
 ---
 
 ## 11. Testing Requirements
 
 ### 1. Unit Tests
+
 - `stripe.provider.test.ts`: Verify `createCheckoutSession`, `refundPayment`, and `verifyWebhookSignature` mock calls and error transformations.
 - `paymentReconciliation.job.test.ts`: Verify sweeper handles succeeded, canceled, and pending intents correctly.
 
 ### 2. Integration / Failure-Oriented Tests
+
 - **Duplicate Webhook Test**: Send identical `payment_intent.succeeded` event twice in parallel; assert exactly 1 completed payment and 1 ledger entry.
 - **Race Condition Test**: Fire webhook handler and reconciliation job simultaneously on the same pending order; assert exactly 1 completion and zero inventory drift.
 - **Lost Webhook Recovery Test**: Seed a `PENDING` payment with a succeeded Stripe intent; run reconciliation worker; assert order transitions to `COMPLETED`.

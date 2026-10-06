@@ -60,7 +60,9 @@ export const startScheduler = () => {
     try {
       const expiredCount = await OrderService.expireStalePendingOrders(15);
       if (expiredCount > 0) {
-        logger.info(`[Scheduler] Expired ${expiredCount} stale pending order(s) and released holds.`);
+        logger.info(
+          `[Scheduler] Expired ${expiredCount} stale pending order(s) and released holds.`,
+        );
       }
     } catch (err) {
       logger.error('[Scheduler] Failed to process expired pending orders:', err);
