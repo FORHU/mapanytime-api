@@ -5,7 +5,9 @@ import axios from 'axios';
 import { OAuth2Client } from 'google-auth-library';
 import { Users } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
-import { DOCUMENTTYPES } from '@prisma/client';
+import { BUYERIDTYPE, DOCUMENTTYPES, SEX } from '@prisma/client';
+import S3Util from '../../utils/s3.util';
+import AddressService from '../addresses/address.service';
 import {
   ACCESS_TOKEN_SECRET,
   REFRESH_TOKEN_SECRET,
@@ -24,6 +26,13 @@ import type { AuthUser } from './auth.repository';
 import logger from '../../utils/logger';
 import { publish } from '../../infrastructure/rabbitmq/publisher';
 import { ROUTING_KEYS } from '../../events/routing-keys';
+
+/** File extension for each accepted ID photo type (see AuthController). */
+const ID_PHOTO_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
 
 /** How long a reset code stays usable. Short, because the code is only 4 digits. */
 const PASSWORD_RESET_TTL_MINUTES = 15;
@@ -82,6 +91,16 @@ export default class AuthSvc {
       govIdFileName: string;
       govIdKey: string;
     };
+    dateOfBirth?: Date;
+    sex?: SEX;
+    /** The valid ID photo from a buyer sign-up, stored privately for review. */
+    validId?: {
+      idType: BUYERIDTYPE;
+      idNumber: string;
+      /** The holder's address as confirmed against the ID. */
+      address: string;
+      photo: { buffer: Buffer; mimeType: string; size: number; originalName: string };
+    };
   }) {
     logger.info(`[Auth] Registration attempt for ${data.email} (role: ${data.roleName})`);
 
@@ -94,29 +113,42 @@ export default class AuthSvc {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512').toString('hex');
 
-    // Use Prisma transaction to ensure all identity records succeed or fail together
-    await prisma.$transaction(async (tx) => {
-      const rolesToConnect =
-        data.roleName === 'SELLER'
-          ? [{ roleName: 'SELLER' }, { roleName: 'BUYER' }]
-          : [{ roleName: data.roleName }];
+    // The ID photo goes to S3 before the transaction (S3 can't join it); if the
+    // transaction then fails, the object is deleted again below.
+    const validId = data.roleName === 'BUYER' ? data.validId : undefined;
+    let idPhotoKey: string | undefined;
+    if (validId) {
+      const ext = ID_PHOTO_EXTENSIONS[validId.photo.mimeType] ?? 'jpg';
+      idPhotoKey = `buyer-ids/${crypto.randomBytes(16).toString('hex')}.${ext}`;
+      await S3Util.putObject(idPhotoKey, validId.photo.buffer, validId.photo.mimeType);
+    }
 
-      const user = await tx.users.create({
-        data: {
-          email: data.email,
-          passwordHash: `${salt}:${hash}`,
-          firstName: data.firstName,
-          lastName: data.lastName,
-          middleName: data.middleName,
-          phoneNumber: data.phoneNumber,
-          countryCode: data.countryCode,
-          isEmailVerified: true,
-          accountStatus: 'ACTIVE',
-          roles: { connect: rolesToConnect },
-        },
-      });
+    try {
+      // Use Prisma transaction to ensure all identity records succeed or fail together
+      await prisma.$transaction(async (tx) => {
+        const rolesToConnect =
+          data.roleName === 'SELLER'
+            ? [{ roleName: 'SELLER' }, { roleName: 'BUYER' }]
+            : [{ roleName: data.roleName }];
 
-      /* --- ORIGINAL STRICT LOGIC (COMMENTED OUT FOR MVP BYPASS) ---
+        const user = await tx.users.create({
+          data: {
+            email: data.email,
+            passwordHash: `${salt}:${hash}`,
+            firstName: data.firstName,
+            lastName: data.lastName,
+            middleName: data.middleName,
+            phoneNumber: data.phoneNumber,
+            countryCode: data.countryCode,
+            dateOfBirth: data.dateOfBirth,
+            sex: data.sex,
+            isEmailVerified: true,
+            accountStatus: 'ACTIVE',
+            roles: { connect: rolesToConnect },
+          },
+        });
+
+        /* --- ORIGINAL STRICT LOGIC (COMMENTED OUT FOR MVP BYPASS) ---
       if (data.roleName === 'SELLER' && data.sellerDocuments) {
         const seller = await tx.sellers.create({
           data: { userId: user.id },
@@ -169,75 +201,118 @@ export default class AuthSvc {
       }
       --- END ORIGINAL STRICT LOGIC --- */
 
-      // --- START BYPASS LOGIC ---
-      const displayName =
-        [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' ') || 'New User';
+        // --- START BYPASS LOGIC ---
+        const displayName =
+          [data.firstName, data.middleName, data.lastName].filter(Boolean).join(' ') || 'New User';
 
-      if (data.roleName === 'SELLER') {
-        const seller = await tx.sellers.create({
-          data: { userId: user.id },
-        });
+        if (data.roleName === 'SELLER') {
+          const seller = await tx.sellers.create({
+            data: { userId: user.id },
+          });
 
-        // Every seller belongs to exactly one seller organization. Create it
-        // (plus system roles and the owner's admin membership) in the same
-        // transaction so a never-onboarded seller is always scoped.
-        await OrganizationRepository.ensureSellerOrganization(tx, {
-          sellerId: seller.id,
-          userId: user.id,
-          orgName: `${displayName}'s Organization`,
-        });
-
-        // Also create a buyer profile for the seller
-        await tx.buyers.create({
-          data: { userId: user.id, displayName },
-        });
-
-        const docVerification = await tx.documentVerifications.create({
-          data: {
+          // Every seller belongs to exactly one seller organization. Create it
+          // (plus system roles and the owner's admin membership) in the same
+          // transaction so a never-onboarded seller is always scoped.
+          await OrganizationRepository.ensureSellerOrganization(tx, {
             sellerId: seller.id,
-            verificationStatus: 'PENDING',
-          },
-        });
+            userId: user.id,
+            orgName: `${displayName}'s Organization`,
+          });
 
-        if (data.sellerDocuments) {
-          const attachDoc = async (fileName: string, fileUrl: string, type: DOCUMENTTYPES) => {
+          // Also create a buyer profile for the seller
+          await tx.buyers.create({
+            data: { userId: user.id, displayName },
+          });
+
+          const docVerification = await tx.documentVerifications.create({
+            data: {
+              sellerId: seller.id,
+              verificationStatus: 'PENDING',
+            },
+          });
+
+          if (data.sellerDocuments) {
+            const attachDoc = async (fileName: string, fileUrl: string, type: DOCUMENTTYPES) => {
+              const file = await tx.files.create({
+                data: {
+                  uploadedById: user.id,
+                  filename: fileName,
+                  originalName: fileName,
+                  mimeType: 'application/octet-stream',
+                  size: 0,
+                  path: fileUrl,
+                },
+              });
+              await tx.documents.create({
+                data: {
+                  documentVerificationsId: docVerification.id,
+                  fileId: file.id,
+                  documentType: type,
+                },
+              });
+            };
+
+            await attachDoc(
+              data.sellerDocuments.tinIdFileName,
+              data.sellerDocuments.tinIdKey,
+              'TIN_ID',
+            );
+            await attachDoc(
+              data.sellerDocuments.govIdFileName,
+              data.sellerDocuments.govIdKey,
+              'GOV_ID',
+            );
+          }
+        } else if (data.roleName === 'BUYER') {
+          const buyer = await tx.buyers.create({
+            data: { userId: user.id, displayName },
+          });
+
+          if (validId && idPhotoKey) {
             const file = await tx.files.create({
               data: {
                 uploadedById: user.id,
-                filename: fileName,
-                originalName: fileName,
-                mimeType: 'application/octet-stream',
-                size: 0,
-                path: fileUrl,
+                filename: idPhotoKey.split('/').pop()!,
+                originalName: validId.photo.originalName,
+                mimeType: validId.photo.mimeType,
+                size: validId.photo.size,
+                path: idPhotoKey,
               },
             });
-            await tx.documents.create({
+            await tx.buyerIdVerifications.create({
               data: {
-                documentVerificationsId: docVerification.id,
+                buyerId: buyer.id,
+                idType: validId.idType,
+                idNumber: validId.idNumber,
+                address: validId.address,
                 fileId: file.id,
-                documentType: type,
               },
             });
-          };
+            logger.info(`[Auth] Buyer ID uploaded for review: ${user.id} (${validId.idType})`);
 
-          await attachDoc(
-            data.sellerDocuments.tinIdFileName,
-            data.sellerDocuments.tinIdKey,
-            'TIN_ID',
-          );
-          await attachDoc(
-            data.sellerDocuments.govIdFileName,
-            data.sellerDocuments.govIdKey,
-            'GOV_ID',
-          );
+            // The address entered at sign-up becomes the buyer's default
+            // address, under the same rules as POST /addresses.
+            if (data.phoneNumber) {
+              await AddressService.addForBuyer(tx, buyer.id, {
+                addressType: 'HOME',
+                recipientName: displayName,
+                phoneNumber: data.phoneNumber,
+                addressLine1: validId.address,
+                isDefault: true,
+              });
+            }
+          }
         }
-      } else if (data.roleName === 'BUYER') {
-        await tx.buyers.create({
-          data: { userId: user.id, displayName },
-        });
+        // --- END BYPASS LOGIC ---
+      });
+    } catch (err) {
+      if (idPhotoKey) {
+        await S3Util.deleteObject(idPhotoKey).catch((e) =>
+          logger.error(`[Auth] Could not delete orphaned ID photo ${idPhotoKey}: ${e}`),
+        );
       }
-      // --- END BYPASS LOGIC ---
-    });
+      throw err;
+    }
 
     return null;
   }
