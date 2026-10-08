@@ -1,4 +1,9 @@
-import { PutObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import {
+  PutObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  DeleteObjectCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import crypto from 'crypto';
 import logger from '../utils/logger';
@@ -37,6 +42,22 @@ export default class S3Util {
   }
 
   // Generates a temporary URL to view/download a private file by its S3 Key.
+  /**
+   * Uploads bytes the server already holds (a multipart upload it received) to `key`.
+   * Unlike the presigned flows, the client never talks to S3 itself.
+   */
+  static async putObject(key: string, body: Buffer, contentType: string): Promise<void> {
+    await s3Client.send(
+      new PutObjectCommand({ Bucket: bucket(), Key: key, Body: body, ContentType: contentType }),
+    );
+    logger.info(`[S3] Uploaded object: ${key}`);
+  }
+
+  static async deleteObject(key: string): Promise<void> {
+    await s3Client.send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
+    logger.info(`[S3] Deleted object: ${key}`);
+  }
+
   static async getFileUrl(fileKey: string): Promise<string> {
     const command = new GetObjectCommand({
       Bucket: bucket(),

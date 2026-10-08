@@ -31,6 +31,13 @@ const VALIDATE_OPTS: Joi.ValidationOptions = {
   stripUnknown: true,
 };
 
+/** Government IDs a buyer can sign up with — mirrors the BUYERIDTYPE enum. */
+const BUYER_ID_TYPES = ['PHILSYS', 'DRIVERS_LICENSE', 'PASSPORT', 'UMID', 'POSTAL_ID', 'PRC_ID'];
+
+/** Photo formats accepted for the sign-up ID; the phone camera produces JPEG. */
+const ID_PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const MAX_ID_PHOTO_BYTES = 10 * 1024 * 1024;
+
 export default class AuthController {
   // Register a new user
   static async register(req: Request, res: Response, next: NextFunction) {
@@ -60,13 +67,68 @@ export default class AuthController {
         then: Joi.optional(), // revert to required to return to original logic
         otherwise: Joi.forbidden(),
       }),
-    });
+
+      // Buyer details read from (and corrected against) the uploaded valid ID.
+      // All optional so the web's plain JSON sign-up is unaffected; the app
+      // sends them as multipart fields alongside the `validId` photo.
+      dateOfBirth: Joi.date().iso().max('now').optional(),
+      sex: Joi.string().valid('MALE', 'FEMALE').optional(),
+      validIdType: Joi.string()
+        .valid(...BUYER_ID_TYPES)
+        .optional(),
+      validIdNumber: Joi.string().trim().max(50).optional(),
+      /** The holder's address, one line, as confirmed against the ID. */
+      address: Joi.string().trim().max(300).optional(),
+    }).and('validIdType', 'validIdNumber', 'address');
 
     const { error, value } = schema.validate(req.body);
     if (error) return responseError(res, 400, error.message);
 
+    const idPhoto = req.file;
+    if (idPhoto || value.validIdType) {
+      if (value.roleName !== 'BUYER') {
+        return responseError(res, 400, 'A valid ID can only be attached to a buyer sign-up');
+      }
+      if (!idPhoto) return responseError(res, 400, 'validId photo is required');
+      if (!value.validIdType) {
+        return responseError(
+          res,
+          400,
+          'validIdType, validIdNumber and address are required with a validId photo',
+        );
+      }
+      // The sign-up address is saved to the buyer's addresses, which need a
+      // contact number.
+      if (!value.phoneNumber) {
+        return responseError(res, 400, 'phoneNumber is required with a validId photo');
+      }
+      if (!ID_PHOTO_TYPES.has(idPhoto.mimetype)) {
+        return responseError(res, 400, 'validId must be a JPEG, PNG or WebP image');
+      }
+      if (idPhoto.size > MAX_ID_PHOTO_BYTES) {
+        return responseError(res, 400, 'validId must be 10 MB or smaller');
+      }
+    }
+
+    const { validIdType, validIdNumber, address, ...rest } = value;
+
     try {
-      await AuthSvc.register(value);
+      await AuthSvc.register({
+        ...rest,
+        validId: idPhoto
+          ? {
+              idType: validIdType,
+              idNumber: validIdNumber,
+              address,
+              photo: {
+                buffer: idPhoto.buffer,
+                mimeType: idPhoto.mimetype,
+                size: idPhoto.size,
+                originalName: idPhoto.originalname,
+              },
+            }
+          : undefined,
+      });
       return responseSuccess(res, 201, null, 'Registration successful');
     } catch (error) {
       next(error);

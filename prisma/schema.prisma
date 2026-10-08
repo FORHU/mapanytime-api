@@ -27,6 +27,8 @@ model Users {
   isPasswordSet   Boolean           @default(true)
   isOnBoarding    Boolean           @default(false)
   countryCode     String?
+  dateOfBirth     DateTime?         @db.Date
+  sex             SEX?
   lastLoginAt     DateTime?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
@@ -50,6 +52,7 @@ model Users {
   transportMemberships TransportOperatorMembers[]
   drivenVehicle      Vehicles?                   @relation("VehicleDriver")
   uploadedAppReleases AppRelease[]               @relation("AppReleaseUploader")
+  reviewedBuyerIds   BuyerIdVerifications[]      @relation("BuyerIdReviewer")
 
   @@unique([userReferralId, id])
   @@index([userReferralId])
@@ -185,6 +188,7 @@ model Files {
   logoStores      Stores[]          @relation("StoreLogo")
   bannerStores    Stores[]          @relation("StoreBanner")
   propertiesFiles PropertiesFiles[] @relation("PropertyFiles")
+  buyerIdVerification BuyerIdVerifications?
 }
 
 model Sellers {
@@ -361,6 +365,7 @@ model Buyers {
   reservations    InventoryReservations[]
   rewardWallet    RewardWallet?
   claimedVouchers UserVouchers[]
+  idVerification  BuyerIdVerifications?
 }
 
 model DocumentVerifications {
@@ -395,6 +400,43 @@ enum DOCUMENTTYPES {
   MAYORS_PERMIT
   BIR_CERTIFICATE
   SEC_CERTIFICATE
+}
+
+enum SEX {
+  MALE
+  FEMALE
+}
+
+/// Government IDs a buyer can sign up with.
+enum BUYERIDTYPE {
+  PHILSYS
+  DRIVERS_LICENSE
+  PASSPORT
+  UMID
+  POSTAL_ID
+  PRC_ID
+}
+
+/// The valid ID a buyer uploaded at sign-up, waiting for an admin to check it.
+/// The photo is a private S3 object referenced through `file`.
+model BuyerIdVerifications {
+  id                 String             @id @default(cuid())
+  buyerId            String             @unique
+  idType             BUYERIDTYPE
+  idNumber           String
+  /// The holder's address as confirmed against the ID at sign-up.
+  address            String
+  fileId             String             @unique
+  verificationStatus VerificationStatus @default(PENDING)
+  verifiedById       String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  buyer      Buyers @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  file       Files  @relation(fields: [fileId], references: [id])
+  verifiedBy Users? @relation("BuyerIdReviewer", fields: [verifiedById], references: [id])
+
+  @@index([verificationStatus])
 }
 
 model AdminInvites {
@@ -1653,9 +1695,10 @@ model BuyerAddresses {
   addressLine1  String
   addressLine2  String?
   barangay      String?
-  city          String
-  province      String
-  zipCode       String
+  /// Optional: sign-up collects the address as one line in addressLine1.
+  city          String?
+  province      String?
+  zipCode       String?
   country       String
   isDefault     Boolean     @default(false)
   createdAt     DateTime    @default(now())
