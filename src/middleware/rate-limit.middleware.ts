@@ -6,8 +6,7 @@ import rateLimit, {
   RateLimitRequestHandler,
   Store,
 } from 'express-rate-limit';
-import { RedisStore } from 'rate-limit-redis';
-import RedisUtil from '../utils/redis.util';
+import { FailoverStore, redisReady } from './rate-limit-store';
 import {
   ACCESS_TOKEN_SECRET,
   CREDENTIAL_FAILURE_LIMIT_MAX,
@@ -82,25 +81,48 @@ const globalKey = (req: Request) => {
 const skipPreflight = (req: Request) => req.method === 'OPTIONS';
 
 /**
- * The library's default response, plus one log line per blocked request with rich diagnostic metadata.
+ * The library's default response, plus one log line per blocked request. requestId and
+ * correlationId come from the logger's request context (see logger.ts), not from here.
  */
 const logBlocked =
   (name: string, keyOf: (req: Request) => string | undefined): RateLimitExceededEventHandler =>
   (req, res, _next, options) => {
-    const correlationId = (req.headers['x-correlation-id'] ||
-      req.headers['x-request-id'] ||
-      '') as string;
     const userId = bearerUserId(req);
     const retryAfter = res.getHeader('Retry-After');
+    const key = keyOf(req);
+    const ip = ipKey(req);
     logger.warn(
-      `[RateLimit] ${name} blocked ${req.method} ${req.originalUrl} ` +
-        `ip=${ipKey(req)} key=${keyOf(req)}` +
+      `[RateLimit] ${name} blocked ${req.method} ${req.originalUrl} ip=${ip} key=${key}` +
         (userId ? ` user=${userId}` : '') +
-        (correlationId ? ` correlationId=${correlationId}` : '') +
         (retryAfter ? ` retryAfter=${retryAfter}` : ''),
+      {
+        limiter: name,
+        method: req.method,
+        url: req.originalUrl,
+        ip,
+        key,
+        userId,
+        retryAfter,
+      },
     );
     res.status(options.statusCode).json(options.message);
   };
+
+/** Whether the auth limiters are on their emergency caps; undefined until the first request. */
+let emergency: boolean | undefined;
+
+/** Logs entering and leaving emergency mode once per transition, not once per request. */
+function noteRedisHealth(ready: boolean) {
+  if (emergency === !ready) return;
+  emergency = !ready;
+  if (emergency) {
+    logger.error(
+      '[RateLimit:EMERGENCY] Redis unavailable; auth limiters are on emergency caps and counting per instance',
+    );
+  } else {
+    logger.info('[RateLimit] Redis available; auth limiters back on configured limits');
+  }
+}
 
 export interface RateLimiters {
   global: RateLimitRequestHandler;
@@ -110,43 +132,27 @@ export interface RateLimiters {
 }
 
 /**
- * Creates rate limiters backed by Redis (rate-limit-redis) when available,
- * falling back gracefully to express-rate-limit's in-memory store in dev or unit tests.
+ * Creates the limiters. Each counts in Redis while it is ready and in this instance's memory
+ * otherwise (see FailoverStore), so it is safe to call before Redis connects.
  */
 export function createRateLimiters(
   limits: RateLimits = configuredLimits,
   customStore?: Store,
 ): RateLimiters {
-  const isRedisHealthy = () => Boolean(customStore || RedisUtil.client?.isOpen);
+  /**
+   * The configured limit while Redis holds the shared count; a much tighter one while each
+   * instance counts alone, since N instances would otherwise allow N times the budget on the
+   * routes attackers care about. Checked per request — Redis isn't connected yet when this runs.
+   */
+  const authLimit =
+    (normal: number, emergencyCap: number) => (): number => {
+      if (customStore || process.env.NODE_ENV === 'test') return normal;
+      const ready = redisReady();
+      noteRedisHealth(ready);
+      return ready ? normal : Math.min(normal, emergencyCap);
+    };
 
-  // In production, when Redis is unavailable, apply a restrictive local emergency limit
-  // on security-sensitive auth endpoints and log a security alert.
-  const emergencyAuthLimit = (normalLimit: number, emergencyCap = 5): number => {
-    if (isRedisHealthy() || process.env.NODE_ENV === 'test') {
-      return normalLimit;
-    }
-    logger.warn(
-      `[RateLimit:EMERGENCY] Redis unavailable! Enforcing restrictive emergency auth limit (${Math.min(
-        normalLimit,
-        emergencyCap,
-      )}) instead of ${normalLimit}.`,
-    );
-    return Math.min(normalLimit, emergencyCap);
-  };
-
-  const storeFor = (prefix: string): Store | undefined => {
-    if (customStore) return customStore;
-    if (RedisUtil.client?.isOpen) {
-      return new RedisStore({
-        sendCommand: (...args: string[]) =>
-          RedisUtil.client.sendCommand(args) as Promise<
-            boolean | number | string | (boolean | number | string)[]
-          >,
-        prefix: `rl:${prefix}:`,
-      });
-    }
-    return undefined;
-  };
+  const storeFor = (name: string): Store => customStore ?? new FailoverStore(name);
 
   /**
    * Global throttle — a blunt guard against abuse, not a per-feature budget.
@@ -186,7 +192,7 @@ export function createRateLimiters(
    */
   const credential = rateLimit({
     windowMs: FIFTEEN_MINUTES_MS,
-    limit: emergencyAuthLimit(limits.credential, 5),
+    limit: authLimit(limits.credential, 5),
     store: storeFor('credential'),
     standardHeaders: true,
     legacyHeaders: false,
@@ -204,7 +210,7 @@ export function createRateLimiters(
    */
   const credentialFailures = rateLimit({
     windowMs: FIFTEEN_MINUTES_MS,
-    limit: emergencyAuthLimit(limits.credentialFailures, 3),
+    limit: authLimit(limits.credentialFailures, 3),
     store: storeFor('credential-failures'),
     // Off so these don't overwrite `credential`'s headers on the same response.
     standardHeaders: false,
@@ -223,7 +229,7 @@ export function createRateLimiters(
    */
   const resetEmail = rateLimit({
     windowMs: limits.resetEmailWindowMinutes * 60 * 1000,
-    limit: emergencyAuthLimit(limits.resetEmail, 2),
+    limit: authLimit(limits.resetEmail, 2),
     store: storeFor('reset-email'),
     standardHeaders: false,
     legacyHeaders: false,
