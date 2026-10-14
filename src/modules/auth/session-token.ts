@@ -3,17 +3,20 @@ import { AUTH_SECRET } from './auth-secret';
 
 /**
  * The bearer token clients hold (#122): a Better Auth session token plus an
- * HMAC of it, `<token>.<signature>` — exactly the signed-cookie value Better
- * Auth's `bearer` plugin accepts when `requireSignature` is on. The signature
- * is HMAC-SHA256 with the auth secret, unpadded base64url — byte-for-byte what
- * Better Auth's own `createHMAC('SHA-256', 'base64urlnopad')` produces.
+ * HMAC of it, `<token>.<signature>` — exactly the signed session-cookie value
+ * Better Auth verifies (better-call's `serializeSignedCookie`), which its
+ * `bearer` plugin turns a bearer token back into. The signature is HMAC-SHA256
+ * with the auth secret in **standard, padded base64** (44 chars, may contain
+ * `+ / =`). Not base64url: a base64url signature passes the bearer plugin's own
+ * check but fails the cookie layer behind it, so getSession answers null — the
+ * end-to-end check against a real database is what caught that.
  *
  * The signature is what lets callers outside a request check a token without a
  * database read: the rate limiter keys on it, and a forged token falls back to
  * the address bucket, the same way an unverifiable JWT did before.
  */
 function sign(value: string): string {
-  return crypto.createHmac('sha256', AUTH_SECRET).update(value).digest('base64url');
+  return crypto.createHmac('sha256', AUTH_SECRET).update(value).digest('base64');
 }
 
 export function signSessionToken(sessionToken: string): string {
