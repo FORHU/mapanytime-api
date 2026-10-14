@@ -35,6 +35,39 @@ gateway fee on refunds**, recorded in the ledger (#118); the **web app is the
 only admin frontend** — the `mapanytime-market-admin` repo no longer exists, and
 its pricing-engine screens are to be ported (web #89).
 
+### Open pull requests (end of 2026-10-14)
+
+| PR       | What                                                   | Merge when         |
+| :------- | :----------------------------------------------------- | :----------------- |
+| API #125 | Better Auth base URL — the one commit that missed #123 | Any time           |
+| API #126 | This documentation (closes #120)                       | Any time           |
+| web #90  | Web drops the old refresh-token flow (closes web #88)  | Any time           |
+| app #74  | App drops the old refresh-token flow (closes app #73)  | Any time; next APK |
+
+### Paused work
+
+- **Stripe (#124)** — branch `feat/stripe-payments` holds only the SDK install.
+  The full plan, design decisions and three owner questions are in the
+  checkpoint comment on #124. Key facts: Stripe takes **cards only** (no
+  GCash/Maya); paying PH sellers through Stripe Connect needs a **US (or
+  UK/EEA/CA/CH) platform account**; Stripe Checkout sessions cannot expire in
+  under 30 minutes, while unpaid orders are cancelled at 15.
+- **Admin pricing-engine port (web #89)** — the source exists only as local
+  commit `37fb6a0` on branch `feat/admin-pricing-engine` in the old
+  `mapanytime-market-admin` checkout; that repository no longer exists on
+  GitHub, so the commit cannot be pushed. Port it before that folder is lost.
+
+### Where everything is written down
+
+- **Live task list:** the FORHU project boards — API #23, app #24, web #25.
+  Every issue carries its decisions and progress as comments.
+- **Findings and decisions:** [`OPEN-FLAGS.md`](./OPEN-FLAGS.md) (F39–F114, and
+  the "Decided 2026-10-14" table).
+- **Overview of the system:** [`PROJECT-EVALUATION.md`](./PROJECT-EVALUATION.md).
+- **Deploy order:** [`HANDOFF-2026-10-14.md`](./HANDOFF-2026-10-14.md) §4.
+- **Auth:** API #122 (closed) — its comments record every Better Auth decision,
+  the spike, and the end-to-end check.
+
 The 2026-10-06 notes below are older; their unticked items are still open
 unless marked superseded.
 
