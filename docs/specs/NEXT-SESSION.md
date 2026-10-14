@@ -1,6 +1,6 @@
 # MapAnytime — Immediate Execution Checklist (Next Session)
 
-**Updated:** 2026-09-10 (pricing engine + payout verification).
+**Updated:** 2026-10-14 (evaluation fixes, Better Auth, decisions — see RESUME HERE).
 
 **Primary Reference:** [`MASTER_EXECUTION_PLAN.md`](./MASTER_EXECUTION_PLAN.md)  
 **Historical Context:** [`FLAGS.md`](./FLAGS.md) · [`OPEN-FLAGS.md`](./OPEN-FLAGS.md)
@@ -9,10 +9,34 @@
 
 ## ▶ RESUME HERE — last session 2026-10-14
 
-Start with [`HANDOFF-2026-10-14.md`](./HANDOFF-2026-10-14.md): four open
-branches across the API, web and app, the pre-deploy checks for F113 (the
-deployed worker has never run), and a device checklist for the app. The
-2026-10-06 notes below are older, but their unticked items are still open.
+**The live task list is the FORHU project boards** — API #23, app #24, web #25.
+This file and the handoff are context; the boards say what is open.
+
+**Merged to `staging`, not deployed:** the evaluation fixes F107–F113 (API #114,
+web #85, app #69/#70) and the move from JWT to **Better Auth** (#123, closing
+#122 — JWT is gone entirely). PR #125 carries the one Better Auth commit that
+missed #123 (its base URL). Merging does **not** deploy: both deploy workflows
+are `workflow_dispatch` only.
+
+**Before the first production deploy** — in order, details in
+[`HANDOFF-2026-10-14.md`](./HANDOFF-2026-10-14.md) §4:
+
+1. F113 pre-deploy checks (#115): worker logs, `email.queue`, matured settlements.
+2. Dispatch **Deploy Production with `ref: staging`** (#116) — the default `main`
+   has none of this. It runs the Better Auth migrations: everyone signs in once.
+   `BETTER_AUTH_SECRET` and `MAPANYTIME_API_PUBLIC_URL` are set in the
+   `production` environment.
+3. Deploy web in the same window (web #86), then publish a new APK (app #72).
+
+**Decided 2026-10-14:** the gateway moves to **Stripe** (#124 — FoxPassport's
+implementation is the reference, notes on the issue); a payment landing on a
+cancelled order is **refunded automatically** (#117); the platform **absorbs the
+gateway fee on refunds**, recorded in the ledger (#118); the **web app is the
+only admin frontend** — the `mapanytime-market-admin` repo no longer exists, and
+its pricing-engine screens are to be ported (web #89).
+
+The 2026-10-06 notes below are older; their unticked items are still open
+unless marked superseded.
 
 ## 0. Previous session — 2026-10-06
 
@@ -38,17 +62,17 @@ deployed worker has never run), and a device checklist for the app. The
 > **Run `git fetch` first.** GitHub was unreachable at the end of the session, so
 > the last confirmed state is `origin/staging` at `7203309`.
 
-- [ ] **A. Check the `ACCESS_TOKEN_EXPIRY` repository secret.** _Two minutes, do
-      it first._ Both deploy workflows read `secrets.ACCESS_TOKEN_EXPIRY` and only
-      fall back to the `15m` literal. If that secret still says `7d`, production
-      access tokens are still seven days and the whole of F98 is not actually in
-      effect — while the merged PR makes it look done. Clear it or set `15m`.
+- [x] ~~**A. Check the `ACCESS_TOKEN_EXPIRY` repository secret.**~~ **Superseded
+      2026-10-14:** JWT was removed (#122/#123); access-token expiry no longer
+      exists, and the deploy workflows no longer read that secret. The secret
+      can be deleted from the repository.
 
-- [ ] **B. Do the AWS setup for SSM, before the next merge to `staging`.**
-      The staging deploy now triggers on merges to `staging` (it used to watch the
-      abandoned `main`), so **the next merge auto-deploys and will fail** at
-      `configure-aws-credentials` until this exists. It fails safely — nothing
-      reaches ECR, Parameter Store or the box — but it is red every time.
+- [ ] **B. Do the AWS setup for SSM, before the first production deploy.**
+      _Corrected 2026-10-14:_ merges do **not** deploy. The workflows are
+      `ci.yml` (push/PR) and two `workflow_dispatch`-only deploys
+      (`deploy-production.yml`, `deploy-dev.yml` for the shared dev host). A deploy
+      without this setup fails at `configure-aws-credentials` — safely, before
+      anything reaches ECR, Parameter Store or the box.
       Full checklist with the reasoning: [`../../infra/README.md`](../../infra/README.md) §4.
   - [ ] Create the OIDC role — trust `infra/aws-oidc-trust-policy.json`,
         permissions `infra/cicd-deploy-policy.json`. ARN → `AWS_DEPLOY_ROLE_ARN`.
@@ -62,10 +86,10 @@ deployed worker has never run), and a device checklist for the app. The
         by hand or `docker pull` is denied on the box.
   - [ ] Confirm each box is a managed node: `aws ssm describe-instance-information`.
 
-- [ ] **C. Prove staging, then production.** No deploy has ever run through the
-      SSM path — static checks pass, but the first live run is what finds anything
-      wrong. Production is `workflow_dispatch` only so it cannot fire by accident;
-      do not press it until staging is green.
+- [ ] **C. Prove the SSM path on the first production deploy.** _Corrected
+      2026-10-14:_ there is no staging server — production is the only box — so
+      there is no staging deploy to prove first. No deploy has run through the SSM
+      path yet; static checks pass, but watch the first live run closely.
 
 - [ ] **D. After the first green staging deploy:** delete the stale scp'd env
       files at `/home/ec2-user/mapanytime-api.env` and

@@ -27,6 +27,20 @@ the batch was being agreed, which is the same one-copy-in-one-place state that
 lost `FIX-PLAN.md` (F55). Findings raised during a session and never written
 down do not survive it.
 
+## Decided 2026-10-14
+
+| Flag         | Decision                                                                                                                                                        |
+| :----------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **F109**     | **Refund it.** A payment that lands on an already-cancelled order is refunded automatically through the provider adapter. To build — #117                       |
+| **F86**      | **The platform absorbs the gateway fee on a refund**, recorded as a `PLATFORM`-payer charge row so it shows in the ledger instead of vanishing. To build — #118 |
+| **F65**      | **Superseded.** The gateway moves to **Stripe** (#124), so Xendit's rate card is not needed. The rule carries over: seed Stripe's rates before real money       |
+| **F98–F106** | **Superseded by Better Auth** (#122, merged in #123). JWT, refresh-token rotation and `activeSessionId` are gone; sessions are Better Auth's                    |
+| **F114**     | Being fixed as planned: legacy PBKDF2 hashes are re-hashed to scrypt on each user's next sign-in (#123)                                                         |
+
+The web app is also now the **only admin frontend** — the `mapanytime-market-admin`
+repository no longer exists (web #87); its pricing-engine screens are to be
+ported (web #89).
+
 ## Raised 2026-10-14 — project evaluation
 
 | Flag     | Outcome                                                                                                       |
