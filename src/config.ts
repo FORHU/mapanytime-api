@@ -20,6 +20,14 @@ export const REFRESH_TOKEN_SECRET =
  * they do (`web/src/shared/lib/http.ts`, Flutter's `AuthInterceptor`), so a short
  * expiry costs a silent round-trip rather than a visible sign-out.
  */
+/**
+ * Signs Better Auth's session tokens (#122). Required in production — a default
+ * would let anyone who reads the source forge sessions — so a production
+ * process without it refuses to start (better-auth.ts). Development and tests
+ * fall back to a fixed, obviously-not-secret value.
+ */
+export const BETTER_AUTH_SECRET = process.env.BETTER_AUTH_SECRET || '';
+
 export const ACCESS_TOKEN_EXPIRY =
   process.env.ACCESS_TOKEN_EXPIRY || process.env.JWT_EXPIRY || '15m';
 export const REFRESH_TOKEN_EXPIRY = process.env.REFRESH_TOKEN_EXPIRY || '30d';

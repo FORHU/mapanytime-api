@@ -5,6 +5,7 @@ import {
   ApplicationStatus,
 } from '@prisma/client';
 import crypto from 'crypto';
+import { displayName } from '../../src/utils/display-name.util';
 
 /**
  * Volume fixture for map-density testing: ~55 stores scattered across the
@@ -365,6 +366,7 @@ export async function seedBulkMapStores(prisma: PrismaClient) {
           email: spec.email,
           firstName: spec.firstName,
           lastName: spec.lastName,
+          name: displayName(spec),
           passwordHash: hashPassword(BULK_PASSWORD),
           isEmailVerified: true,
           countryCode: 'PH',

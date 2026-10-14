@@ -3,6 +3,7 @@ import { prisma } from '../../utils/prisma';
 import StoreService from '../stores/store.service';
 import OrganizationRepository from '../organization/organization.repository';
 import logger from '../../utils/logger';
+import { displayName } from '../../utils/display-name.util';
 
 type SellerRegistrationData = {
   firstName: string;
@@ -66,6 +67,7 @@ export default class AgentService {
       const user = await tx.users.create({
         data: {
           email: data.email,
+          name: displayName(data),
           passwordHash: `${salt}:${hash}`,
           firstName: data.firstName,
           lastName: data.lastName,

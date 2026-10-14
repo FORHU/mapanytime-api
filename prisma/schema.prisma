@@ -14,7 +14,15 @@ datasource db {
 model Users {
   id              String            @id @default(cuid())
   email           String            @unique
-  passwordHash    String
+  /// Superseded by AuthAccount.password (providerId "credential") under Better
+  /// Auth, which never writes this column — hence nullable. Kept until the
+  /// cutover is proven, then dropped (#122).
+  passwordHash    String?
+  /// Better Auth's required display name (`user.name`). Backfilled from
+  /// first/last name, falling back to the email's local part.
+  name            String
+  /// Better Auth's optional `user.image`.
+  image           String?
   activeSessionId String?
   firstName       String?
   lastName        String?
@@ -36,6 +44,8 @@ model Users {
   roles              Roles[]                     @relation("UserRoles")
   avatarFile         Files?                      @relation("UserAvatar", fields: [avatarFileId], references: [id])
   session            Session[]
+  authSessions       AuthSession[]
+  authAccounts       AuthAccount[]
   passwordResets     PasswordResetTokens[]
   seller             Sellers?
   reviewedSellers    Sellers[]                   @relation("SellerReviewer")
@@ -165,6 +175,61 @@ model Session {
   @@unique([provider, providerUserId])
   @@index([familyId])
   @@index([userId, expiresAt])
+}
+
+/// Better Auth's `session` table (#122). Distinct from `Session` above, which is
+/// the JWT refresh-token chain being retired. `token` is what clients send as
+/// `Authorization: Bearer` (bearer plugin).
+model AuthSession {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user Users @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Better Auth's `account` table: one row per sign-in method. Email/password is
+/// `providerId: "credential"` with `accountId` = the user's id and the bcrypt
+/// hash in `password`; Google/Facebook rows carry the provider's user id.
+model AuthAccount {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user Users @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+/// Better Auth's `verification` table: short-lived values such as the
+/// password-reset codes issued by the email-OTP plugin.
+model AuthVerification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
 }
 
 model Files {

@@ -8,6 +8,7 @@ import AuthService from '../auth/auth.service';
 import { publish } from '../../infrastructure/rabbitmq/publisher';
 import { ROUTING_KEYS } from '../../events/routing-keys';
 import logger from '../../utils/logger';
+import { displayName } from '../../utils/display-name.util';
 import { MAPANYTIME_WEB_APP_EMAIL_URL } from '../../config';
 
 /**
@@ -171,6 +172,7 @@ export default class OrganizationService {
       const created = await tx.users.create({
         data: {
           email,
+          name: displayName({ email, firstName: input.firstName, lastName: input.lastName }),
           passwordHash: `${salt}:${hash}`,
           firstName: input.firstName.trim(),
           lastName: input.lastName.trim(),

@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 import { SYSTEM_ROLES } from '../../src/constants/roles.constant';
+import { displayName } from '../../src/utils/display-name.util';
 
 export async function seedUsers(prisma: PrismaClient) {
   console.log('🌱 Seeding base users...');
@@ -99,6 +100,7 @@ export async function seedUsers(prisma: PrismaClient) {
       user = await prisma.users.create({
         data: {
           ...rest,
+          name: displayName(rest),
           passwordHash: hashedPassword,
           roles: {
             connect: roles.map((roleName: string) => ({ roleName })),

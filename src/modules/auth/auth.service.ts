@@ -24,6 +24,7 @@ import { resolveOrgContext } from '../organization/orgContext';
 import OrganizationRepository from '../organization/organization.repository';
 import type { AuthUser } from './auth.repository';
 import logger from '../../utils/logger';
+import { displayName as userDisplayName } from '../../utils/display-name.util';
 import { publish } from '../../infrastructure/rabbitmq/publisher';
 import { ROUTING_KEYS } from '../../events/routing-keys';
 
@@ -134,6 +135,7 @@ export default class AuthSvc {
         const user = await tx.users.create({
           data: {
             email: data.email,
+            name: userDisplayName(data),
             passwordHash: `${salt}:${hash}`,
             firstName: data.firstName,
             lastName: data.lastName,
@@ -428,6 +430,7 @@ export default class AuthSvc {
       const created = await tx.users.create({
         data: {
           email: profile.email,
+          name: userDisplayName(profile),
           passwordHash: unusablePasswordHash,
           firstName: profile.firstName,
           lastName: profile.lastName,
