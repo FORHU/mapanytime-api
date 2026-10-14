@@ -108,8 +108,7 @@ jobs:
       # looks configured and silently disables whatever reads it.
       - name: Publish project env to Parameter Store
         env:
-          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
-          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -123,6 +122,12 @@ jobs:
           set -euo pipefail
           umask 077
 
+          # The API refuses to start without it (#122) — fail here, before publishing.
+          if [ -z "${BETTER_AUTH_SECRET:-}" ]; then
+            echo "::error::Secret BETTER_AUTH_SECRET is not set for this environment." >&2
+            exit 1
+          fi
+
           cat > env.tmp <<ENVEOF
           NODE_ENV=production
           PORT=${{ env.APP_PORT }}
@@ -130,8 +135,6 @@ jobs:
           CORS_ORIGIN=${{ vars.CORS_ORIGIN }}
           MAPANYTIME_API_PUBLIC_URL=${{ vars.MAPANYTIME_API_PUBLIC_URL }}
           MAPANYTIME_WEB_APP_URL=${{ vars.MAPANYTIME_WEB_APP_URL }}
-          ACCESS_TOKEN_EXPIRY=${{ vars.ACCESS_TOKEN_EXPIRY }}
-          REFRESH_TOKEN_EXPIRY=${{ vars.REFRESH_TOKEN_EXPIRY }}
           REDIS_TTL_SECONDS=${{ vars.REDIS_TTL_SECONDS }}
           REDIS_TLS=false
           RABBITMQ_EXCHANGE=${{ vars.RABBITMQ_EXCHANGE }}
@@ -153,7 +156,7 @@ jobs:
           XENDIT_API_URL=${{ vars.XENDIT_API_URL }}
           ENVEOF
 
-          for k in ACCESS_TOKEN_SECRET REFRESH_TOKEN_SECRET GOOGLE_CLIENT_SECRET \
+          for k in BETTER_AUTH_SECRET GOOGLE_CLIENT_SECRET \
                    FACEBOOK_APP_SECRET OPENAI_API_KEY PAYMONGO_SECRET_KEY \
                    PAYMONGO_WEBHOOK_SECRET_KEY XENDIT_SECRET_KEY XENDIT_WEBHOOK_TOKEN \
                    MAILER_PASSWORD SMTP_PASS; do

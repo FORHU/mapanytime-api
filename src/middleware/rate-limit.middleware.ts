@@ -1,5 +1,5 @@
+import crypto from 'crypto';
 import type { Express, Request } from 'express';
-import jwt from 'jsonwebtoken';
 import rateLimit, {
   ipKeyGenerator,
   RateLimitExceededEventHandler,
@@ -8,7 +8,6 @@ import rateLimit, {
 } from 'express-rate-limit';
 import { FailoverStore, redisHealthy } from './rate-limit-store';
 import {
-  ACCESS_TOKEN_SECRET,
   CREDENTIAL_FAILURE_LIMIT_MAX,
   CREDENTIAL_RATE_LIMIT_MAX,
   GLOBAL_RATE_LIMIT_MAX,
@@ -23,6 +22,7 @@ import {
   resetEmailKey,
 } from '../utils/credential-paths.util';
 import logger from '../utils/logger';
+import { bearerFrom, verifySessionToken } from '../modules/auth/session-token';
 
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
@@ -46,38 +46,36 @@ const configuredLimits: RateLimits = {
 // ipKeyGenerator groups IPv6 addresses by subnet so one host can't rotate through its /64.
 const ipKey = (req: Request) => ipKeyGenerator(clientIp(req) ?? '');
 
-/** The user a bearer token was signed for, or undefined if it doesn't verify. */
-function bearerUserId(req: Request): string | undefined {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return undefined;
-  try {
-    const { userId } = jwt.verify(token, ACCESS_TOKEN_SECRET, { ignoreExpiration: true }) as {
-      userId?: unknown;
-    };
-    return typeof userId === 'string' && userId ? userId : undefined;
-  } catch {
-    return undefined;
-  }
+/**
+ * A short, stable id for the session a bearer token belongs to, or undefined if
+ * the token's signature does not verify (#122). Offline — an HMAC check, no
+ * session or account lookup — and a hash, so the token itself never lands in a
+ * Redis key or a log line.
+ */
+function bearerSessionId(req: Request): string | undefined {
+  const token = bearerFrom(req.headers.authorization);
+  const sessionToken = token ? verifySessionToken(token) : null;
+  if (!sessionToken) return undefined;
+  return crypto.createHash('sha256').update(sessionToken).digest('hex').slice(0, 24);
 }
 
 /**
  * Signed-in callers get a bucket of their own; everyone else shares one per address.
  *
- * The token is only signature-checked — no session or account lookup. A token from a
- * logged-out session still names a real user and `authenticate` 401s it afterwards,
- * while a forged one fails here and falls back to the address, so nobody can claim
- * another user's bucket or mint new ones. Expiry is ignored on purpose: access tokens
- * last 15 minutes, and keying an expired one on a full address bucket would answer 429
- * instead of the 401 that makes clients refresh — the lockout this key exists to end.
+ * The token is only signature-checked. A token from a signed-out or expired session
+ * still carries a genuine signature and keeps its bucket — `authenticate` 401s it
+ * afterwards, which is the answer that sends clients to login rather than a 429 from a
+ * full address bucket. A forged token fails here and falls back to the address, so
+ * nobody can claim another caller's bucket or mint new ones. Under the single-device
+ * rule one session is one user.
  *
  * Anonymous IPv6 is grouped by /64, not the library's /56: carriers hand each phone its
  * own /64, so a /56 on mobile data spans hundreds of subscribers.
  */
 const globalKey = (req: Request) => {
-  const userId = bearerUserId(req);
-  return userId ? `user:${userId}` : `ip:${ipKeyGenerator(clientIp(req) ?? '', 64)}`;
+  const sessionId = bearerSessionId(req);
+  return sessionId ? `session:${sessionId}` : `ip:${ipKeyGenerator(clientIp(req) ?? '', 64)}`;
 };
-
 const skipPreflight = (req: Request) => req.method === 'OPTIONS';
 
 /**
@@ -87,13 +85,13 @@ const skipPreflight = (req: Request) => req.method === 'OPTIONS';
 const logBlocked =
   (name: string, keyOf: (req: Request) => string | undefined): RateLimitExceededEventHandler =>
   (req, res, _next, options) => {
-    const userId = bearerUserId(req);
+    const sessionId = bearerSessionId(req);
     const retryAfter = res.getHeader('Retry-After');
     const key = keyOf(req);
     const ip = ipKey(req);
     logger.warn(
       `[RateLimit] ${name} blocked ${req.method} ${req.originalUrl} ip=${ip} key=${key}` +
-        (userId ? ` user=${userId}` : '') +
+        (sessionId ? ` session=${sessionId}` : '') +
         (retryAfter ? ` retryAfter=${retryAfter}` : ''),
       {
         limiter: name,
@@ -101,7 +99,7 @@ const logBlocked =
         url: req.originalUrl,
         ip,
         key,
-        userId,
+        sessionId,
         retryAfter,
       },
     );

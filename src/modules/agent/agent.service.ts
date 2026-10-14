@@ -4,6 +4,7 @@ import StoreService from '../stores/store.service';
 import OrganizationRepository from '../organization/organization.repository';
 import logger from '../../utils/logger';
 import { displayName } from '../../utils/display-name.util';
+import { hashPassword } from '../auth/password-hash';
 
 type SellerRegistrationData = {
   firstName: string;
@@ -60,15 +61,13 @@ export default class AgentService {
     }
 
     const temporaryPassword = crypto.randomBytes(12).toString('base64url');
-    const salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto.pbkdf2Sync(temporaryPassword, salt, 1000, 64, 'sha512').toString('hex');
+    const passwordHash = await hashPassword(temporaryPassword);
 
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.users.create({
         data: {
           email: data.email,
           name: displayName(data),
-          passwordHash: `${salt}:${hash}`,
           firstName: data.firstName,
           lastName: data.lastName,
           phoneNumber: data.phoneNumber || null,
@@ -77,6 +76,16 @@ export default class AgentService {
           isOnBoarding: true,
           accountStatus: 'ACTIVE',
           roles: { connect: { roleName: 'SELLER' } },
+        },
+      });
+
+      // The temporary password signs in through Better Auth's credential account (#122).
+      await tx.authAccount.create({
+        data: {
+          userId: user.id,
+          accountId: user.id,
+          providerId: 'credential',
+          password: passwordHash,
         },
       });
 

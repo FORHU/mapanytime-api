@@ -194,8 +194,7 @@ removes them. Delete them once the SSM path is proven.
 base64s its env into the `commands[]` parameter, which is safe _there_ because
 every value it sends is `NEXT_PUBLIC_*` — already public, already inlined into
 the client bundle. This service's env file carries `DATABASE_URL`,
-`ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, `PAYMONGO_SECRET_KEY` and the
-mail credentials. SSM retains command text in Run Command history for 30 days,
+`BETTER_AUTH_SECRET`, `PAYMONGO_SECRET_KEY` and the mail credentials. SSM retains command text in Run Command history for 30 days,
 readable by anyone holding `ssm:ListCommands`, and base64 is encoding rather
 than encryption. Copying gc3's approach here would publish every one of those.
 `deploy-remote.sh` says the same thing at the point where someone would be

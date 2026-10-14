@@ -33,7 +33,7 @@ ENV_FILE="$ENV_FILE_PATH"
 # The env file arrives from Parameter Store as a SecureString.
 #
 # It does NOT travel inside the SSM command, and must not be changed to. This
-# file carries DATABASE_URL, ACCESS_TOKEN_SECRET, PAYMONGO_SECRET_KEY and the
+# file carries DATABASE_URL, BETTER_AUTH_SECRET, PAYMONGO_SECRET_KEY and the
 # mail credentials; SSM retains command text in Run Command history for 30 days,
 # readable by anyone holding ssm:ListCommands. Base64 would not help — it is
 # encoding, not encryption. (The sibling gc3-client-web workflow does inline its

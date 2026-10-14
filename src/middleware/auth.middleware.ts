@@ -1,9 +1,43 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import AuthRepo from '../modules/auth/auth.repository';
-import { ACCESS_TOKEN_SECRET } from '../config';
+import { ACCOUNT_BLOCKED_MESSAGE, auth } from '../modules/auth/better-auth';
+import { bearerFrom, verifySessionToken } from '../modules/auth/session-token';
 import { responseError } from '../helpers/response.helper';
 import logger from '../utils/logger';
+
+type SessionUser = NonNullable<Awaited<ReturnType<typeof AuthRepo.findUserById>>>;
+
+/**
+ * Who a bearer token belongs to, under Better Auth sessions (#122):
+ *
+ * - `invalid` — unsigned, forged, unknown, expired or signed-out. The signature
+ *   is checked first and offline, so a forged token never costs a database read.
+ * - `blocked` — a real session whose account is no longer ACTIVE.
+ * - `ok` — the full user, as `req.user` has always carried it.
+ *
+ * Better Auth's `getSession` owns expiry and the sliding window (a session in
+ * use is pushed out again once a day; see better-auth.ts).
+ */
+async function resolveBearer(
+  bearerToken: string,
+): Promise<{ kind: 'invalid' } | { kind: 'blocked' } | { kind: 'ok'; user: SessionUser }> {
+  if (!verifySessionToken(bearerToken)) return { kind: 'invalid' };
+
+  let userId: string | undefined;
+  try {
+    const session = await auth.api.getSession({
+      headers: new Headers({ authorization: `Bearer ${bearerToken}` }),
+    });
+    userId = session?.user.id;
+  } catch (err) {
+    logger.warn(`[Auth] Session lookup failed: ${(err as Error).message}`);
+  }
+  if (!userId) return { kind: 'invalid' };
+
+  const user = await AuthRepo.findUserById(userId);
+  if (!user || user.accountStatus !== 'ACTIVE') return { kind: 'blocked' };
+  return { kind: 'ok', user };
+}
 
 /**
  * Every rejection here is a 401, deliberately.
@@ -15,12 +49,11 @@ import logger from '../utils/logger';
  * "deactivated", and mobile just showed an error and stayed on a dead session.
  *
  * Routing through `responseError` also keeps these bodies on the `ApiError` contract
- * (`status`/`statusCode`/`message`); they were hand-rolled `res.json({ message })`
- * before, in three shapes, none of which matched what clients parse.
+ * (`status`/`statusCode`/`message`).
  */
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   const route = `${req.method} ${req.originalUrl}`;
-  const token = req.headers.authorization?.split(' ')[1];
+  const token = bearerFrom(req.headers.authorization);
 
   if (!token) {
     logger.warn(`[Auth] Rejected ${route} — no token provided`);
@@ -28,39 +61,22 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
   }
 
   try {
-    const decoded = jwt.verify(token, ACCESS_TOKEN_SECRET) as {
-      userId: string;
-      sessionId?: string;
-    };
-    const user = await AuthRepo.findUserById(decoded.userId);
+    const result = await resolveBearer(token);
 
-    // Check the raw database field 'accountStatus'
-    if (!user || user.accountStatus !== 'ACTIVE') {
-      logger.warn(`[Auth] Rejected ${route} — user not found or deactivated (${decoded.userId})`);
-      return responseError(res, 401, 'User not found or deactivated');
-    }
-
-    // Single Active Device Policy. A token is only good while its sessionId is still the user's
-    // active one. Two ways it can stop being active:
-    //   - a newer login on another device replaced it, or
-    //   - the user logged out, which clears activeSessionId entirely.
-    // The null case must reject too: treating "no active session" as "allow" would let every
-    // previously-issued token work again for the rest of its 7-day life the moment anyone logs out.
-    //
-    // A token carrying no sessionId at all is rejected for the same reason. Those predate the
-    // policy and used to be waved through, which meant logging out did not actually stop them —
-    // the one hole in "logout destroys the session". Closing it signs out anyone still holding
-    // such a token; they were already past ACCESS_TOKEN_EXPIRY of being issued one.
-    if (decoded.sessionId !== user.activeSessionId) {
-      logger.warn(`[Auth] Rejected ${route} — session no longer active (${decoded.userId})`);
+    if (result.kind === 'invalid') {
+      logger.warn(`[Auth] Rejected ${route} — no live session for this token`);
       return responseError(res, 401, 'Session expired — please sign in again.');
     }
+    if (result.kind === 'blocked') {
+      logger.warn(`[Auth] Rejected ${route} — account not active`);
+      return responseError(res, 401, ACCOUNT_BLOCKED_MESSAGE);
+    }
 
-    logger.debug(`[Auth] Authenticated ${route} (user: ${user.id})`);
-    req.user = user;
+    logger.debug(`[Auth] Authenticated ${route} (user: ${result.user.id})`);
+    req.user = result.user;
     next();
-  } catch {
-    logger.warn(`[Auth] Rejected ${route} — invalid or expired token`);
+  } catch (err) {
+    logger.error(`[Auth] Authentication error on ${route}: ${(err as Error).message}`);
     return responseError(res, 401, 'Invalid token');
   }
 };
@@ -70,15 +86,11 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
  *
  * For endpoints that serve authenticated and anonymous callers alike — analytics
  * ingestion is the first — where knowing *who* is optional but the request must
- * succeed either way.
- *
- * Every rejection path in `authenticate` becomes "continue anonymously" here,
- * including the single-active-device check: a superseded token identifies a
- * real person, but not one we are willing to attribute events to, so it is
- * treated as no token at all rather than trusted.
+ * succeed either way. Every rejection path in `authenticate` becomes "continue
+ * anonymously" here.
  */
 export const optionalAuthenticate = async (req: Request, _res: Response, next: NextFunction) => {
-  const token = req.headers.authorization?.split(' ')[1];
+  const token = bearerFrom(req.headers.authorization);
   if (!token) return next();
 
   const user = await resolveActiveUser(token);
@@ -88,26 +100,15 @@ export const optionalAuthenticate = async (req: Request, _res: Response, next: N
 };
 
 /**
- * The user an access token belongs to, under exactly the rules `authenticate` applies —
- * valid signature, unexpired, active account, still the active session — or null.
- *
- * For callers outside the HTTP pipeline, such as the socket gateway, that need to know
- * who is asking without a request to hang the answer on.
+ * The user a bearer token belongs to, under exactly the rules `authenticate`
+ * applies, or null. For callers outside the HTTP pipeline, such as the socket
+ * gateway (F107), that need to know who is asking without a request.
  */
 export async function resolveActiveUser(token: string) {
   try {
-    const decoded = jwt.verify(token, ACCESS_TOKEN_SECRET) as {
-      userId: string;
-      sessionId?: string;
-    };
-    const user = await AuthRepo.findUserById(decoded.userId);
-
-    if (!user || user.accountStatus !== 'ACTIVE') return null;
-    if (decoded.sessionId !== user.activeSessionId) return null;
-
-    return user;
+    const result = await resolveBearer(token);
+    return result.kind === 'ok' ? result.user : null;
   } catch {
-    // Malformed or expired token.
     return null;
   }
 }

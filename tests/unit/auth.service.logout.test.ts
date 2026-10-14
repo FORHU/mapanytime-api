@@ -1,8 +1,6 @@
-import jwt from 'jsonwebtoken';
 import AuthSvc from '../../src/modules/auth/auth.service';
-import AuthRepo from '../../src/modules/auth/auth.repository';
 import CacheUtil from '../../src/utils/cache.util';
-import { REFRESH_TOKEN_SECRET } from '../../src/config';
+import { prisma } from '../../src/utils/prisma';
 
 jest.mock('../../src/modules/auth/auth.repository');
 jest.mock('../../src/utils/cache.util', () => ({
@@ -13,101 +11,64 @@ jest.mock('../../src/utils/logger', () => ({
   __esModule: true,
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
-jest.mock('../../src/utils/prisma', () => ({ prisma: {} }));
+jest.mock('../../src/utils/prisma', () => ({
+  prisma: { authSession: { deleteMany: jest.fn() } },
+}));
+jest.mock('../../src/modules/auth/better-auth', () => ({
+  auth: {},
+  ACCOUNT_BLOCKED_MESSAGE: 'User not found or deactivated',
+}));
 
-const mockRepo = AuthRepo as jest.Mocked<typeof AuthRepo>;
+const deleteSessions = prisma.authSession.deleteMany as unknown as jest.Mock;
 const USER_ID = 'user-1';
-
-/** A refresh token that will actually verify, so logout gets as far as the repo. */
-const signedToken = (jti = 'jti-1') =>
-  jwt.sign({ userId: USER_ID, jti, familyId: 'fam-1' }, REFRESH_TOKEN_SECRET, {
-    expiresIn: '30d',
-  });
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockRepo.updateActiveSession.mockResolvedValue({} as never);
-  mockRepo.findSessionByJti.mockResolvedValue({ familyId: 'fam-1' } as never);
-  mockRepo.revokeFamily.mockResolvedValue(1 as never);
+  deleteSessions.mockResolvedValue({ count: 1 });
 });
 
 /**
  * Logout is idempotent by contract. The Flutter client treats any non-401, non-network
- * error here as a failure and deliberately keeps the user signed in, so a rejection for
- * a stale refresh token would leave mobile users with a Logout button that can never
- * succeed — and under single-active-device, a stale refresh token is the normal case.
+ * error here as a failure and deliberately keeps the user signed in, so a logout that
+ * errored on an already-dead session would leave mobile users with a Logout button that
+ * can never succeed.
  */
-describe('AuthSvc.logout', () => {
-  it('clears the active session when no refresh token is supplied', async () => {
+describe('AuthSvc.logout (Better Auth, #122)', () => {
+  it("ends the user's sessions", async () => {
     await expect(AuthSvc.logout(USER_ID)).resolves.toBeDefined();
 
-    expect(mockRepo.updateActiveSession).toHaveBeenCalledWith(USER_ID, null);
-    expect(mockRepo.revokeFamily).not.toHaveBeenCalled();
+    expect(deleteSessions).toHaveBeenCalledWith({ where: { userId: USER_ID } });
   });
 
-  it('succeeds when the refresh token matches no session row', async () => {
-    mockRepo.findSessionByJti.mockResolvedValue(null as never);
+  it('succeeds when there is no session left to end', async () => {
+    deleteSessions.mockResolvedValue({ count: 0 });
 
-    await expect(AuthSvc.logout(USER_ID, signedToken())).resolves.toBeDefined();
-
-    expect(mockRepo.updateActiveSession).toHaveBeenCalledWith(USER_ID, null);
-    expect(mockRepo.revokeFamily).not.toHaveBeenCalled();
-  });
-
-  it('succeeds when the refresh token is unparseable rather than merely stale', async () => {
-    // A token that cannot even be verified must not turn logout into an error — the
-    // authoritative revocation does not depend on it.
-    await expect(AuthSvc.logout(USER_ID, 'not-a-jwt')).resolves.toBeDefined();
-
-    expect(mockRepo.updateActiveSession).toHaveBeenCalledWith(USER_ID, null);
-    expect(mockRepo.revokeFamily).not.toHaveBeenCalled();
-  });
-
-  it('revokes the whole refresh family, not just the presented link', async () => {
-    // Retiring one row would leave its already-rotated successors alive to mint fresh
-    // access tokens, so logout would not actually end the session.
-    await AuthSvc.logout(USER_ID, signedToken());
-
-    expect(mockRepo.revokeFamily).toHaveBeenCalledWith('fam-1', USER_ID);
+    await expect(AuthSvc.logout(USER_ID)).resolves.toBeDefined();
   });
 
   it('is safe to call twice', async () => {
-    await AuthSvc.logout(USER_ID, signedToken());
-    await expect(AuthSvc.logout(USER_ID, signedToken())).resolves.toBeDefined();
-
-    expect(mockRepo.updateActiveSession).toHaveBeenCalledTimes(2);
-  });
-
-  it('kills the active session before tearing down the refresh family', async () => {
-    // Clearing activeSessionId is the authoritative revocation — authenticate() checks
-    // it on every request. If the family teardown runs first and fails, the old order
-    // left a fully live session behind.
-    const order: string[] = [];
-    mockRepo.updateActiveSession.mockImplementation(async () => {
-      order.push('updateActiveSession');
-      return {} as never;
-    });
-    mockRepo.revokeFamily.mockImplementation(async () => {
-      order.push('revokeFamily');
-      return 1 as never;
-    });
-
-    await AuthSvc.logout(USER_ID, signedToken());
-
-    expect(order).toEqual(['updateActiveSession', 'revokeFamily']);
+    await AuthSvc.logout(USER_ID);
+    deleteSessions.mockResolvedValue({ count: 0 });
+    await expect(AuthSvc.logout(USER_ID)).resolves.toBeDefined();
   });
 
   it('drops the cached user so a stale copy cannot outlive the session', async () => {
-    await AuthSvc.logout(USER_ID, signedToken());
+    await AuthSvc.logout(USER_ID);
 
     expect(CacheUtil.del).toHaveBeenCalledWith(`user:${USER_ID}`);
   });
 
-  it('propagates a genuine failure to revoke rather than reporting success', async () => {
-    // The idempotency above is about stale *input*. If the revocation itself fails, the
+  it('propagates a genuine failure to end the session rather than reporting success', async () => {
+    // Idempotency is about an already-dead session. If the delete itself fails, the
     // session really is still alive and saying "logged out" would be a lie.
-    mockRepo.updateActiveSession.mockRejectedValue(new Error('db down') as never);
+    deleteSessions.mockRejectedValue(new Error('db down'));
 
-    await expect(AuthSvc.logout(USER_ID, signedToken())).rejects.toThrow('db down');
+    await expect(AuthSvc.logout(USER_ID)).rejects.toThrow('db down');
+  });
+});
+
+describe('AuthSvc.refreshToken (retired with JWT)', () => {
+  it('always answers 401, which sends an older client back to login', async () => {
+    await expect(AuthSvc.refreshToken()).rejects.toMatchObject({ status: 401 });
   });
 });

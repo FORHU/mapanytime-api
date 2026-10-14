@@ -4,8 +4,8 @@ import {
   PRODUCTSTATUS,
   ApplicationStatus,
 } from '@prisma/client';
-import crypto from 'crypto';
 import { displayName } from '../../src/utils/display-name.util';
+import { hashPassword } from '../../src/modules/auth/password-hash';
 
 /**
  * Volume fixture for map-density testing: ~55 stores scattered across the
@@ -309,14 +309,6 @@ function seededOffsetLatLng(index: number) {
   return { latitude: CENTER.lat + dLat, longitude: CENTER.lng + dLng };
 }
 
-// TODO: duplicated from users.seeder.ts (the copy in multi_store_seller.seeder.ts
-// was just deleted in favor of a shared import) — reuse the same helper instead.
-function hashPassword(raw: string): string {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(raw, salt, 1000, 64, 'sha512').toString('hex');
-  return `${salt}:${hash}`;
-}
-
 const WEEKLY_HOURS = [0, 1, 2, 3, 4, 5, 6].map((dayOfWeek) => ({
   dayOfWeek,
   openMinutes: 8 * 60,
@@ -367,10 +359,18 @@ export async function seedBulkMapStores(prisma: PrismaClient) {
           firstName: spec.firstName,
           lastName: spec.lastName,
           name: displayName(spec),
-          passwordHash: hashPassword(BULK_PASSWORD),
           isEmailVerified: true,
           countryCode: 'PH',
           roles: { connect: [{ roleName: 'SELLER' }] },
+        },
+      });
+      // Better Auth signs in against the credential account, not Users (#122).
+      await prisma.authAccount.create({
+        data: {
+          userId: user.id,
+          accountId: user.id,
+          providerId: 'credential',
+          password: await hashPassword(BULK_PASSWORD),
         },
       });
     }
