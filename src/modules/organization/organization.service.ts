@@ -8,6 +8,7 @@ import AuthService from '../auth/auth.service';
 import { publish } from '../../infrastructure/rabbitmq/publisher';
 import { ROUTING_KEYS } from '../../events/routing-keys';
 import logger from '../../utils/logger';
+import { displayName } from '../../utils/display-name.util';
 import { MAPANYTIME_WEB_APP_EMAIL_URL } from '../../config';
 
 /**
@@ -161,17 +162,14 @@ export default class OrganizationService {
     // having created a user first.
     const permissions = normalizePermissions(input.role, input.permissions);
 
-    // Nobody ever learns this. It exists only so the column is non-null before
-    // the recipient sets their own.
-    const unusablePassword = crypto.randomBytes(32).toString('hex');
-    const salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto.pbkdf2Sync(unusablePassword, salt, 1000, 64, 'sha512').toString('hex');
-
+    // No password yet, so no credential account: the recipient sets one with the
+    // setup code below, and resetPassword creates the account then (#122).
+    // Until that happens, email/password sign-in has nothing to match.
     const user = await prisma.$transaction(async (tx) => {
       const created = await tx.users.create({
         data: {
           email,
-          passwordHash: `${salt}:${hash}`,
+          name: displayName({ email, firstName: input.firstName, lastName: input.lastName }),
           firstName: input.firstName.trim(),
           lastName: input.lastName.trim(),
           isEmailVerified: true,

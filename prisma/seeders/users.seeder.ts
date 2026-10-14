@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
-import crypto from 'crypto';
 import { SYSTEM_ROLES } from '../../src/constants/roles.constant';
+import { displayName } from '../../src/utils/display-name.util';
+import { hashPassword } from '../../src/modules/auth/password-hash';
 
 export async function seedUsers(prisma: PrismaClient) {
   console.log('🌱 Seeding base users...');
@@ -92,17 +93,22 @@ export async function seedUsers(prisma: PrismaClient) {
     });
 
     if (!user) {
-      const salt = crypto.randomBytes(16).toString('hex');
-      const hash = crypto.pbkdf2Sync(passwordRaw, salt, 1000, 64, 'sha512').toString('hex');
-      const hashedPassword = `${salt}:${hash}`;
-
       user = await prisma.users.create({
         data: {
           ...rest,
-          passwordHash: hashedPassword,
+          name: displayName(rest),
           roles: {
             connect: roles.map((roleName: string) => ({ roleName })),
           },
+        },
+      });
+      // Better Auth signs in against the credential account, not Users (#122).
+      await prisma.authAccount.create({
+        data: {
+          userId: user.id,
+          accountId: user.id,
+          providerId: 'credential',
+          password: await hashPassword(passwordRaw),
         },
       });
       console.log(`✅ Created user: ${rest.email}`);

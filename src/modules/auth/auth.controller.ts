@@ -280,19 +280,13 @@ export default class AuthController {
   }
 
   /**
-   * Refresh access token
+   * Retired with JWT (#122) — always 401, whatever the body. Kept routed so
+   * installed clients that still call it get the 401 that sends them to login,
+   * rather than a 404 they would not recognise as "signed out".
    */
-  static async refreshToken(req: Request, res: Response, next: NextFunction) {
-    const schema = Joi.object({
-      refreshToken: Joi.string().required(),
-    });
-
-    const { error, value } = schema.validate(req.body);
-    if (error) return responseError(res, 400, error.message);
-
+  static async refreshToken(_req: Request, _res: Response, next: NextFunction) {
     try {
-      const data = await AuthSvc.refreshToken(value.refreshToken);
-      return responseSuccess(res, 200, data, 'Token refreshed successfully');
+      await AuthSvc.refreshToken();
     } catch (error) {
       next(error);
     }
@@ -301,41 +295,28 @@ export default class AuthController {
   /**
    * Logout — idempotent by contract.
    *
-   * Anything short of "you are not authenticated at all" answers 200, including a
-   * missing, unknown, or already-revoked refresh token. The access token in the
-   * Authorization header is what identifies the session to kill; the body token is
-   * only a hint about *which* refresh row to drop.
+   * Anything short of "you are not authenticated at all" answers 200. The bearer
+   * token in the Authorization header identifies the session to end; any body —
+   * including the `refreshToken` older clients still send — is ignored.
    *
    * This is load-bearing for the Flutter client: its repository treats any non-401,
    * non-network error from this endpoint as a failure and deliberately keeps the user
    * signed in, so a 400 here would leave mobile users with a Logout button that can
-   * never succeed. Under the single-active-device policy a stale refresh token is the
-   * normal case, not an exceptional one.
+   * never succeed.
    */
   static async logout(req: Request, res: Response, next: NextFunction) {
     try {
-      const schema = Joi.object({
-        refreshToken: Joi.string().allow('', null).optional(),
-      });
-
-      // Ignore a malformed body outright rather than rejecting it — see above.
-      const { value } = schema.validate(req.body ?? {}, VALIDATE_OPTS);
-      const refreshToken = value?.refreshToken || undefined;
       const user = req.user as Users;
       const userId = user?.id;
 
-      logger.info(
-        `[Auth] Logout request received (user: ${userId ?? 'none'}, hasRefreshToken: ${Boolean(
-          refreshToken,
-        )})`,
-      );
+      logger.info(`[Auth] Logout request received (user: ${userId ?? 'none'})`);
 
       if (!userId) {
         logger.warn('[Auth] Logout rejected — no authenticated user');
         return responseError(res, 401, 'Unauthorized');
       }
 
-      const result = await AuthSvc.logout(userId, refreshToken);
+      const result = await AuthSvc.logout(userId);
 
       return responseSuccess(res, 200, {}, result.message);
     } catch (error) {

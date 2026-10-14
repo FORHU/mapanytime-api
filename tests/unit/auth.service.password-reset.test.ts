@@ -24,8 +24,11 @@ jest.mock('../../src/utils/prisma', () => ({
       updateMany: jest.fn(),
     },
     users: { update: jest.fn() },
-    session: { deleteMany: jest.fn() },
   },
+}));
+jest.mock('../../src/modules/auth/better-auth', () => ({
+  auth: {},
+  ACCOUNT_BLOCKED_MESSAGE: 'User not found or deactivated',
 }));
 
 const mockRepo = AuthRepo as jest.Mocked<typeof AuthRepo>;
@@ -38,7 +41,6 @@ const mockPrisma = prisma as unknown as {
     updateMany: jest.Mock;
   };
   users: { update: jest.Mock };
-  session: { deleteMany: jest.Mock };
 };
 
 const USER = { id: 'user-1', email: 'buyer@example.com', passwordHash: 'salt:hash' };
@@ -121,8 +123,9 @@ describe('AuthSvc.resetPassword', () => {
     mockPrisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
         passwordResetTokens: { update: jest.fn() },
+        authAccount: { upsert: jest.fn() },
         users: { update: jest.fn() },
-        session: { deleteMany: jest.fn() },
+        authSession: { deleteMany: jest.fn() },
       }),
     );
   });
@@ -204,12 +207,13 @@ describe('AuthSvc.resetPassword', () => {
   // of nothing.
   it('signs every device out on success', async () => {
     givenToken();
-    const session = { deleteMany: jest.fn() };
+    const authSession = { deleteMany: jest.fn() };
     mockPrisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
         passwordResetTokens: { update: jest.fn() },
+        authAccount: { upsert: jest.fn() },
         users: { update: jest.fn() },
-        session,
+        authSession,
       }),
     );
 
@@ -219,7 +223,39 @@ describe('AuthSvc.resetPassword', () => {
       newPassword: 'a-new-password',
     });
 
-    expect(session.deleteMany).toHaveBeenCalledWith({ where: { userId: USER.id } });
+    expect(authSession.deleteMany).toHaveBeenCalledWith({ where: { userId: USER.id } });
+  });
+
+  /**
+   * Better Auth signs in against the credential account (#122). Upserted, so a
+   * Google/Facebook-only user — who has none — gets one here, and hashed as the
+   * new prefixed scrypt rather than the legacy PBKDF2 (F114).
+   */
+  it('writes the new password into the credential account', async () => {
+    givenToken();
+    const authAccount = { upsert: jest.fn() };
+    mockPrisma.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        passwordResetTokens: { update: jest.fn() },
+        authAccount,
+        users: { update: jest.fn() },
+        authSession: { deleteMany: jest.fn() },
+      }),
+    );
+
+    await AuthSvc.resetPassword({
+      email: USER.email,
+      code: '1234',
+      newPassword: 'a-new-password',
+    });
+
+    const call = authAccount.upsert.mock.calls[0][0];
+    expect(call.where).toEqual({
+      providerId_accountId: { providerId: 'credential', accountId: USER.id },
+    });
+    expect(call.create).toMatchObject({ userId: USER.id, providerId: 'credential' });
+    expect(call.create.password).toMatch(/^\$scrypt\$/);
+    expect(call.update.password).toBe(call.create.password);
   });
 
   it('gives the same error for an unknown address as for a bad code', async () => {

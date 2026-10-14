@@ -5,7 +5,7 @@ Authentication pass raised and worked **2026-09-07** (F98–F106).
 Project evaluation raised and partly worked **2026-10-14** (F107–F113; overview in
 [`PROJECT-EVALUATION.md`](PROJECT-EVALUATION.md)).
 Continues the numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently
-F39–F113.
+F39–F114.
 
 F84–F88 come from a sweep of the returns and refund path — the current branch's
 own module, and ground neither register had covered.
@@ -127,6 +127,22 @@ provider reference. Neither notification is sent for such an order. Pinned in
 
 (2) prevents the case; (1) cleans up whatever still gets through. They are not
 alternatives for long.
+
+### F114. Passwords are PBKDF2 at 1,000 iterations — BEING FIXED IN #122
+
+Every password is hashed as PBKDF2-SHA512 with **1,000 iterations**, stored as
+`salt:hash` (`auth.service.ts` register and reset, `agent.service.ts`,
+`organization.service.ts`). OWASP's current figure for PBKDF2-SHA512 is about
+210,000. A leaked `Users` table is therefore cheap to brute-force. The
+`bcrypt`-based `utils/password.util.ts` exists but nothing in the auth path
+uses it.
+
+**Being fixed by the Better Auth migration (#122):** new hashes are Better
+Auth's scrypt, prefixed `$scrypt$` (the two formats are otherwise the same
+shape); legacy hashes still verify, and each is re-hashed to scrypt on its
+owner's next successful sign-in, so nobody is forced to reset. Accounts that
+never sign in again keep the weak hash — consider a forced reset for them
+once most active users have migrated.
 
 ### 🔴 F113. The deployed worker never runs — FIXED IN CODE, NOT YET CONFIRMED ON A HOST
 

@@ -1,7 +1,6 @@
 import express from 'express';
-import jwt from 'jsonwebtoken';
 import request from 'supertest';
-import { ACCESS_TOKEN_SECRET } from '../../src/config';
+import { signSessionToken } from '../../src/modules/auth/session-token';
 import { applyRateLimits, createRateLimiters } from '../../src/middleware/rate-limit.middleware';
 
 jest.mock('../../src/utils/logger', () => ({
@@ -43,7 +42,8 @@ async function send(times: number, call: () => request.Test) {
   return statuses;
 }
 
-const tokenFor = (userId: string, secret = ACCESS_TOKEN_SECRET) => jwt.sign({ userId }, secret);
+/** A bearer token as /login issues it (#122): the user's session token plus its signature. */
+const tokenFor = (name: string) => signSessionToken(`session-of-${name}`);
 
 /** GET /api/v1/stores as it arrives through Cloudflare from `ip`, optionally signed in. */
 const getStores = (app: express.Express, ip: string, token?: string) => {
@@ -140,7 +140,7 @@ describe('rate limits', () => {
 
     it('counts a forged or malformed token against the address', async () => {
       const app = buildApp();
-      const forged = tokenFor('alice', 'not-the-secret');
+      const forged = `session-of-alice.not-the-signature`;
       await send(LIMITS.global - 1, () => getStores(app, CGNAT_IP, forged));
       expect((await getStores(app, CGNAT_IP, 'garbage')).status).toBe(200);
       expect((await getStores(app, CGNAT_IP)).status).toBe(429);
@@ -148,13 +148,15 @@ describe('rate limits', () => {
       expect((await getStores(app, CGNAT_IP, tokenFor('alice'))).status).toBe(200);
     });
 
-    it('keys an expired token on its user, so a full address bucket cannot block the refresh', async () => {
+    it('keys an ended session on its own bucket, so a full address bucket answers 401 not 429', async () => {
       const app = buildApp();
       await send(LIMITS.global, () => getStores(app, CGNAT_IP));
       expect((await getStores(app, CGNAT_IP)).status).toBe(429);
 
-      const expired = jwt.sign({ userId: 'alice' }, ACCESS_TOKEN_SECRET, { expiresIn: -10 });
-      expect((await getStores(app, CGNAT_IP, expired)).status).toBe(200);
+      // Signed out or expired: the signature is still genuine, so the token keeps its
+      // own bucket and reaches authenticate, whose 401 sends the client to login.
+      const ended = tokenFor('alice');
+      expect((await getStores(app, CGNAT_IP, ended)).status).toBe(200);
     });
 
     it('groups anonymous IPv6 by /64, so neighbouring phones in a /56 stay apart', async () => {

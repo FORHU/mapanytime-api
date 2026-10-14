@@ -126,14 +126,9 @@ jobs:
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD || '' }}
           REDIS_TLS: ${{ secrets.REDIS_TLS || 'false' }}
           REDIS_TTL_SECONDS: ${{ secrets.REDIS_TTL_SECONDS || '3600' }}
-          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
-          ACCESS_TOKEN_EXPIRY: ${{ secrets.ACCESS_TOKEN_EXPIRY || '15m' }}
-          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
-          # Was '1d' here while the code default was '30d'. Since the session row
-          # now derives its expiry from this value (F99), leaving it at a day
-          # would cap every session at a day — a regression from the effective
-          # seven the old 7d access token gave. Aligned with the code default.
-          REFRESH_TOKEN_EXPIRY: ${{ secrets.REFRESH_TOKEN_EXPIRY || '30d' }}
+          # Better Auth (#122). No fallback: the API refuses to start in
+          # production without it. Replaces the four JWT settings.
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           MAILER_TRANSPORT_HOST: ${{ secrets.MAILER_TRANSPORT_HOST || secrets.SMTP_HOST || 'smtp.ethereal.email' }}
           MAILER_TRANSPORT_PORT: ${{ secrets.MAILER_TRANSPORT_PORT || secrets.SMTP_PORT || '587' }}
           MAILER_TRANSPORT_SECURE: ${{ secrets.MAILER_TRANSPORT_SECURE || 'false' }}
@@ -180,6 +175,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          # The API refuses to start in production without it (#122). Failing
+          # here stops the deploy before the env is published or a container is
+          # swapped, instead of after — which would be downtime, then a red run.
+          if [[ -z "${BETTER_AUTH_SECRET:-}" ]]; then
+            echo "::error::Repository secret BETTER_AUTH_SECRET is not set (production environment)." >&2
+            exit 1
+          fi
+
           # printf per line rather than a heredoc. An unquoted `<< EOF` expands
           # its body, so a secret containing a backtick, `$(` or a backslash is
           # interpreted by the shell instead of stored — DATABASE_URL,
@@ -197,10 +200,7 @@ jobs:
             printf 'REDIS_PASSWORD=%s\n'              "$REDIS_PASSWORD"
             printf 'REDIS_TLS=%s\n'                   "$REDIS_TLS"
             printf 'REDIS_TTL_SECONDS=%s\n'           "$REDIS_TTL_SECONDS"
-            printf 'ACCESS_TOKEN_SECRET=%s\n'         "$ACCESS_TOKEN_SECRET"
-            printf 'ACCESS_TOKEN_EXPIRY=%s\n'         "$ACCESS_TOKEN_EXPIRY"
-            printf 'REFRESH_TOKEN_SECRET=%s\n'        "$REFRESH_TOKEN_SECRET"
-            printf 'REFRESH_TOKEN_EXPIRY=%s\n'        "$REFRESH_TOKEN_EXPIRY"
+            printf 'BETTER_AUTH_SECRET=%s\n'          "$BETTER_AUTH_SECRET"
             printf 'MAILER_TRANSPORT_HOST=%s\n'       "$MAILER_TRANSPORT_HOST"
             printf 'MAILER_TRANSPORT_PORT=%s\n'       "$MAILER_TRANSPORT_PORT"
             printf 'MAILER_TRANSPORT_SECURE=%s\n'     "$MAILER_TRANSPORT_SECURE"

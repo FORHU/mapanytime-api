@@ -14,6 +14,11 @@ jest.mock('../../src/utils/logger', () => ({
   default: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 jest.mock('../../src/utils/prisma', () => ({ prisma: { $transaction: jest.fn() } }));
+// Registration writes the credential account itself; Better Auth is not involved.
+jest.mock('../../src/modules/auth/better-auth', () => ({
+  auth: {},
+  ACCOUNT_BLOCKED_MESSAGE: 'User not found or deactivated',
+}));
 
 const mockRepo = AuthRepo as jest.Mocked<typeof AuthRepo>;
 const mockS3 = S3Util as jest.Mocked<typeof S3Util>;
@@ -22,6 +27,7 @@ const mockTransaction = prisma.$transaction as unknown as jest.Mock;
 /** The `tx` client handed to the transaction callback. */
 const tx = {
   users: { create: jest.fn() },
+  authAccount: { create: jest.fn() },
   buyers: { create: jest.fn() },
   buyerAddresses: {
     create: jest.fn(),
@@ -142,6 +148,25 @@ describe('AuthSvc.register — buyer valid ID', () => {
     await expect(AuthSvc.register(WITH_ID)).rejects.toMatchObject({ status: 400 });
 
     expect(mockS3.putObject).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Better Auth signs in against the credential account, never Users (#122), so a
+   * sign-up that skipped it would create an account nobody can log in to. The hash
+   * must be the new prefixed scrypt, not the legacy PBKDF2 (F114).
+   */
+  it('creates the credential account Better Auth signs in against', async () => {
+    await AuthSvc.register(BASE);
+
+    expect(tx.authAccount.create).toHaveBeenCalledWith({
+      data: {
+        userId: 'user-1',
+        accountId: 'user-1',
+        providerId: 'credential',
+        password: expect.stringMatching(/^\$scrypt\$/),
+      },
+    });
+    expect(tx.users.create.mock.calls[0][0].data).not.toHaveProperty('passwordHash');
   });
 
   it('creates no ID check for a plain sign-up', async () => {
