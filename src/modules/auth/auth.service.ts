@@ -1,24 +1,17 @@
 import AuthRepo from './auth.repository';
 import crypto from 'crypto';
-import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import { OAuth2Client } from 'google-auth-library';
+import { APIError } from 'better-auth/api';
 import { Users } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import { BUYERIDTYPE, DOCUMENTTYPES, SEX } from '@prisma/client';
 import S3Util from '../../utils/s3.util';
 import AddressService from '../addresses/address.service';
-import {
-  ACCESS_TOKEN_SECRET,
-  REFRESH_TOKEN_SECRET,
-  ACCESS_TOKEN_EXPIRY,
-  REFRESH_TOKEN_EXPIRY,
-  REFRESH_TOKEN_EXPIRY_MS,
-  REFRESH_TOKEN_GRACE_MS,
-  FACEBOOK_APP_ID,
-  FACEBOOK_APP_SECRET,
-  GOOGLE_CLIENT_ID,
-} from '../../config';
+import { FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, GOOGLE_CLIENT_ID } from '../../config';
+import { ACCOUNT_BLOCKED_MESSAGE, auth } from './better-auth';
+import { hashPassword } from './password-hash';
+import { signSessionToken } from './session-token';
 import CacheUtil from '../../utils/cache.util';
 import { resolveOrgContext } from '../organization/orgContext';
 import OrganizationRepository from '../organization/organization.repository';
@@ -48,32 +41,24 @@ const MAX_RESET_ATTEMPTS = 5;
  */
 const INVALID_CREDENTIALS = 'Incorrect email or password.';
 
-/**
- * Fixed salt/hash used to run a real PBKDF2 pass for unknown-email login attempts, so
- * "no such user" costs the same as "wrong password" and can't be timed apart.
- */
-const DUMMY_SALT = 'ponytail-dummy-salt';
-const DUMMY_HASH_HEX = crypto.pbkdf2Sync('dummy', DUMMY_SALT, 1000, 64, 'sha512').toString('hex');
+/** Whether a Better Auth error is the blocked-account refusal from the session hook. */
+const isBlockedAccount = (err: unknown) =>
+  err instanceof APIError && err.message === ACCOUNT_BLOCKED_MESSAGE;
 
 /**
- * Constant-time comparison of a stored hex digest against a freshly computed one.
- *
- * `a !== b` returns as soon as it finds a differing byte, so how long it takes leaks how
- * much of the digest the attacker guessed correctly — enough, over many samples, to
- * reconstruct it byte by byte. `timingSafeEqual` always reads both buffers fully.
- *
- * It throws on length mismatch rather than returning false, so the lengths are compared
- * first; that check is safe to short-circuit because the length of a digest is not a
- * secret.
- *
- * The stored value is decoded *before* that check: `Buffer.from` stops at the first
- * non-hex character, so a corrupt column can pass a string-length check and still decode
- * short, turning a clean 401 into a 500.
+ * Starts a Better Auth session for a user whose identity is already proven (a
+ * verified Google/Facebook token). The session hooks in better-auth.ts still
+ * run: a blocked account is refused, and the user's other sessions end.
  */
-function timingSafeEqualHex(storedHex: string, computed: Buffer): boolean {
-  if (typeof storedHex !== 'string') return false;
-  const stored = Buffer.from(storedHex, 'hex');
-  return stored.length === computed.length && crypto.timingSafeEqual(stored, computed);
+async function startSession(userId: string): Promise<string> {
+  const ctx = await auth.$context;
+  try {
+    const session = await ctx.internalAdapter.createSession(userId);
+    return session.token;
+  } catch (err) {
+    if (isBlockedAccount(err)) throw { status: 401, message: ACCOUNT_BLOCKED_MESSAGE };
+    throw err;
+  }
 }
 
 export default class AuthSvc {
@@ -111,8 +96,9 @@ export default class AuthSvc {
       throw { status: 400, message: 'Email already exists' };
     }
 
-    const salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512').toString('hex');
+    // Hashed before the transaction: scrypt is deliberately slow, and the
+    // transaction should hold its connection only for the writes.
+    const passwordHash = await hashPassword(data.password);
 
     // The ID photo goes to S3 before the transaction (S3 can't join it); if the
     // transaction then fails, the object is deleted again below.
@@ -136,7 +122,6 @@ export default class AuthSvc {
           data: {
             email: data.email,
             name: userDisplayName(data),
-            passwordHash: `${salt}:${hash}`,
             firstName: data.firstName,
             lastName: data.lastName,
             middleName: data.middleName,
@@ -147,6 +132,16 @@ export default class AuthSvc {
             isEmailVerified: true,
             accountStatus: 'ACTIVE',
             roles: { connect: rolesToConnect },
+          },
+        });
+
+        // Better Auth signs in against this row, not Users (#122).
+        await tx.authAccount.create({
+          data: {
+            userId: user.id,
+            accountId: user.id,
+            providerId: 'credential',
+            password: passwordHash,
           },
         });
 
@@ -319,34 +314,34 @@ export default class AuthSvc {
     return null;
   }
 
+  /**
+   * Email/password sign-in through Better Auth (#122). Better Auth verifies the
+   * password against the credential account — and hashes even for an unknown
+   * address, so "no such user" cannot be timed apart from "wrong password". The
+   * session hooks refuse a blocked account and end the user's other sessions.
+   */
   static async login(data: { email: string; password: string; roleName?: string }) {
     logger.info(`[Auth] Login attempt for ${data.email} as ${data.roleName || 'any'}`);
 
-    const user = await AuthRepo.findUserByEmail(data.email);
-
-    // Always hash + compare, even for an unknown account, using a fixed dummy
-    // salt/hash — otherwise "no such user" returns faster than "wrong password"
-    // and leaks which emails are registered via response timing. The defaults also
-    // cover a stored hash with no ':' separator, which would otherwise leave `salt`
-    // undefined and make pbkdf2Sync throw a 500.
-    const [salt = DUMMY_SALT, storedHashHex = DUMMY_HASH_HEX] = user?.passwordHash
-      ? user.passwordHash.split(':')
-      : [DUMMY_SALT, DUMMY_HASH_HEX];
-
-    const computed = crypto.pbkdf2Sync(data.password, salt, 1000, 64, 'sha512');
-
-    // One branch for every failure — unknown account, social-only account, wrong
-    // password. Splitting them apart is what reopens the enumeration oracle.
-    if (!user || !user.passwordHash || !timingSafeEqualHex(storedHashHex, computed)) {
+    let signedIn: { token: string; user: { id: string } };
+    try {
+      signedIn = await auth.api.signInEmail({
+        body: { email: data.email, password: data.password },
+      });
+    } catch (err) {
+      if (isBlockedAccount(err)) {
+        logger.warn(`[Auth] Login refused — account blocked: ${data.email}`);
+        throw { status: 401, message: ACCOUNT_BLOCKED_MESSAGE };
+      }
+      // One answer for every other failure — unknown account, social-only
+      // account, wrong password. Splitting them reopens the enumeration oracle.
       logger.warn(`[Auth] Login failed for ${data.email}`);
       throw { status: 401, message: INVALID_CREDENTIALS };
     }
 
-    const updatedUser = await AuthRepo.updateUserLoginStatus(user.id);
+    const updatedUser = await AuthRepo.updateUserLoginStatus(signedIn.user.id);
     logger.info(`[Auth] Login successful: ${updatedUser.id} (${data.email})`);
-    return this.generateAuthResponse(updatedUser as Users, 'local', true, {
-      revokeOtherSessions: true,
-    });
+    return this.buildAuthResponse(updatedUser as Users, signedIn.token);
   }
 
   /**
@@ -417,21 +412,14 @@ export default class AuthSvc {
     const displayName =
       [profile.firstName, profile.lastName].filter(Boolean).join(' ') || 'New User';
 
-    // `passwordHash` has no nullable variant in the schema, so a social-only account
-    // still needs a value in it. This one is never derived from anything the user
-    // typed — pbkdf2Sync would have to invert a random 512-bit hash to produce it —
-    // so `login()`'s ordinary password check rejects it for every input, which is
-    // exactly the "social-only account" case that check already defends against.
-    const unusablePasswordHash = `${crypto.randomBytes(16).toString('hex')}:${crypto
-      .randomBytes(64)
-      .toString('hex')}`;
-
+    // No credential account is created: a social-only user has no password, so
+    // email/password sign-in finds nothing to verify and fails like any wrong
+    // password — until they set one through forgot-password.
     await prisma.$transaction(async (tx) => {
       const created = await tx.users.create({
         data: {
           email: profile.email,
           name: userDisplayName(profile),
-          passwordHash: unusablePasswordHash,
           firstName: profile.firstName,
           lastName: profile.lastName,
           isEmailVerified: true,
@@ -447,6 +435,37 @@ export default class AuthSvc {
     user = await AuthRepo.findUserByEmail(profile.email);
     if (!user) throw { status: 500, message: 'Could not create account' };
     return user;
+  }
+
+  /**
+   * Records which provider identity signed this user in, as a Better Auth
+   * account row (`providerId` + the provider's own user id). Replaces the
+   * provider columns on the retired JWT `Session` table.
+   */
+  private static async linkProviderAccount(
+    userId: string,
+    providerId: 'google' | 'facebook',
+    providerUserId: string,
+  ) {
+    await prisma.authAccount.upsert({
+      where: { providerId_accountId: { providerId, accountId: providerUserId } },
+      create: { userId, providerId, accountId: providerUserId },
+      update: {},
+    });
+  }
+
+  /** Shared tail of every social sign-in: link the identity, start a session, respond. */
+  private static async completeSocialLogin(
+    user: { id: string },
+    providerId: 'google' | 'facebook',
+    providerUserId: string,
+    email: string,
+  ) {
+    await this.linkProviderAccount(user.id, providerId, providerUserId);
+    const sessionToken = await startSession(user.id);
+    const updatedUser = await AuthRepo.updateUserLoginStatus(user.id);
+    logger.info(`[Auth] ${providerId} login successful: ${updatedUser.id} (${email})`);
+    return this.buildAuthResponse(updatedUser as Users, sessionToken);
   }
 
   /**
@@ -476,14 +495,7 @@ export default class AuthSvc {
       lastName: profile.last_name,
     });
 
-    const updatedUser = await AuthRepo.updateUserLoginStatus(user.id);
-    logger.info(`[Auth] Facebook login successful: ${updatedUser.id} (${profile.email})`);
-
-    return this.generateAuthResponse(updatedUser as Users, 'facebook', true, {
-      revokeOtherSessions: true,
-      providerUserId: profile.id,
-      providerAvatarUrl: profile.picture?.data?.url,
-    });
+    return this.completeSocialLogin(user, 'facebook', profile.id, profile.email);
   }
 
   /**
@@ -531,14 +543,7 @@ export default class AuthSvc {
       lastName: payload.family_name,
     });
 
-    const updatedUser = await AuthRepo.updateUserLoginStatus(user.id);
-    logger.info(`[Auth] Google login successful: ${updatedUser.id} (${payload.email})`);
-
-    return this.generateAuthResponse(updatedUser as Users, 'google', true, {
-      revokeOtherSessions: true,
-      providerUserId: payload.sub,
-      providerAvatarUrl: payload.picture,
-    });
+    return this.completeSocialLogin(user, 'google', payload.sub, payload.email);
   }
 
   /**
