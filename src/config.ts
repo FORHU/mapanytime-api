@@ -15,6 +15,14 @@ export const NODE_ENV = process.env.NODE_ENV || 'development';
  * expiry settings, removed with JWT.
  */
 export const BETTER_AUTH_SECRET = process.env.BETTER_AUTH_SECRET || '';
+
+/**
+ * Better Auth's base URL (its standard `BETTER_AUTH_URL`), when it must differ from
+ * `MAPANYTIME_API_PUBLIC_URL` — in local development, where that one stays unset
+ * because Xendit refuses a localhost return URL. Production leaves this unset and
+ * uses `MAPANYTIME_API_PUBLIC_URL` for both (better-auth.ts).
+ */
+export const BETTER_AUTH_URL = process.env.BETTER_AUTH_URL || '';
 /**
  * A positive whole number from the environment, or `fallback` when unset.
  *
