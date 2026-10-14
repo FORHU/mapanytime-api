@@ -190,12 +190,25 @@ jobs:
             "docker run --rm --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} --entrypoint npx ${IMAGE} prisma migrate deploy"
             "docker run -d --name ${{ env.CONTAINER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} -p 127.0.0.1:${{ env.HOST_PORT }}:${{ env.APP_PORT }} ${IMAGE}"
             # Production runs a worker beside the API from the same image
-            # (mapanytime-api-worker, `npm run worker`). Without it anything
-            # queued on RabbitMQ is accepted and never processed, which reads
-            # as the API silently dropping jobs rather than as a missing
-            # container.
+            # (mapanytime-api-worker). Without it anything queued on RabbitMQ is
+            # accepted and never processed, which reads as the API silently
+            # dropping jobs rather than as a missing container.
+            #
+            # `start:worker` runs the compiled worker. `npm run worker` is
+            # nodemon + ts-node over ./src/worker.ts, which the image does not
+            # contain; nodemon then waits for file changes instead of exiting,
+            # so the container stayed "Up" with nothing running (F113).
+            #
+            # No -p: the health port is only probed from inside the container
+            # below. It used to publish 127.0.0.1:${WORKER_HOST_PORT}:${WORKER_PORT},
+            # neither of which this workflow defines, so docker got `-p 127.0.0.1::`
+            # and refused to start the worker at all. Host ports on this box are
+            # allocated per project (00-PORTS.md); this needs none.
             "docker rm -f ${{ env.WORKER }} 2>/dev/null || true"
-            "docker run -d --name ${{ env.WORKER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} -p 127.0.0.1:${{ env.WORKER_HOST_PORT }}:${{ env.WORKER_PORT }} ${IMAGE} npm run worker"
+            "docker run -d --name ${{ env.WORKER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} ${IMAGE} npm run start:worker"
+            # /live answers only once the worker's consumers and scheduler are up.
+            # Single-quoted so the container's shell, not the host's, expands the port.
+            "for i in $(seq 1 20); do docker exec ${{ env.WORKER }} sh -c 'wget -q -O /dev/null http://127.0.0.1:${WORKER_HEALTH_PORT:-8080}/live' && exit 0; sleep 3; done; echo 'Worker did not start within 60 seconds:'; docker logs ${{ env.WORKER }} --tail 50; exit 1"
           )
 
           # jq builds the JSON, so a quote inside any command cannot break it.

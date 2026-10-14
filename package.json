@@ -9,6 +9,7 @@
     "worker": "nodemon --watch src --ext ts --exec ts-node ./src/worker.ts",
     "build": "tsc",
     "start": "node ./dist/src/server.js",
+    "start:worker": "node ./dist/src/worker.js",
     "lint": "eslint \"src/**/*.ts\" \"prisma/**/*.ts\"",
     "lint:fix": "eslint \"src/**/*.ts\" \"prisma/**/*.ts\" --fix",
     "format": "prettier . --write",

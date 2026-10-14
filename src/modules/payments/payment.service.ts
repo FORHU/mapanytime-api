@@ -7,6 +7,7 @@ import { MockProvider } from './providers/mock.provider';
 import { XenditProvider } from './providers/xendit.provider';
 import PricingEngineService, { OrderPricingResult } from '../pricing/pricing-engine.service';
 import InventoryStockRepository from '../inventory/inventoryStock.repository';
+import logger from '../../utils/logger';
 
 /** Peso amount for buyer-facing copy: `1500` -> `₱1,500`. */
 const formatPeso = (amount: number) => `₱${amount.toLocaleString('en-PH')}`;
@@ -634,10 +635,35 @@ export default class PaymentService {
         });
 
         // Advance Order to PROCESSING
-        await tx.orders.updateMany({
+        const advanced = await tx.orders.updateMany({
           where: { id: orderId, status: 'PENDING' },
           data: { status: 'PROCESSING' },
         });
+
+        // F109: money arrived for an order that is no longer waiting for it. The stale-order
+        // sweeper cancels a PENDING order after 15 minutes and releases its stock, but the
+        // gateway session it was paid through stays open longer than that, so a buyer who
+        // pays late is charged for an order that no longer exists. Nothing refunds them
+        // automatically yet — that is a decision, not a fix — so make it impossible to miss.
+        if (advanced.count === 0) {
+          const current = await tx.orders.findUnique({
+            where: { id: orderId },
+            select: { status: true },
+          });
+          if (current && (current.status === 'CANCELLED' || current.status === 'FAILED')) {
+            logger.error(
+              `[Payment] REFUND OWED: payment ${existingPayment.id} completed for order ${orderId} ` +
+                `which is already ${current.status} — the buyer was charged for a cancelled order`,
+              {
+                orderId,
+                paymentId: existingPayment.id,
+                orderStatus: current.status,
+                amount: existingPayment.amount?.toString(),
+                providerReference: providerReference || eventId,
+              },
+            );
+          }
+        }
 
         // The reservations deliberately stay RESERVED here. Payment succeeding
         // does not move any goods — they sit on the shelf, still held for this
@@ -699,7 +725,10 @@ export default class PaymentService {
             },
           },
         });
-        if (order?.buyer?.userId) {
+        // A payment that landed on an already-cancelled order (F109, logged above) must not tell
+        // the seller to start preparing it, nor tell the buyer their order is confirmed.
+        const orderIsLive = order?.status !== 'CANCELLED' && order?.status !== 'FAILED';
+        if (orderIsLive && order?.buyer?.userId) {
           emitNotificationToUser(order.buyer.userId, {
             id: payment.id,
             title: 'Payment Confirmed',
@@ -708,7 +737,7 @@ export default class PaymentService {
             sentAt: new Date().toISOString(),
           });
         }
-        if (order?.store?.seller?.userId) {
+        if (orderIsLive && order?.store?.seller?.userId) {
           emitNotificationToUser(order.store.seller.userId, {
             id: order.id,
             title: 'New Paid Order',

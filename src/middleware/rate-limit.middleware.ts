@@ -6,7 +6,7 @@ import rateLimit, {
   RateLimitRequestHandler,
   Store,
 } from 'express-rate-limit';
-import { FailoverStore, redisReady } from './rate-limit-store';
+import { FailoverStore, redisHealthy } from './rate-limit-store';
 import {
   ACCESS_TOKEN_SECRET,
   CREDENTIAL_FAILURE_LIMIT_MAX,
@@ -117,7 +117,7 @@ function noteRedisHealth(ready: boolean) {
   emergency = !ready;
   if (emergency) {
     logger.error(
-      '[RateLimit:EMERGENCY] Redis unavailable; auth limiters are on emergency caps and counting per instance',
+      '[RateLimit:EMERGENCY] Redis unavailable or failing; auth limiters are on emergency caps and counting per instance',
     );
   } else {
     logger.info('[RateLimit] Redis available; auth limiters back on configured limits');
@@ -143,14 +143,16 @@ export function createRateLimiters(
    * The configured limit while Redis holds the shared count; a much tighter one while each
    * instance counts alone, since N instances would otherwise allow N times the budget on the
    * routes attackers care about. Checked per request — Redis isn't connected yet when this runs.
+   *
+   * "Shared" means connected *and* answering: a connected Redis whose commands fail also sends
+   * every store to memory, so the caps follow redisHealthy(), not the connection alone (F111).
    */
-  const authLimit =
-    (normal: number, emergencyCap: number) => (): number => {
-      if (customStore || process.env.NODE_ENV === 'test') return normal;
-      const ready = redisReady();
-      noteRedisHealth(ready);
-      return ready ? normal : Math.min(normal, emergencyCap);
-    };
+  const authLimit = (normal: number, emergencyCap: number) => (): number => {
+    if (customStore || process.env.NODE_ENV === 'test') return normal;
+    const healthy = redisHealthy();
+    noteRedisHealth(healthy);
+    return healthy ? normal : Math.min(normal, emergencyCap);
+  };
 
   const storeFor = (name: string): Store => customStore ?? new FailoverStore(name);
 
@@ -250,11 +252,15 @@ export function createRateLimiters(
  * Per-address budget for the public APK download (GET /v1/app/download). Each hit presigns a URL
  * to a large object, so this sits well under the global budget while leaving room for retries
  * and a household behind one address. Mounted on the route itself rather than in applyRateLimits.
+ *
+ * Counts in Redis like the other limiters; it used the library's default memory store, so the
+ * budget was per instance (F111).
  */
-export function createDownloadLimiter(limit = 20): RateLimitRequestHandler {
+export function createDownloadLimiter(limit = 20, customStore?: Store): RateLimitRequestHandler {
   return rateLimit({
     windowMs: FIFTEEN_MINUTES_MS,
     limit,
+    store: customStore ?? new FailoverStore('apk-download'),
     standardHeaders: true,
     legacyHeaders: false,
     skip: skipPreflight,

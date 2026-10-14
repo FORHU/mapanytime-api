@@ -81,6 +81,20 @@ export const optionalAuthenticate = async (req: Request, _res: Response, next: N
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return next();
 
+  const user = await resolveActiveUser(token);
+  if (user) req.user = user;
+
+  return next();
+};
+
+/**
+ * The user an access token belongs to, under exactly the rules `authenticate` applies —
+ * valid signature, unexpired, active account, still the active session — or null.
+ *
+ * For callers outside the HTTP pipeline, such as the socket gateway, that need to know
+ * who is asking without a request to hang the answer on.
+ */
+export async function resolveActiveUser(token: string) {
   try {
     const decoded = jwt.verify(token, ACCESS_TOKEN_SECRET) as {
       userId: string;
@@ -88,13 +102,12 @@ export const optionalAuthenticate = async (req: Request, _res: Response, next: N
     };
     const user = await AuthRepo.findUserById(decoded.userId);
 
-    if (!user || user.accountStatus !== 'ACTIVE') return next();
-    if (decoded.sessionId !== user.activeSessionId) return next();
+    if (!user || user.accountStatus !== 'ACTIVE') return null;
+    if (decoded.sessionId !== user.activeSessionId) return null;
 
-    req.user = user;
+    return user;
   } catch {
-    // Malformed or expired token — fall through as anonymous.
+    // Malformed or expired token.
+    return null;
   }
-
-  return next();
-};
+}

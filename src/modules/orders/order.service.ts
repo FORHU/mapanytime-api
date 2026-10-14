@@ -1056,6 +1056,11 @@ export default class OrderService {
   /**
    * Sweeper for F44: Cancels orders that have remained PENDING past their reservation TTL
    * (default 15 minutes) without an active/completed payment, releasing their inventory holds.
+   *
+   * Cash orders are excluded (F108). Their payment stays PENDING until the seller hands the
+   * goods over (completeOrderInternal), so "unpaid after 15 minutes" is their normal state,
+   * not an abandoned checkout — sweeping them cancelled every cash order a seller had not
+   * accepted within 15 minutes, including ones booked for a pickup the next day.
    */
   static async expireStalePendingOrders(olderThanMinutes = 15): Promise<number> {
     const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
@@ -1063,11 +1068,16 @@ export default class OrderService {
       where: {
         status: 'PENDING',
         createdAt: { lte: cutoff },
-        payment: {
-          none: {
-            status: { in: [PAYMENTSTATUS.COMPLETED, PAYMENTSTATUS.REFUND_PENDING] },
+        AND: [
+          {
+            payment: {
+              none: {
+                status: { in: [PAYMENTSTATUS.COMPLETED, PAYMENTSTATUS.REFUND_PENDING] },
+              },
+            },
           },
-        },
+          { payment: { none: { paymentMethod: { type: PAYMENTMETHODTYPE.CASH } } } },
+        ],
       },
       select: { id: true, buyerId: true },
     });

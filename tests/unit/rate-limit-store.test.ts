@@ -2,7 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import logger from '../../src/utils/logger';
 import RedisUtil from '../../src/utils/redis.util';
-import { FailoverStore } from '../../src/middleware/rate-limit-store';
+import { FailoverStore, redisHealthy, redisReady } from '../../src/middleware/rate-limit-store';
 import { applyRateLimits, createRateLimiters } from '../../src/middleware/rate-limit.middleware';
 
 jest.mock('../../src/utils/logger', () => ({
@@ -27,6 +27,7 @@ jest.mock('rate-limit-redis', () => ({
       return { totalHits: hits, resetTime: new Date(Date.now() + 60_000) };
     }
     async decrement(key: string) {
+      if (redisFails) throw new Error('ECONNRESET');
       redisCounts.set(this.prefix + key, (redisCounts.get(this.prefix + key) ?? 1) - 1);
     }
     async resetKey(key: string) {
@@ -86,6 +87,22 @@ describe('FailoverStore', () => {
     expect(logger.error).toHaveBeenCalledTimes(1);
     store.shutdown();
   });
+
+  it('reports Redis unhealthy while a store is failing, and healthy once it recovers (F111)', async () => {
+    setRedisReady(true);
+    redisFails = true;
+    const store = new FailoverStore('recovering');
+    store.init(OPTIONS);
+
+    await store.increment('k');
+    expect(redisReady()).toBe(true);
+    expect(redisHealthy()).toBe(false);
+
+    redisFails = false;
+    await store.increment('k');
+    expect(redisHealthy()).toBe(true);
+    store.shutdown();
+  });
 });
 
 describe('auth limits outside tests', () => {
@@ -127,5 +144,16 @@ describe('auth limits outside tests', () => {
     for (let i = 0; i < 5; i++) expect((await login(app)).status).toBe(200);
     expect((await login(app)).status).toBe(429);
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('EMERGENCY'));
+  });
+
+  // Last in the file on purpose: the limiters built here are never shut down, so their
+  // stores stay registered as failing for the rest of the module.
+  it('drops to the emergency cap while Redis is connected but its commands fail (F111)', async () => {
+    setRedisReady(true);
+    redisFails = true;
+    const app = buildApp();
+
+    for (let i = 0; i < 5; i++) expect((await login(app)).status).toBe(200);
+    expect((await login(app)).status).toBe(429);
   });
 });

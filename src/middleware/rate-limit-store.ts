@@ -9,6 +9,17 @@ import logger from '../utils/logger';
  */
 export const redisReady = () => Boolean(RedisUtil.client?.isReady);
 
+/** Stores currently counting in memory because their Redis commands failed. */
+const failingStores = new Set<FailoverStore>();
+
+/**
+ * Whether the limiters' counts are really shared: Redis connected *and* its commands
+ * working. `redisReady()` alone misses the second half — a connected Redis that rejects
+ * commands (script load, OOM, ACL) still sends every store to memory, and each instance
+ * then counts alone (F111).
+ */
+export const redisHealthy = () => redisReady() && failingStores.size === 0;
+
 /**
  * Shared Redis counters when Redis is up, this instance's memory when it isn't.
  *
@@ -52,7 +63,9 @@ export class FailoverStore implements Store {
     const redis = await this.redisStore();
     if (redis) {
       try {
-        return await redis.decrement(key);
+        await redis.decrement(key);
+        this.recovered();
+        return;
       } catch (err) {
         this.failed(err);
       }
@@ -67,6 +80,7 @@ export class FailoverStore implements Store {
   }
 
   shutdown() {
+    failingStores.delete(this);
     this.memory.shutdown();
   }
 
@@ -98,6 +112,7 @@ export class FailoverStore implements Store {
   }
 
   private failed(err: unknown) {
+    failingStores.add(this);
     if (this.failing) return;
     this.failing = true;
     logger.error(
@@ -107,6 +122,7 @@ export class FailoverStore implements Store {
   }
 
   private recovered() {
+    failingStores.delete(this);
     if (!this.failing) return;
     this.failing = false;
     logger.info(`[RateLimit] ${this.prefix} Redis store recovered`);
