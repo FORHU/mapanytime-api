@@ -7,7 +7,14 @@
 
 ---
 
-## 0. RESUME HERE — last session 2026-10-06
+## ▶ RESUME HERE — last session 2026-10-14
+
+Start with [`HANDOFF-2026-10-14.md`](./HANDOFF-2026-10-14.md): four open
+branches across the API, web and app, the pre-deploy checks for F113 (the
+deployed worker has never run), and a device checklist for the app. The
+2026-10-06 notes below are older, but their unticked items are still open.
+
+## 0. Previous session — 2026-10-06
 
 ### ✅ Completed This Session
 

@@ -1,6 +1,7 @@
 import PaymentService from '../../src/modules/payments/payment.service';
 import { prisma } from '../../src/utils/prisma';
 import { emitNotificationToUser } from '../../src/infrastructure/socket';
+import logger from '../../src/utils/logger';
 
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
@@ -30,7 +31,11 @@ const ORDER_ID = 'order-1';
 
 const makeTx = () => ({
   payments: { findFirst: jest.fn(), update: jest.fn(), create: jest.fn() },
-  orders: { updateMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+  orders: {
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    findUnique: jest.fn(),
+    update: jest.fn(),
+  },
   inventory: { updateMany: jest.fn(), update: jest.fn() },
   inventoryReservations: { updateMany: jest.fn() },
   paymentWebhookEvents: { upsert: jest.fn() },
@@ -215,6 +220,57 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
       // the same claim that takes the stock down (F43).
       expect(tx.inventoryReservations.updateMany).not.toHaveBeenCalled();
       expect(mockEmit).toHaveBeenCalledTimes(2);
+    });
+
+    /**
+     * F109. The stale-order sweeper cancels an unpaid order after 15 minutes, but the
+     * gateway session stays payable for longer. A late payment must be recorded (the money
+     * did move), shouted about, and must not tell the seller to prepare a cancelled order.
+     */
+    it('flags a payment that lands on an already-cancelled order and sends no notifications', async () => {
+      const pendingPayment = { id: 'pay-late', orderId: ORDER_ID, status: 'FAILED', amount: 500 };
+      tx.payments.findFirst.mockResolvedValue(pendingPayment);
+      tx.payments.update.mockResolvedValue({ ...pendingPayment, status: 'COMPLETED' });
+      tx.orders.updateMany.mockResolvedValue({ count: 0 });
+      tx.orders.findUnique.mockResolvedValue({ status: 'CANCELLED' });
+      mockOrdersFindUnique.mockResolvedValue({
+        id: ORDER_ID,
+        status: 'CANCELLED',
+        buyer: { userId: 'buyer-user' },
+        store: { storeName: 'Flagship Store', seller: { userId: 'seller-user' } },
+      });
+      const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+
+      const payload = {
+        data: {
+          id: 'evt-late',
+          type: 'payment.paid',
+          attributes: {
+            data: { id: 'pay_ref_late', attributes: { reference_number: ORDER_ID } },
+          },
+        },
+      };
+
+      try {
+        const result = await PaymentService.processProviderWebhook(
+          'MOCK',
+          JSON.stringify(payload),
+          'sig',
+          payload,
+        );
+
+        expect(result.status).toBe('processed');
+        expect(tx.payments.update).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ status: 'COMPLETED' }) }),
+        );
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('REFUND OWED'),
+          expect.objectContaining({ orderId: ORDER_ID, orderStatus: 'CANCELLED' }),
+        );
+        expect(mockEmit).not.toHaveBeenCalled();
+      } finally {
+        errorSpy.mockRestore();
+      }
     });
 
     it('handles payment failure by releasing inventory reservations', async () => {

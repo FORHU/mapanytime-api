@@ -133,8 +133,7 @@ export const startScheduler = () => {
   // has no outward-facing side effects to duplicate, so the lock would buy
   // nothing — and see the note on `withJobLock` above about RedisUtil in the
   // worker process.
-  cron.schedule('* * * * *', async () => {
-    // TEMP: was '15 * * * *'
+  cron.schedule('15 * * * *', async () => {
     try {
       const purged = await StoreService.purgeExpiredRejectedStores();
       if (purged > 0) {
@@ -145,25 +144,10 @@ export const startScheduler = () => {
     }
   });
 
-  // ── Database cleanup — runs daily at 2:00 AM ────────────────────────────
-  cron.schedule('0 2 * * *', async () => {
-    logger.info('[Scheduler] Running daily database cleanup...');
-    try {
-      logger.info('[Scheduler] Daily cleanup completed.');
-    } catch (err) {
-      logger.error('[Scheduler] Daily cleanup failed:', err);
-    }
-  });
-
-  // ── Worker metrics flush — every 5 minutes ──────────────────────────────
-  cron.schedule('*/5 * * * *', async () => {
-    logger.info('[Scheduler] Flushing stale cache keys...');
-    try {
-      logger.info('[Scheduler] Cache flush completed.');
-    } catch (err) {
-      logger.error('[Scheduler] Cache flush failed:', err);
-    }
-  });
+  // There used to be a 2:00 AM "database cleanup" and a five-minute "cache flush" here.
+  // Both bodies were log lines and nothing else, so the logs reported work that never
+  // happened (F110). Redis keys already expire by TTL. Pruning consumed Session rows
+  // (F103) is real work that belongs in a daily slot — add it as its own job when built.
 
   logger.info('[Scheduler] All jobs registered.');
 };

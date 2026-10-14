@@ -86,6 +86,10 @@ docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
 
 docker stop "$WORKER_NAME" 2>/dev/null || true
 docker rm "$WORKER_NAME" 2>/dev/null || true
+# The compiled worker, not `npm run worker`: that is nodemon + ts-node over
+# ./src/worker.ts, and the image holds only dist/. nodemon does not exit when the
+# app crashes — it waits for file changes — so the container stayed "Up" while no
+# consumer or scheduled job ever ran (F113). Same fix docker-compose.yml carries.
 docker run -d --name "$WORKER_NAME" --restart unless-stopped \
   --network "$DOCKER_NETWORK" \
   --env-file "$ENV_FILE" \
@@ -94,7 +98,7 @@ docker run -d --name "$WORKER_NAME" --restart unless-stopped \
   --log-opt max-size=10m \
   --log-opt max-file=3 \
   "$IMAGE" \
-  npm run worker
+  npm run start:worker
 
 # Health check loop for API container
 echo "Verifying API container health..."
@@ -141,6 +145,28 @@ if [ -n "$SMOKE_ORIGIN" ]; then
     exit 1
   fi
   echo "CORS preflight passed."
+fi
+
+# The worker's health server only starts listening once RabbitMQ, Redis, the
+# consumers and the scheduler are all up (worker.ts), so a 200 from /live means
+# the worker really started. Without this the deploy never looked at the worker,
+# which is how F113 went unnoticed.
+echo "Verifying worker container health..."
+WORKER_HEALTHY=false
+for i in $(seq 1 20); do
+  if curl -sf "http://127.0.0.1:${WORKER_HOST_PORT}/live" >/dev/null 2>&1; then
+    echo "Worker health check passed!"
+    WORKER_HEALTHY=true
+    break
+  fi
+  echo "Waiting for worker to become ready... (attempt $i/20)"
+  sleep 3
+done
+
+if [ "$WORKER_HEALTHY" = false ]; then
+  echo "Worker did not start within 60 seconds. Displaying worker logs:"
+  docker logs "$WORKER_NAME" --tail 50
+  exit 1
 fi
 
 docker image prune -f
