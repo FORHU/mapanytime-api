@@ -2,7 +2,7 @@ import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { bearer } from 'better-auth/plugins';
-import { MAPANYTIME_API_PUBLIC_URL } from '../../config';
+import { BETTER_AUTH_URL, MAPANYTIME_API_PUBLIC_URL, PORT } from '../../config';
 import { prisma } from '../../utils/prisma';
 import logger from '../../utils/logger';
 import CacheUtil from '../../utils/cache.util';
@@ -29,7 +29,8 @@ export const ACCOUNT_BLOCKED_MESSAGE = 'User not found or deactivated';
  */
 export const auth = betterAuth({
   secret: AUTH_SECRET,
-  baseURL: MAPANYTIME_API_PUBLIC_URL || 'http://localhost:4002',
+  // BETTER_AUTH_URL locally; the API's public origin in production.
+  baseURL: BETTER_AUTH_URL || MAPANYTIME_API_PUBLIC_URL || `http://localhost:${PORT}`,
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
   advanced: { database: { generateId: false } },
 
