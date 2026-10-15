@@ -17,6 +17,13 @@
 set -euo pipefail
 
 ENV_NAME="${1:?usage: $0 <staging|production>}"
+# The GitHub environment each deploy reads: the staging deploy (deploy-dev.yml)
+# uses the one named `dev`.
+case "$ENV_NAME" in
+  staging) GITHUB_ENV_NAME=dev ;;
+  production) GITHUB_ENV_NAME=production ;;
+  *) echo "usage: $0 <staging|production>" >&2; exit 2 ;;
+esac
 REGION="${AWS_REGION:-ap-southeast-1}"
 # 4 = the first attempt plus three retries.
 MAX_RECEIVES="${QUEUE_MAX_RECEIVES:-4}"
@@ -83,7 +90,7 @@ create_consumer_queue analytics-events analytics.event.recorded
 
 cat <<EOF
 
-Set these as variables of the GitHub "${ENV_NAME}" environment:
+Set these as variables of the GitHub "${GITHUB_ENV_NAME}" environment:
 
 EVENTS_TOPIC_ARN=${topic_arn}
 EMAIL_SEND_QUEUE_URL=${QUEUE_URLS[email-send]}

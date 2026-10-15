@@ -19,7 +19,7 @@ name: Deploy Dev
 #      from the host — do NOT set them here.
 #   4. The event bus (#127) is this project's own SNS topic and SQS queues, not
 #      something the host shares: set EVENTS_TOPIC_ARN, EMAIL_SEND_QUEUE_URL and
-#      ANALYTICS_EVENTS_QUEUE_URL as variables of the `staging` environment this
+#      ANALYTICS_EVENTS_QUEUE_URL as variables of the `dev` environment this
 #      workflow deploys with (infra/README.md).
 #      The worker refuses to start without them.
 
@@ -59,7 +59,9 @@ jobs:
     # amd64, pulls cleanly, then dies with "exec format error". Do not
     # cross-build under QEMU — Node and Prisma builds take hours and look hung.
     runs-on: ubuntu-24.04-arm
-    environment: staging
+    # `dev` is the GitHub environment holding this deploy's settings. It was
+    # `staging` from 0c26d5d, an environment that never had most of them (#130).
+    environment: dev
 
     permissions:
       id-token: write
