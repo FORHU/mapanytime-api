@@ -1,6 +1,6 @@
 # 📘 Beginner Guide
 
-New to the template? This guide explains how everything fits together — no prior knowledge of RabbitMQ, Redis, or advanced Node.js patterns required.
+New to the template? This guide explains how everything fits together — no prior knowledge of SQS, Redis, or advanced Node.js patterns required.
 
 ---
 
@@ -17,7 +17,7 @@ This template adds two more layers:
 ```
 Client → Route → Controller → Service → Repository → Database
                                     ↓
-                               RabbitMQ (events)
+                               SNS + SQS (events)
                                     ↓
                          Worker Process (background jobs)
 ```
@@ -106,7 +106,7 @@ static async createUser(data: CreateUserDto) {
   const user = await UserRepository.create(data);
 
   // ✅ Business rule: notify other systems about new user
-  await rabbitmq.publish(ROUTING_KEYS.USER_CREATED, { userId: user.id, email: user.email });
+  await eventBus.publish(ROUTING_KEYS.USER_CREATED, { userId: user.id, email: user.email });
 
   return user;
 }
@@ -233,8 +233,8 @@ When you add a new utility or helper, add a corresponding test in `tests/unit/`.
 
 ## Frequently Asked Questions
 
-**Q: Do I need RabbitMQ for basic CRUD?**
-No. You can build a complete CRUD API without touching RabbitMQ. Add events when you need background processing.
+**Q: Do I need the event bus for basic CRUD?**
+No. You can build a complete CRUD API without touching the event bus. Add events when you need background processing.
 
 **Q: What if Redis goes down?**
 `CacheUtil.remember()` falls back to the database automatically. Health checks return `degraded` instead of `down`.

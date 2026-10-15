@@ -158,10 +158,13 @@ jobs:
           APP_AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
           AWS_S3_BUCKET_NAME: ${{ secrets.AWS_S3_BUCKET_NAME || secrets.S3_BUCKET }}
           S3_CDN_URL: ${{ secrets.S3_CDN_URL || '' }}
-          RABBITMQ_URL: ${{ secrets.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672/' }}
-          RABBITMQ_EXCHANGE: ${{ secrets.RABBITMQ_EXCHANGE || 'app_events_exchange' }}
-          RABBITMQ_QUEUE_PREFIX: ${{ secrets.RABBITMQ_QUEUE_PREFIX || 'app' }}
-          INGESTION_QUEUE_NAME: ${{ secrets.INGESTION_QUEUE_NAME || 'ingestion_jobs' }}
+          # The event bus (#127). ARNs and URLs, not secrets, so environment
+          # variables, and no fallback: a default would point production at a
+          # queue another environment's worker reads. The worker refuses to
+          # start without them. Topology: infra/README.md.
+          EVENTS_TOPIC_ARN: ${{ vars.EVENTS_TOPIC_ARN }}
+          EMAIL_SEND_QUEUE_URL: ${{ vars.EMAIL_SEND_QUEUE_URL }}
+          ANALYTICS_EVENTS_QUEUE_URL: ${{ vars.ANALYTICS_EVENTS_QUEUE_URL }}
           WORKER_HEALTH_PORT: ${{ secrets.WORKER_HEALTH_PORT || '8080' }}
           METRICS_INTERVAL_MS: ${{ secrets.METRICS_INTERVAL_MS || '60000' }}
           # No fallback, unlike staging. This is the origin the CORS smoke test
@@ -224,10 +227,9 @@ jobs:
             printf 'AWS_REGION=%s\n'                  "$APP_AWS_REGION"
             printf 'AWS_S3_BUCKET_NAME=%s\n'          "$AWS_S3_BUCKET_NAME"
             printf 'S3_CDN_URL=%s\n'                  "$S3_CDN_URL"
-            printf 'RABBITMQ_URL=%s\n'                "$RABBITMQ_URL"
-            printf 'RABBITMQ_EXCHANGE=%s\n'           "$RABBITMQ_EXCHANGE"
-            printf 'RABBITMQ_QUEUE_PREFIX=%s\n'       "$RABBITMQ_QUEUE_PREFIX"
-            printf 'INGESTION_QUEUE_NAME=%s\n'        "$INGESTION_QUEUE_NAME"
+            printf 'EVENTS_TOPIC_ARN=%s\n'            "$EVENTS_TOPIC_ARN"
+            printf 'EMAIL_SEND_QUEUE_URL=%s\n'        "$EMAIL_SEND_QUEUE_URL"
+            printf 'ANALYTICS_EVENTS_QUEUE_URL=%s\n'  "$ANALYTICS_EVENTS_QUEUE_URL"
             printf 'WORKER_HEALTH_PORT=%s\n'          "$WORKER_HEALTH_PORT"
             printf 'METRICS_INTERVAL_MS=%s\n'         "$METRICS_INTERVAL_MS"
             printf 'MAPANYTIME_WEB_APP_URL=%s\n'      "$MAPANYTIME_WEB_APP_URL"

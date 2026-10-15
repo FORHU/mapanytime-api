@@ -14,6 +14,23 @@
       "Resource": "arn:aws:s3:::forhu-marketplace-dev"
     },
     {
+      "Sid": "EventBusPublish",
+      "Effect": "Allow",
+      "Action": ["sns:Publish", "sns:GetTopicAttributes"],
+      "Resource": "arn:aws:sns:ap-southeast-1:*:*-mapanytime-events"
+    },
+    {
+      "Sid": "EventBusConsume",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage",
+        "sqs:ChangeMessageVisibility",
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": "arn:aws:sqs:ap-southeast-1:*:*-mapanytime-*"
+    },
+    {
       "Sid": "AppConfigParameters",
       "Effect": "Allow",
       "Action": ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],

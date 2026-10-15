@@ -7,7 +7,6 @@ import logger from './utils/logger';
 import { PORT, NODE_ENV, assertCheckoutReturnUrl } from './config';
 import { prisma } from './utils/prisma';
 import { redis } from './infrastructure/redis';
-import { rabbitmq } from './infrastructure/rabbitmq';
 import { attachRedisAdapter, closeRedisAdapter, initSocket } from './infrastructure/socket';
 import RedisUtil from './utils/redis.util';
 import MobilityService from './modules/mobility/mobility.service';
@@ -27,7 +26,6 @@ const startServer = async () => {
 
     // Initialize infrastructure before opening the port to traffic
     await RedisUtil.initialize();
-    await rabbitmq.connect();
 
     // Without Redis this instance still serves its own sockets, just not other replicas'.
     if (RedisUtil.client?.isOpen) {
@@ -68,7 +66,6 @@ const gracefulShutdown = async (signal: string) => {
       MobilityService.stopSweeper();
       InventoryReservationService.stopSweeper();
       await closeRedisAdapter();
-      await rabbitmq.close();
       await redis.close();
       await prisma.$disconnect();
 

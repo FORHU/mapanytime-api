@@ -1,7 +1,7 @@
 import { Prisma, Roles } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import UserRepository from './user.repository';
-import { rabbitmq } from '../../infrastructure/rabbitmq';
+import { eventBus } from '../../infrastructure/event-bus';
 import { ROUTING_KEYS } from '../../events/routing-keys';
 
 export default class UserService {
@@ -24,7 +24,7 @@ export default class UserService {
   static async createUser(data: Prisma.UsersUncheckedCreateInput) {
     const user = await UserRepository.create(data);
 
-    await rabbitmq.publish(ROUTING_KEYS.USER_CREATED, {
+    await eventBus.publish(ROUTING_KEYS.USER_CREATED, {
       userId: user.id,
       email: user.email,
       timestamp: new Date().toISOString(),

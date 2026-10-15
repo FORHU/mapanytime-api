@@ -1,6 +1,6 @@
 import request from 'supertest';
 import app from '../../src/app';
-import { rabbitmq } from '../../src/infrastructure/rabbitmq';
+import { eventBus } from '../../src/infrastructure/event-bus';
 
 /**
  * Infrastructure is mocked below, so the cost here is compiling the app's import
@@ -17,7 +17,7 @@ jest.setTimeout(20000);
  * built on this data toward authenticated users.
  *
  * Infrastructure is mocked so this runs without a live database, Redis or
- * RabbitMQ, matching health.test.ts.
+ * the event bus, matching health.test.ts.
  */
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
@@ -36,22 +36,26 @@ jest.mock('../../src/infrastructure/redis', () => ({
   },
 }));
 
-jest.mock('../../src/infrastructure/rabbitmq', () => ({
-  rabbitmq: {
-    connect: jest.fn().mockResolvedValue(undefined),
-    close: jest.fn().mockResolvedValue(undefined),
-    isReady: jest.fn().mockReturnValue(true),
+jest.mock('../../src/infrastructure/event-bus', () => ({
+  eventBus: {
+    ping: jest.fn().mockResolvedValue(true),
     publish: jest.fn().mockResolvedValue(true),
-    consume: jest.fn().mockResolvedValue(undefined),
+    publishMany: jest.fn(),
+    consume: jest.fn(),
+    consumeBatch: jest.fn(),
   },
 }));
 
-const mockPublish = rabbitmq.publish as jest.MockedFunction<typeof rabbitmq.publish>;
+const mockPublishMany = eventBus.publishMany as jest.MockedFunction<typeof eventBus.publishMany>;
+/** Every publish succeeds, one result per payload. */
+const allPublished = async (_key: string, payloads: unknown[]) => payloads.map(() => true);
+/** The payloads handed to the event bus by the first request. */
+const published = () => mockPublishMany.mock.calls[0][1] as Array<{ userId: unknown }>;
 const ENDPOINT = '/api/v1/analytics/events';
 
 beforeEach(() => {
-  mockPublish.mockClear();
-  mockPublish.mockResolvedValue(true);
+  mockPublishMany.mockReset();
+  mockPublishMany.mockImplementation(allPublished);
 });
 
 describe('POST /v1/analytics/events', () => {
@@ -62,7 +66,7 @@ describe('POST /v1/analytics/events', () => {
 
     expect(res.status).toBe(202);
     expect(res.body.data).toEqual({ accepted: 1, transport: 'queued' });
-    expect(mockPublish).toHaveBeenCalledTimes(1);
+    expect(published()).toHaveLength(1);
   });
 
   it('accepts a batch', async () => {
@@ -77,7 +81,7 @@ describe('POST /v1/analytics/events', () => {
 
     expect(res.status).toBe(202);
     expect(res.body.data.accepted).toBe(2);
-    expect(mockPublish).toHaveBeenCalledTimes(2);
+    expect(published()).toHaveLength(2);
   });
 
   it('does not require a token', async () => {
@@ -93,7 +97,7 @@ describe('POST /v1/analytics/events', () => {
       .send({ eventType: 'STORE_VIEW', sessionId: 'sess-2' });
 
     expect(res.status).toBe(202);
-    expect((mockPublish.mock.calls[0][1] as { userId: unknown }).userId).toBeNull();
+    expect(published()[0].userId).toBeNull();
   });
 
   describe('validation', () => {
@@ -101,7 +105,7 @@ describe('POST /v1/analytics/events', () => {
       const res = await request(app).post(ENDPOINT).send({ eventType: 'NOT_A_REAL_EVENT' });
 
       expect(res.status).toBe(400);
-      expect(mockPublish).not.toHaveBeenCalled();
+      expect(mockPublishMany).not.toHaveBeenCalled();
     });
 
     it('rejects a missing event type', async () => {
@@ -114,7 +118,7 @@ describe('POST /v1/analytics/events', () => {
       const res = await request(app).post(ENDPOINT).send({ events });
 
       expect(res.status).toBe(400);
-      expect(mockPublish).not.toHaveBeenCalled();
+      expect(mockPublishMany).not.toHaveBeenCalled();
     });
 
     it('rejects an empty batch', async () => {
@@ -124,7 +128,7 @@ describe('POST /v1/analytics/events', () => {
   });
 
   it('reports the direct transport when the queue is unreachable', async () => {
-    mockPublish.mockResolvedValue(false);
+    mockPublishMany.mockImplementation(async (_key, payloads) => payloads.map(() => false));
 
     const res = await request(app).post(ENDPOINT).send({ eventType: 'ADD_TO_CART' });
 

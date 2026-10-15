@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { prisma } from '../../utils/prisma';
 import { redis } from '../../infrastructure/redis';
-import { rabbitmq } from '../../infrastructure/rabbitmq';
+import { eventBus } from '../../infrastructure/event-bus';
 
 /**
  * GET /health/live
@@ -26,14 +26,14 @@ export const liveness = (_req: Request, res: Response) => {
  * A single failure flips the overall status to "degraded".
  */
 export const readiness = async (_req: Request, res: Response) => {
-  const checks = await Promise.allSettled([checkDatabase(), checkRedis(), checkRabbitMQ()]);
+  const checks = await Promise.allSettled([checkDatabase(), checkRedis(), eventBus.ping()]);
 
-  const [dbCheck, redisCheck, rmqCheck] = checks;
+  const [dbCheck, redisCheck, eventBusCheck] = checks;
 
   const services = {
     database: dbCheck.status === 'fulfilled' && dbCheck.value ? 'up' : 'down',
     redis: redisCheck.status === 'fulfilled' && redisCheck.value ? 'up' : 'down',
-    rabbitmq: rmqCheck.status === 'fulfilled' && rmqCheck.value ? 'up' : 'down',
+    eventBus: eventBusCheck.status === 'fulfilled' && eventBusCheck.value ? 'up' : 'down',
   };
 
   const isHealthy = Object.values(services).every((s) => s === 'up');
@@ -61,8 +61,4 @@ const checkRedis = async (): Promise<boolean> => {
   } catch {
     return false;
   }
-};
-
-const checkRabbitMQ = async (): Promise<boolean> => {
-  return rabbitmq.isReady();
 };

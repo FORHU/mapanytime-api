@@ -1,4 +1,4 @@
-import { rabbitmq } from '../../infrastructure/rabbitmq';
+import { eventBus } from '../../infrastructure/event-bus';
 import { ROUTING_KEYS } from '../../events/routing-keys';
 import logger from '../../utils/logger';
 import AnalyticsRepository from './analytics.repository';
@@ -10,7 +10,7 @@ import {
 
 export interface RecordResult {
   accepted: number;
-  /** 'queued' — handed to RabbitMQ. 'direct' — queue was down, written inline. */
+  /** 'queued' — handed to the event bus. 'direct' — queue was down, written inline. */
   transport: 'queued' | 'direct';
 }
 
@@ -49,7 +49,7 @@ export default class AnalyticsService {
   /**
    * Accept a batch of events and get them off the request path.
    *
-   * Publishing is best-effort: if RabbitMQ is unreachable the events are written
+   * Publishing is best-effort: if the event bus is unreachable the events are written
    * straight to the database instead. That is slower and defeats the batching,
    * but silently dropping behavioural data is worse — the whole point of the
    * event log is that it is the record other features get built on. Only if
@@ -61,9 +61,8 @@ export default class AnalyticsService {
   ): Promise<RecordResult> {
     const payloads = inputs.map((input) => AnalyticsService.normalise(input, context));
 
-    const published = await Promise.all(
-      payloads.map((payload) => rabbitmq.publish(ROUTING_KEYS.ANALYTICS_EVENT_RECORDED, payload)),
-    );
+    // Up to 50 events a request: ten per SNS call rather than one call each.
+    const published = await eventBus.publishMany(ROUTING_KEYS.ANALYTICS_EVENT_RECORDED, payloads);
 
     const failed = payloads.filter((_, i) => !published[i]);
     if (failed.length === 0) {

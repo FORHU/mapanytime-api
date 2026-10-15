@@ -21,7 +21,7 @@ gateway or in cash at pickup. This API serves the Flutter buyer app
 | HTTP          | Express 4 + TypeScript, Joi validation, Helmet, CORS        |
 | Data          | PostgreSQL via Prisma 6                                     |
 | Cache / state | Redis — carts, idempotency keys, rate-limit counters, locks |
-| Events        | RabbitMQ topic exchange with retry and dead-letter queues   |
+| Events        | SNS topic fanned out to SQS queues, with dead-letter queues |
 | Realtime      | Socket.IO, Redis adapter across replicas                    |
 | Payments      | Xendit and PayMongo adapters, a mock for development, cash  |
 | Files         | S3 (MinIO locally), presigned URLs                          |
@@ -48,7 +48,7 @@ src/
 ├── modules/<feature>/     # one folder per feature: route, controller, service, repository
 ├── routes.ts              # mounts every module under /api/v1
 ├── middleware/            # auth, CORS allowlist, rate limiting, validation, errors
-├── infrastructure/        # rabbitmq, redis, socket gateway, scheduler
+├── infrastructure/        # event bus (SNS/SQS), redis, socket gateway, scheduler
 ├── consumers/             # worker-side queue consumers
 ├── server.ts / worker.ts  # process entry points
 prisma/                    # schema, migrations, seeders
@@ -67,7 +67,7 @@ Prerequisites: Node 20+ and Docker.
 ```bash
 npm install
 cp .env.example .env          # then fill it in — see the warning below
-docker compose up -d db redis rabbitmq minio minio-init
+docker compose up -d --wait db redis localstack minio minio-init
 npm run db:setup              # prisma generate + migrate dev, local database only
 npm run dev                   # API on http://localhost:4002
 npm run worker                # in a second terminal
@@ -78,13 +78,13 @@ npm run worker                # in a second terminal
 > a non-local database (`scripts/check-db-target.ts`); `npx prisma migrate dev`
 > on its own does not.
 
-| URL                                      | What                                 |
-| :--------------------------------------- | :----------------------------------- |
-| `http://localhost:4002/api/v1/...`       | The API                              |
-| `http://localhost:4002/api/docs`         | Swagger UI (development only)        |
-| `http://localhost:4002/api/health/ready` | Readiness: Postgres, Redis, RabbitMQ |
-| `http://localhost:8080/live`             | Worker liveness                      |
-| `http://localhost:15672`                 | RabbitMQ dashboard                   |
+| URL                                      | What                                  |
+| :--------------------------------------- | :------------------------------------ |
+| `http://localhost:4002/api/v1/...`       | The API                               |
+| `http://localhost:4002/api/docs`         | Swagger UI (development only)         |
+| `http://localhost:4002/api/health/ready` | Readiness: Postgres, Redis, event bus |
+| `http://localhost:8080/live`             | Worker liveness                       |
+| `http://localhost:4576`                  | LocalStack (SNS + SQS), no dashboard  |
 
 ### Testing payment gateways
 
@@ -146,8 +146,10 @@ CI runs `prettier . --check`, and that includes markdown in `docs/` (F58). Run
   (`inventoryStock.repository.ts`; F43, F75).
 - **The socket gateway trusts tokens, not ids.** Notification channels are
   joined by access token; viewport rooms are public (F107).
-- **Domain events** are published to RabbitMQ with a correlation id that follows
-  the request into the worker's logs.
+- **Domain events** are published to an SNS topic and fanned out to one SQS
+  queue per consumer, with a correlation id that follows the request into the
+  worker's logs. Locally that is LocalStack (`docker/localstack/init-events.sh`);
+  deployed, `infra/event-bus-setup.sh` creates it (#127).
 
 ## Deployment
 

@@ -84,7 +84,9 @@ docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
   --log-opt max-file=3 \
   "$IMAGE"
 
-docker stop "$WORKER_NAME" 2>/dev/null || true
+# 30s, not docker's default 10: on SIGTERM the worker lets an open SQS long poll
+# (up to 20s) end and in-flight messages finish before it exits (#127).
+docker stop -t 30 "$WORKER_NAME" 2>/dev/null || true
 docker rm "$WORKER_NAME" 2>/dev/null || true
 # The compiled worker, not `npm run worker`: that is nodemon + ts-node over
 # ./src/worker.ts, and the image holds only dist/. nodemon does not exit when the
@@ -147,7 +149,7 @@ if [ -n "$SMOKE_ORIGIN" ]; then
   echo "CORS preflight passed."
 fi
 
-# The worker's health server only starts listening once RabbitMQ, Redis, the
+# The worker's health server only starts listening once Redis, the
 # consumers and the scheduler are all up (worker.ts), so a 200 from /live means
 # the worker really started. Without this the deploy never looked at the worker,
 # which is how F113 went unnoticed.
