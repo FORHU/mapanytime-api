@@ -56,6 +56,11 @@ jobs:
     # amd64, pulls cleanly, then dies with "exec format error". Do not
     # cross-build under QEMU — Node and Prisma builds take hours and look hung.
     runs-on: ubuntu-24.04-arm
+    # The GitHub environment holding this project's secrets, renamed from
+    # `staging` to `dev` on 2026-10-15. The name has to match exactly: naming one
+    # that does not exist does not fail — GitHub creates an empty environment and
+    # every secret resolves to a blank string, which surfaces much later as a
+    # missing-variable crash rather than a configuration error.
     environment: dev
 
     permissions:
@@ -139,6 +144,12 @@ jobs:
           # instance role already grants sns:Publish and the sqs actions on
           # dev-*, and a partial credential pair makes the SDK skip its
           # provider chain entirely.
+          # better-auth, added by the devs after this workflow was written. The
+          # API and the worker both refuse to start in production without the
+          # secret — on 2026-10-15 that took both containers down, not just the
+          # worker. BETTER_AUTH_URL is the public origin it issues cookies for.
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL || secrets.BETTER_AUTH_URL }}
           EVENTS_TOPIC_ARN: ${{ vars.EVENTS_TOPIC_ARN || secrets.EVENTS_TOPIC_ARN }}
           EMAIL_SEND_QUEUE_URL: ${{ vars.EMAIL_SEND_QUEUE_URL || secrets.EMAIL_SEND_QUEUE_URL }}
           ANALYTICS_EVENTS_QUEUE_URL: ${{ vars.ANALYTICS_EVENTS_QUEUE_URL || secrets.ANALYTICS_EVENTS_QUEUE_URL }}
@@ -179,6 +190,7 @@ jobs:
                    CORS_ORIGIN MAPANYTIME_API_PUBLIC_URL MAPANYTIME_WEB_APP_URL \
                    ACCESS_TOKEN_EXPIRY REFRESH_TOKEN_EXPIRY REDIS_TTL_SECONDS \
                    RABBITMQ_EXCHANGE RABBITMQ_QUEUE_PREFIX INGESTION_QUEUE_NAME \
+                   BETTER_AUTH_SECRET BETTER_AUTH_URL \
                    EVENTS_TOPIC_ARN EMAIL_SEND_QUEUE_URL ANALYTICS_EVENTS_QUEUE_URL \
                    METRICS_INTERVAL_MS AWS_S3_BUCKET_NAME S3_CDN_URL \
                    GOOGLE_CLIENT_ID FACEBOOK_APP_ID MAILER_EMAIL \
