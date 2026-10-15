@@ -6,7 +6,7 @@ import MerchantAdsService from '../../modules/merchantAds/merchantAds.service';
 import RewardService from '../../modules/rewards/reward.service';
 import StoreService from '../../modules/stores/store.service';
 import OrderService from '../../modules/orders/order.service';
-import RedisUtil from '../../utils/redis.util';
+import { redis } from '../redis';
 
 /**
  * node-cron fires per process. There is one worker today, so nothing here is
@@ -16,16 +16,31 @@ import RedisUtil from '../../utils/redis.util';
  *
  * The TTL is deliberately shorter than the interval it guards so a worker that
  * dies mid-job cannot wedge the lock permanently.
+ *
+ * The lock lives on the client the worker connects (`redis.connect()` in
+ * worker.ts). It used to be `RedisUtil.client`, which only the API server
+ * initialises, so in the worker every locked job threw and never ran (#143).
+ * Without Redis the job runs unlocked: with one worker there is nothing to
+ * duplicate, and skipping it would silently stop the job.
  */
 async function withJobLock(name: string, ttlSeconds: number, run: () => Promise<void>) {
-  const acquired = await RedisUtil.client.set(`scheduler:lock:${name}`, '1', {
-    NX: true,
-    expiration: { type: 'EX', value: ttlSeconds },
-  });
+  const client = redis.getClient();
 
-  if (!acquired) {
-    logger.debug(`[Scheduler] ${name} skipped — another worker holds the lock.`);
-    return;
+  if (!client) {
+    logger.warn(`[Scheduler] Redis unavailable; running ${name} without its lock.`);
+  } else {
+    try {
+      const acquired = await client.set(`scheduler:lock:${name}`, '1', {
+        NX: true,
+        expiration: { type: 'EX', value: ttlSeconds },
+      });
+      if (!acquired) {
+        logger.debug(`[Scheduler] ${name} skipped — another worker holds the lock.`);
+        return;
+      }
+    } catch (err) {
+      logger.warn(`[Scheduler] Could not take the ${name} lock; running without it.`, err);
+    }
   }
 
   await run();
@@ -131,8 +146,7 @@ export const startScheduler = () => {
   // Deliberately not under `withJobLock`. The sweep is idempotent (`deletedAt:
   // null` is in the WHERE, so a second run in the same hour matches nothing) and
   // has no outward-facing side effects to duplicate, so the lock would buy
-  // nothing — and see the note on `withJobLock` above about RedisUtil in the
-  // worker process.
+  // nothing.
   cron.schedule('15 * * * *', async () => {
     try {
       const purged = await StoreService.purgeExpiredRejectedStores();
