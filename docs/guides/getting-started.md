@@ -52,7 +52,8 @@ This starts:
 
 - **PostgreSQL** on port `5432`
 - **Redis** on port `6379`
-- **RabbitMQ** on port `5672` (Management UI: `15672`)
+- **LocalStack** on port `4576`: the event bus (SNS + SQS), created by
+  `docker/localstack/init-events.sh` on every start
 
 Verify everything is running:
 
@@ -103,7 +104,7 @@ Expected response:
 ```json
 {
   "status": "ready",
-  "services": { "database": "up", "redis": "up", "rabbitmq": "up" }
+  "services": { "database": "up", "redis": "up", "eventBus": "up" }
 }
 ```
 
@@ -119,12 +120,11 @@ Open [http://localhost:4002/api/docs](http://localhost:4002/api/docs) in your br
 
 ## What's Running
 
-| Service       | URL                              | Credentials   |
-| ------------- | -------------------------------- | ------------- |
-| API Server    | `http://localhost:4002`          | —             |
-| Swagger Docs  | `http://localhost:4002/api/docs` | —             |
-| RabbitMQ UI   | `http://localhost:15672`         | guest / guest |
-| Worker Health | `http://localhost:8080/health`   | —             |
+| Service       | URL                              | Credentials |
+| ------------- | -------------------------------- | ----------- |
+| API Server    | `http://localhost:4002`          | —           |
+| Swagger Docs  | `http://localhost:4002/api/docs` | —           |
+| Worker Health | `http://localhost:8080/health`   | —           |
 
 ---
 

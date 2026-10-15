@@ -1,126 +1,73 @@
-import { consumeBatch } from '../../src/infrastructure/rabbitmq/batch-consumer';
-import { rabbitConnection } from '../../src/infrastructure/rabbitmq/connection';
+import { consumeBatch } from '../../src/infrastructure/event-bus/batch-consumer';
+import { makeFakeSqs, waitFor } from '../helpers/fake-sqs';
 
-jest.mock('../../src/infrastructure/rabbitmq/connection', () => ({
-  rabbitConnection: { createDedicatedChannel: jest.fn() },
+const fake = makeFakeSqs();
+
+jest.mock('../../src/infrastructure/event-bus/clients', () => ({
+  sqs: { send: (command: never) => fake.send(command) },
+  sns: { send: jest.fn() },
 }));
 
-jest.mock('../../src/infrastructure/rabbitmq/exchanges', () => ({
-  APP_EXCHANGE: 'app.events',
-  DLX_EXCHANGE: 'app.dlx',
-}));
-
-/**
- * These drive fake timers through `jest.runAllTimersAsync()`, which is cheap on
- * its own but has repeatedly blown the 5s default when the full suite runs the
- * machine's cores flat. Every assertion below is unchanged — only the budget is
- * raised, so a genuine hang still fails rather than hiding.
- */
-jest.setTimeout(20000);
-
-type Deliver = (msg: unknown) => void;
-
-/** A fake channel that captures the consume callback so tests can push messages. */
-const makeChannel = () => {
-  let deliver: Deliver = () => undefined;
-
-  const channel = {
-    assertQueue: jest.fn().mockResolvedValue(undefined),
-    bindQueue: jest.fn().mockResolvedValue(undefined),
-    consume: jest.fn().mockImplementation((_queue: string, cb: Deliver) => {
-      deliver = cb;
-      return Promise.resolve({ consumerTag: 'tag' });
-    }),
-    ack: jest.fn(),
-    nack: jest.fn(),
-  };
-
-  return { channel, deliver: (msg: unknown) => deliver(msg) };
-};
-
-/** A message carrying the DomainEventMessage envelope the publisher produces. */
-const message = (payload: unknown, deliveryTag: number) => ({
-  content: Buffer.from(JSON.stringify({ metadata: { eventId: `e${deliveryTag}` }, payload })),
-  fields: { deliveryTag },
-  properties: { headers: {} },
-});
+/** The fields of a batch entry these tests look at. */
+type Entry = { ReceiptHandle: string; VisibilityTimeout?: number };
 
 const OPTIONS = {
-  queueName: 'test.queue',
-  routingKey: 'test.key',
+  queueUrl: 'http://localhost:4566/000000000000/test-queue',
   batchSize: 3,
-  flushIntervalMs: 5000,
+  flushIntervalMs: 60,
+  retryDelaySeconds: 30,
 };
 
-let harness: ReturnType<typeof makeChannel>;
+/** Every receipt handle deleted so far, across single and batch deletes. */
+const deleted = () => [
+  ...fake
+    .callsTo('DeleteMessageBatchCommand')
+    .flatMap((i) => i.Entries.map((e: Entry) => e.ReceiptHandle)),
+  ...fake.callsTo('DeleteMessageCommand').map((i) => i.ReceiptHandle),
+];
 
-beforeEach(() => {
-  jest.clearAllMocks();
-  jest.useFakeTimers();
-  harness = makeChannel();
-  (
-    rabbitConnection.createDedicatedChannel as jest.MockedFunction<
-      typeof rabbitConnection.createDedicatedChannel
-    >
-  ).mockResolvedValue(harness.channel as never);
-});
-
-afterEach(() => {
-  jest.useRealTimers();
-});
+beforeEach(() => fake.reset());
 
 describe('consumeBatch', () => {
-  it('requests a dedicated channel with prefetch equal to the batch size', async () => {
-    await consumeBatch(OPTIONS, jest.fn().mockResolvedValue(undefined));
-
-    // The shared channel is prefetch(1), which makes buffering impossible:
-    // message 2 is never delivered until message 1 is acked.
-    expect(rabbitConnection.createDedicatedChannel).toHaveBeenCalledWith(3);
-  });
-
-  it('does not flush before the batch is full', async () => {
+  it('flushes once the batch is full and deletes it in one call', async () => {
     const handler = jest.fn().mockResolvedValue(undefined);
-    await consumeBatch(OPTIONS, handler);
+    [1, 2, 3].forEach((n) => fake.push({ n }));
 
-    harness.deliver(message({ n: 1 }, 1));
-    harness.deliver(message({ n: 2 }, 2));
-    await Promise.resolve();
-
-    expect(handler).not.toHaveBeenCalled();
-    expect(harness.channel.ack).not.toHaveBeenCalled();
-  });
-
-  it('flushes once the batch is full and acks the whole range at once', async () => {
-    const handler = jest.fn().mockResolvedValue(undefined);
-    await consumeBatch(OPTIONS, handler);
-
-    const third = message({ n: 3 }, 3);
-    harness.deliver(message({ n: 1 }, 1));
-    harness.deliver(message({ n: 2 }, 2));
-    harness.deliver(third);
-    await jest.runAllTimersAsync();
+    const consumer = consumeBatch(OPTIONS, handler);
+    await waitFor(() => fake.callsTo('DeleteMessageBatchCommand').length === 1);
+    await consumer.stop();
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler).toHaveBeenCalledWith([{ n: 1 }, { n: 2 }, { n: 3 }]);
-    // allUpTo=true settles the batch in one frame rather than three.
-    expect(harness.channel.ack).toHaveBeenCalledTimes(1);
-    expect(harness.channel.ack).toHaveBeenCalledWith(third, true);
+    expect(deleted()).toEqual(['r1', 'r2', 'r3']);
+  });
+
+  it('asks only for what still fits in the batch', async () => {
+    fake.push({ n: 1 });
+    fake.push({ n: 2 });
+
+    const consumer = consumeBatch(OPTIONS, jest.fn().mockResolvedValue(undefined));
+    await waitFor(() => fake.callsTo('ReceiveMessageCommand').length >= 2);
+    await consumer.stop();
+
+    const [first, second] = fake.callsTo('ReceiveMessageCommand');
+    expect(first.MaxNumberOfMessages).toBe(3);
+    expect(second.MaxNumberOfMessages).toBe(1);
   });
 
   it('flushes a partial batch once the interval elapses', async () => {
     const handler = jest.fn().mockResolvedValue(undefined);
-    await consumeBatch(OPTIONS, handler);
+    fake.push({ n: 1 });
 
-    harness.deliver(message({ n: 1 }, 1));
-    expect(handler).not.toHaveBeenCalled();
+    const consumer = consumeBatch(OPTIONS, handler);
+    await waitFor(() => handler.mock.calls.length === 1);
+    await consumer.stop();
 
-    await jest.advanceTimersByTimeAsync(5000);
-
-    // Without the timer a quiet queue would hold events indefinitely.
+    // Without the deadline a quiet queue would hold events indefinitely.
     expect(handler).toHaveBeenCalledWith([{ n: 1 }]);
   });
 
-  it('never acks before the handler resolves', async () => {
+  it('never deletes before the handler resolves', async () => {
     let release!: () => void;
     const handler = jest.fn(
       () =>
@@ -128,116 +75,72 @@ describe('consumeBatch', () => {
           release = resolve;
         }),
     );
-    await consumeBatch(OPTIONS, handler);
+    [1, 2, 3].forEach((n) => fake.push({ n }));
 
-    harness.deliver(message({ n: 1 }, 1));
-    harness.deliver(message({ n: 2 }, 2));
-    harness.deliver(message({ n: 3 }, 3));
-    await Promise.resolve();
+    const consumer = consumeBatch(OPTIONS, handler);
+    await waitFor(() => handler.mock.calls.length === 1);
 
-    // Acking here would mean a crash during the write loses the events.
-    expect(handler).toHaveBeenCalled();
-    expect(harness.channel.ack).not.toHaveBeenCalled();
+    // Deleting here would mean a crash during the write loses the events.
+    expect(deleted()).toEqual([]);
 
     release();
-    await jest.runAllTimersAsync();
-    expect(harness.channel.ack).toHaveBeenCalledTimes(1);
+    await consumer.stop();
+    expect(deleted()).toEqual(['r1', 'r2', 'r3']);
   });
 
-  it('nacks the batch to the DLQ without requeueing when the handler throws', async () => {
+  it('hands a failed batch back for a delayed retry instead of deleting it', async () => {
     const handler = jest.fn().mockRejectedValue(new Error('insert failed'));
-    await consumeBatch(OPTIONS, handler);
+    [1, 2, 3].forEach((n) => fake.push({ n }));
 
-    const third = message({ n: 3 }, 3);
-    harness.deliver(message({ n: 1 }, 1));
-    harness.deliver(message({ n: 2 }, 2));
-    harness.deliver(third);
-    await jest.runAllTimersAsync();
+    const consumer = consumeBatch(OPTIONS, handler);
+    await waitFor(() => fake.callsTo('ChangeMessageVisibilityBatchCommand').length === 1);
+    await consumer.stop();
 
-    expect(harness.channel.ack).not.toHaveBeenCalled();
-    // requeue=false — requeueing a batch that just failed spins a hot loop.
-    expect(harness.channel.nack).toHaveBeenCalledWith(third, true, false);
+    expect(deleted()).toEqual([]);
+    // The redrive policy, not this code, decides when it goes to the DLQ.
+    const [retry] = fake.callsTo('ChangeMessageVisibilityBatchCommand');
+    expect(retry.Entries.map((e: Entry) => [e.ReceiptHandle, e.VisibilityTimeout])).toEqual([
+      ['r1', 30],
+      ['r2', 30],
+      ['r3', 30],
+    ]);
   });
 
-  it('discards an unparseable message individually without stalling the batch', async () => {
+  it('drops an unparseable message on its own without stalling the batch', async () => {
     const handler = jest.fn().mockResolvedValue(undefined);
-    await consumeBatch(OPTIONS, handler);
+    fake.push(undefined, { raw: 'not json' });
+    fake.push({ n: 2 });
 
-    const junk = { content: Buffer.from('not json'), fields: { deliveryTag: 1 }, properties: {} };
-    harness.deliver(junk);
+    const consumer = consumeBatch(OPTIONS, handler);
+    await waitFor(() => handler.mock.calls.length === 1);
+    await consumer.stop();
 
-    // Left in the buffer it would sit inside a later allUpTo ack range and be
-    // acked as though it had been processed.
-    expect(harness.channel.nack).toHaveBeenCalledWith(junk, false, false);
-    expect(handler).not.toHaveBeenCalled();
+    // Retrying it can never succeed, so it is deleted rather than dead-lettered.
+    expect(fake.callsTo('DeleteMessageCommand').map((i) => i.ReceiptHandle)).toEqual(['r1']);
+    expect(handler).toHaveBeenCalledWith([{ n: 2 }]);
   });
 
-  it('re-arms the timer for a message that arrives while a timed flush is running', async () => {
-    let release!: () => void;
-    const handler = jest
-      .fn()
-      .mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            release = resolve;
-          }),
-      )
-      .mockResolvedValue(undefined);
+  it('deletes a batch larger than ten in SQS-sized chunks', async () => {
+    const handler = jest.fn().mockResolvedValue(undefined);
+    for (let n = 1; n <= 12; n++) fake.push({ n });
 
-    await consumeBatch(OPTIONS, handler);
+    const consumer = consumeBatch({ ...OPTIONS, batchSize: 12 }, handler);
+    await waitFor(() => handler.mock.calls.length === 1);
+    await consumer.stop();
 
-    // Fill a batch so a flush is in flight and awaiting its slow handler.
-    harness.deliver(message({ n: 1 }, 1));
-    harness.deliver(message({ n: 2 }, 2));
-    harness.deliver(message({ n: 3 }, 3));
-    await Promise.resolve();
-    expect(handler).toHaveBeenCalledTimes(1);
-
-    // A fourth message lands mid-flush and arms the interval timer.
-    harness.deliver(message({ n: 4 }, 4));
-
-    // Let that timer fire *while the first flush is still running*. flush()
-    // bails out at its `flushing` guard — before it reaches clearTimer().
-    await jest.advanceTimersByTimeAsync(5000);
-    expect(handler).toHaveBeenCalledTimes(1);
-
-    release();
-    await jest.runAllTimersAsync();
-
-    // Regression: the timer callback has to null its own handle before
-    // flushing. Leaving it set makes scheduleFlush() a no-op afterwards, and
-    // this sub-batch-size message strands until unrelated traffic arrives.
-    expect(handler).toHaveBeenCalledTimes(2);
-    expect(handler).toHaveBeenNthCalledWith(2, [{ n: 4 }]);
+    expect(handler.mock.calls[0][0]).toHaveLength(12);
+    expect(fake.callsTo('DeleteMessageBatchCommand').map((i) => i.Entries.length)).toEqual([10, 2]);
   });
 
-  it('keeps draining when messages arrive during a flush', async () => {
-    let release!: () => void;
-    const handler = jest
-      .fn()
-      .mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            release = resolve;
-          }),
-      )
-      .mockResolvedValue(undefined);
+  it('writes what is buffered when stopped, rather than leaving it hidden', async () => {
+    const handler = jest.fn().mockResolvedValue(undefined);
+    fake.push({ n: 1 });
 
-    await consumeBatch(OPTIONS, handler);
+    const consumer = consumeBatch({ ...OPTIONS, flushIntervalMs: 60_000 }, handler);
+    await waitFor(() => fake.pending.length === 0);
+    await consumer.stop();
 
-    harness.deliver(message({ n: 1 }, 1));
-    harness.deliver(message({ n: 2 }, 2));
-    harness.deliver(message({ n: 3 }, 3));
-    await Promise.resolve();
-
-    // Arrives mid-flush — must land in the next batch, not this ack range.
-    harness.deliver(message({ n: 4 }, 4));
-
-    release();
-    await jest.runAllTimersAsync();
-
-    expect(handler).toHaveBeenCalledTimes(2);
-    expect(handler).toHaveBeenNthCalledWith(1, [{ n: 1 }, { n: 2 }, { n: 3 }]);
-    expect(handler).toHaveBeenNthCalledWith(2, [{ n: 4 }]);
+    expect(handler).toHaveBeenCalledWith([{ n: 1 }]);
+    expect(deleted()).toEqual(['r1']);
   });
 });

@@ -5,7 +5,7 @@ import { normalizePermissions, buildSellerCatalogue } from './sellerPermissions.
 import { SYSTEM_ROLES, type SellerOrgRoleName } from '../../constants/roles.constant';
 import { prisma } from '../../utils/prisma';
 import AuthService from '../auth/auth.service';
-import { publish } from '../../infrastructure/rabbitmq/publisher';
+import { publish } from '../../infrastructure/event-bus/publisher';
 import { ROUTING_KEYS } from '../../events/routing-keys';
 import logger from '../../utils/logger';
 import { displayName } from '../../utils/display-name.util';

@@ -56,7 +56,16 @@ export const REDIS_TTL_SECONDS = parseInt(process.env.REDIS_TTL_SECONDS || '3600
 export const REDIS_TLS = process.env.REDIS_TLS === 'true';
 export const WORKER_HEALTH_PORT = parseInt(process.env.WORKER_HEALTH_PORT || '8080');
 
-export const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
+/**
+ * The async event bus (#127): an SNS topic fanned out to one SQS queue per
+ * consumer. Locally these point at LocalStack (see .env.example); deployed,
+ * they come from the environment's variables. No defaults on purpose: a queue
+ * URL that silently pointed somewhere else would let two environments steal
+ * each other's messages.
+ */
+export const EVENTS_TOPIC_ARN = process.env.EVENTS_TOPIC_ARN || '';
+export const EMAIL_SEND_QUEUE_URL = process.env.EMAIL_SEND_QUEUE_URL || '';
+export const ANALYTICS_EVENTS_QUEUE_URL = process.env.ANALYTICS_EVENTS_QUEUE_URL || '';
 
 /**
  * Mail transport.

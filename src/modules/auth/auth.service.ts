@@ -18,7 +18,7 @@ import OrganizationRepository from '../organization/organization.repository';
 import type { AuthUser } from './auth.repository';
 import logger from '../../utils/logger';
 import { displayName as userDisplayName } from '../../utils/display-name.util';
-import { publish } from '../../infrastructure/rabbitmq/publisher';
+import { publish } from '../../infrastructure/event-bus/publisher';
 import { ROUTING_KEYS } from '../../events/routing-keys';
 
 /** File extension for each accepted ID photo type (see AuthController). */

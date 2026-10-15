@@ -15,8 +15,13 @@ name: Deploy Dev
 #      process listens on inside the container. HOST_PORT is allocated per
 #      project and must not change; see /etc/caddy/sites/00-PORTS.md.
 #   3. Put this project's own secrets in the `dev` environment, and list them
-#      in the "Publish project env" step. DATABASE_URL, REDIS_URL and
-#      RABBITMQ_URL come from the host — do NOT set them here.
+#      in the "Publish project env" step. DATABASE_URL and REDIS_URL come
+#      from the host — do NOT set them here.
+#   4. The event bus (#127) is this project's own SNS topic and SQS queues, not
+#      something the host shares: set EVENTS_TOPIC_ARN, EMAIL_SEND_QUEUE_URL and
+#      ANALYTICS_EVENTS_QUEUE_URL as variables of the `staging` environment this
+#      workflow deploys with (infra/README.md).
+#      The worker refuses to start without them.
 
 on:
   workflow_dispatch:
@@ -98,8 +103,8 @@ jobs:
           provenance: false
           tags: ${{ steps.tag.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}
 
-      # This project's own config and secrets. DATABASE_URL, REDIS_* and
-      # RABBITMQ_URL are deliberately absent: the host supplies them from
+      # This project's own config and secrets. DATABASE_URL and REDIS_* are
+      # deliberately absent: the host supplies them from
       # /opt/forhu-dev/credentials/mapanytime.env and they are merged in at
       # deploy time. Setting them here would override the shared values and
       # point dev at the wrong database.
@@ -137,9 +142,9 @@ jobs:
           MAPANYTIME_WEB_APP_URL=${{ vars.MAPANYTIME_WEB_APP_URL }}
           REDIS_TTL_SECONDS=${{ vars.REDIS_TTL_SECONDS }}
           REDIS_TLS=false
-          RABBITMQ_EXCHANGE=${{ vars.RABBITMQ_EXCHANGE }}
-          RABBITMQ_QUEUE_PREFIX=${{ vars.RABBITMQ_QUEUE_PREFIX }}
-          INGESTION_QUEUE_NAME=${{ vars.INGESTION_QUEUE_NAME }}
+          EVENTS_TOPIC_ARN=${{ vars.EVENTS_TOPIC_ARN }}
+          EMAIL_SEND_QUEUE_URL=${{ vars.EMAIL_SEND_QUEUE_URL }}
+          ANALYTICS_EVENTS_QUEUE_URL=${{ vars.ANALYTICS_EVENTS_QUEUE_URL }}
           WORKER_HEALTH_PORT=${{ vars.WORKER_HEALTH_PORT }}
           METRICS_INTERVAL_MS=${{ vars.METRICS_INTERVAL_MS }}
           AWS_S3_BUCKET_NAME=${{ vars.AWS_S3_BUCKET_NAME }}
@@ -193,7 +198,7 @@ jobs:
             "docker run --rm --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} --entrypoint npx ${IMAGE} prisma migrate deploy"
             "docker run -d --name ${{ env.CONTAINER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} -p 127.0.0.1:${{ env.HOST_PORT }}:${{ env.APP_PORT }} ${IMAGE}"
             # Production runs a worker beside the API from the same image
-            # (mapanytime-api-worker). Without it anything queued on RabbitMQ is
+            # (mapanytime-api-worker). Without it anything queued on the event bus is
             # accepted and never processed, which reads as the API silently
             # dropping jobs rather than as a missing container.
             #

@@ -10,24 +10,23 @@ Region is `ap-southeast-1` throughout.
 
 ## 1. What is actually connected to AWS
 
-| Service              | Used for                                                        | How it is reached                                              | Live?      |
-| :------------------- | :-------------------------------------------------------------- | :------------------------------------------------------------- | :--------- |
-| **S3**               | All user uploads — avatars, product images, seller ID documents | `@aws-sdk/client-s3`, presigned `PutObject`/`GetObject` only   | Yes        |
-| **ECR**              | Docker images for api, web, admin                               | `aws-actions/amazon-ecr-login` in CI; `docker pull` on the box | Yes        |
-| **EC2**              | Runs the API, web and admin containers                          | `ssm:SendCommand` — see §4                                     | Yes        |
-| **SSM**              | Deploy transport, and the env file as a SecureString parameter  | `SendCommand` from CI, `GetParameter` on the box               | Yes        |
-| **RDS (PostgreSQL)** | The application database                                        | `DATABASE_URL`, `sslmode=require`                              | Yes        |
-| **CloudWatch Logs**  | Container logs under `/mapanytime-api/*`                        | EC2 instance profile                                           | Yes        |
-| **STS**              | GitHub Actions assumes the deploy role via OIDC                 | `sts:AssumeRoleWithWebIdentity` — see §2B                      | Yes        |
-| **IAM**              | Nothing at deploy time any more — the self-grant step is gone   | policies attached once, by hand                                | Setup only |
+| Service              | Used for                                                        | How it is reached                                              | Live?                                      |
+| :------------------- | :-------------------------------------------------------------- | :------------------------------------------------------------- | :----------------------------------------- |
+| **S3**               | All user uploads — avatars, product images, seller ID documents | `@aws-sdk/client-s3`, presigned `PutObject`/`GetObject` only   | Yes                                        |
+| **ECR**              | Docker images for api, web, admin                               | `aws-actions/amazon-ecr-login` in CI; `docker pull` on the box | Yes                                        |
+| **EC2**              | Runs the API, web and admin containers                          | `ssm:SendCommand` — see §4                                     | Yes                                        |
+| **SSM**              | Deploy transport, and the env file as a SecureString parameter  | `SendCommand` from CI, `GetParameter` on the box               | Yes                                        |
+| **RDS (PostgreSQL)** | The application database                                        | `DATABASE_URL`, `sslmode=require`                              | Yes                                        |
+| **SNS + SQS**        | The async event bus (#127): one topic, a queue per consumer     | `@aws-sdk/client-sns` / `client-sqs`, instance role            | Not yet — run `event-bus-setup.sh`, see §4 |
+| **CloudWatch Logs**  | Container logs under `/mapanytime-api/*`                        | EC2 instance profile                                           | Yes                                        |
+| **STS**              | GitHub Actions assumes the deploy role via OIDC                 | `sts:AssumeRoleWithWebIdentity` — see §2B                      | Yes                                        |
+| **IAM**              | Nothing at deploy time any more — the self-grant step is gone   | policies attached once, by hand                                | Setup only                                 |
 
 **Not AWS, despite looking like it:**
 
 - **Redis** — `REDIS_HOST` defaults to `localhost` in both workflows and in the
   staging `.env`. Self-hosted on the EC2 box, not ElastiCache. The TLS flag and
   the ElastiCache mentions in the README and handbook are forward-looking only.
-- **RabbitMQ** — `RABBITMQ_URL` likewise defaults to `amqp://…@localhost:5672`.
-  Self-hosted, not Amazon MQ.
 - **Mail** — `smtp.ethereal.email`. Not SES.
 - **CDN** — `S3_CDN_URL` exists and is empty. No CloudFront distribution is
   configured from this repo.
@@ -53,7 +52,7 @@ Attach:
 | `AmazonSSMManagedInstanceCore`    | **AWS managed** — do not hand-roll | Session Manager, SendCommand target, patching |
 | `ec2-ecr-pull-policy.json`        | this directory                     | Pull images from `mapanytime*` repos          |
 | `ec2-cloudwatch-logs-policy.json` | this directory                     | Write to `/mapanytime-api/*` log groups       |
-| `ec2-app-runtime-policy.json`     | this directory — **new**           | S3 uploads, and Parameter Store reads         |
+| `ec2-app-runtime-policy.json`     | this directory — **new**           | S3 uploads, Parameter Store reads, event bus  |
 
 `AmazonSSMManagedInstanceCore` is the one that makes the box a valid SSM target.
 Without it the instance never registers and `SendCommand` has nothing to talk to.
@@ -168,6 +167,14 @@ see §4a.
 4. **Confirm the instance is a managed node** — `aws ssm describe-instance-information`
    should list it. If it does not, the agent is not running or the subnet has no
    route to the SSM endpoints.
+5. **Create the event bus** (#127), once per environment, with admin credentials:
+   `infra/event-bus-setup.sh staging` (then `production`). It creates the SNS
+   topic `<env>-mapanytime-events`, a queue per consumer with a `-dlq` twin, the
+   queue policies that let the topic deliver, and filtered raw-delivery
+   subscriptions. It prints `EVENTS_TOPIC_ARN`, `EMAIL_SEND_QUEUE_URL` and
+   `ANALYTICS_EVENTS_QUEUE_URL`: set them as **variables** of that GitHub
+   environment. The worker refuses to start without them, and the API's
+   `/health/ready` reports `eventBus: down`.
 
 **Define the tag variables per GitHub environment, not repository-wide.** Both
 workflows read the same `EC2_TARGET_TAG_KEY` / `EC2_TARGET_TAG_VALUE` names but
@@ -231,6 +238,14 @@ merits — staging writes and deletes would be landing next to real customer
 uploads. The S3 user is named `style-mirror-s3-dev` too, so the `dev` suffix may
 be a naming accident rather than an environment marker. **This is unverified —
 neither name was confirmed against the production environment.**
+
+**The event-bus statements in `ec2-app-runtime-policy.json` match every
+environment.** They allow `*-mapanytime-events` and `*-mapanytime-*`, so the
+staging role could read production's queues, the same shape of problem as the
+shared bucket above. A worker never chooses a queue on its own (the URLs come
+from its environment's variables), so this is a guard rail, not a live leak.
+Give each instance role its own copy, scoped to `staging-` or `production-`,
+when the policies are split per environment.
 
 **`iam:PutRolePolicy` is no longer used**, by either workflow — the self-grant
 step is deleted from both. `cicd-deploy-policy.json` deliberately does not grant

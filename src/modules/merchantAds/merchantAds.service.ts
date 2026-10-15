@@ -5,7 +5,7 @@ import type { NearbyStore } from '../stores/store.repository';
 import { S3_CDN_URL } from '../../config';
 import S3Util from '../../utils/s3.util';
 import { deriveAdState, windowsOverlap, START_GRACE_MS, type AdWindowState } from './adWindow';
-import { publish } from '../../infrastructure/rabbitmq/publisher';
+import { publish } from '../../infrastructure/event-bus/publisher';
 import { assertStoreInScope, resolveAccessibleStoreIds } from '../organization/storeAccess';
 import type { AuthUser } from '../auth/auth.repository';
 

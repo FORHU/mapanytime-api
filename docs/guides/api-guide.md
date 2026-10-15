@@ -146,7 +146,7 @@ x-correlation-id: my-trace-id-12345
   "status": "ready",
   "timestamp": "...",
   "uptime": 3600,
-  "services": { "database": "up", "redis": "up", "rabbitmq": "up" }
+  "services": { "database": "up", "redis": "up", "eventBus": "up" }
 }
 ```
 

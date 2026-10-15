@@ -19,7 +19,7 @@ jest.setTimeout(20000);
  * anyone. These tests exist so that cannot regress silently.
  *
  * Infrastructure is mocked so the suite runs without a live database, Redis or
- * RabbitMQ — the same approach as health.test.ts.
+ * the event bus — the same approach as health.test.ts.
  */
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
@@ -38,13 +38,13 @@ jest.mock('../../src/infrastructure/redis', () => ({
   },
 }));
 
-jest.mock('../../src/infrastructure/rabbitmq', () => ({
-  rabbitmq: {
-    connect: jest.fn().mockResolvedValue(undefined),
-    close: jest.fn().mockResolvedValue(undefined),
-    isReady: jest.fn().mockReturnValue(true),
+jest.mock('../../src/infrastructure/event-bus', () => ({
+  eventBus: {
+    ping: jest.fn().mockResolvedValue(true),
     publish: jest.fn().mockResolvedValue(true),
-    consume: jest.fn().mockResolvedValue(undefined),
+    publishMany: jest.fn().mockResolvedValue([]),
+    consume: jest.fn(),
+    consumeBatch: jest.fn(),
   },
 }));
 

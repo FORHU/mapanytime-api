@@ -1,11 +1,11 @@
 import AuthSvc from '../../src/modules/auth/auth.service';
 import AuthRepo from '../../src/modules/auth/auth.repository';
-import { publish } from '../../src/infrastructure/rabbitmq/publisher';
+import { publish } from '../../src/infrastructure/event-bus/publisher';
 import { prisma } from '../../src/utils/prisma';
 import crypto from 'crypto';
 
 jest.mock('../../src/modules/auth/auth.repository');
-jest.mock('../../src/infrastructure/rabbitmq/publisher', () => ({ publish: jest.fn() }));
+jest.mock('../../src/infrastructure/event-bus/publisher', () => ({ publish: jest.fn() }));
 jest.mock('../../src/utils/cache.util', () => ({
   __esModule: true,
   default: { del: jest.fn(), get: jest.fn(), set: jest.fn() },
