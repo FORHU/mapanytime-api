@@ -2,6 +2,7 @@ import ReturnRepository from './return.repository';
 import { PAYMENTSTATUS, Prisma, RETURNSTATUS } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import PaymentService from '../payments/payment.service';
+import { recordGatewayFeeKeptOnRefund } from '../payments/refund-ledger';
 import SettlementService from '../settlements/settlement.service';
 import { emitNotificationToUser } from '../../infrastructure/socket';
 import logger from '../../utils/logger';
@@ -345,6 +346,16 @@ export default class ReturnService {
           refundedAt: new Date(),
         },
       });
+
+      // The gateway keeps its fee; the platform absorbs it, on the ledger (F86).
+      if (!isCash) {
+        await recordGatewayFeeKeptOnRefund(tx, {
+          orderId: returnRequest.orderId,
+          paymentAmount: Number(payment.amount),
+          totalRefunded,
+          refundReference,
+        });
+      }
 
       // The seller is not paid for a sale that came back.
       const settlement = await SettlementService.markRefundedForOrder(tx, returnRequest.orderId);
