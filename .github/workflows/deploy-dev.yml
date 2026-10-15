@@ -216,8 +216,12 @@ jobs:
             "docker rm -f ${{ env.WORKER }} 2>/dev/null || true"
             "docker run -d --name ${{ env.WORKER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} ${IMAGE} npm run start:worker"
             # /live answers only once the worker's consumers and scheduler are up.
-            # Single-quoted so the container's shell, not the host's, expands the port.
-            "for i in $(seq 1 20); do docker exec ${{ env.WORKER }} sh -c 'wget -q -O /dev/null http://127.0.0.1:${WORKER_HEALTH_PORT:-8080}/live' && exit 0; sleep 3; done; echo 'Worker did not start within 60 seconds:'; docker logs ${{ env.WORKER }} --tail 50; exit 1"
+            # Every \$ is escaped: this array is built in double quotes on the
+            # runner, which would otherwise expand $(seq 1 20) into twenty lines
+            # and send the box `for i in 1` / `2` / ... (a syntax error, which is
+            # how the first deploy with this check failed). The port is expanded
+            # by the container's shell.
+            "for i in \$(seq 1 20); do docker exec ${{ env.WORKER }} sh -c 'wget -q -O /dev/null http://127.0.0.1:\${WORKER_HEALTH_PORT:-8080}/live' && exit 0; sleep 3; done; echo 'Worker did not start within 60 seconds:'; docker logs ${{ env.WORKER }} --tail 50; exit 1"
           )
 
           # jq builds the JSON, so a quote inside any command cannot break it.
