@@ -114,7 +114,6 @@ jobs:
       - name: Publish project env to Parameter Store
         env:
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PAYMONGO_SECRET_KEY: ${{ secrets.PAYMONGO_SECRET_KEY }}
@@ -161,7 +160,7 @@ jobs:
           XENDIT_API_URL=${{ vars.XENDIT_API_URL }}
           ENVEOF
 
-          for k in BETTER_AUTH_SECRET GOOGLE_CLIENT_SECRET \
+          for k in BETTER_AUTH_SECRET \
                    FACEBOOK_APP_SECRET OPENAI_API_KEY PAYMONGO_SECRET_KEY \
                    PAYMONGO_WEBHOOK_SECRET_KEY XENDIT_SECRET_KEY XENDIT_WEBHOOK_TOKEN \
                    MAILER_PASSWORD SMTP_PASS; do

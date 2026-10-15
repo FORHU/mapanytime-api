@@ -141,7 +141,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
           CHAT_WONDER_API_URL: ${{ secrets.CHAT_WONDER_API_URL || '' }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID || '' }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET || '' }}
           FACEBOOK_APP_ID: ${{ secrets.FACEBOOK_APP_ID || '' }}
           FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET || '' }}
           PAYMONGO_SECRET_KEY: ${{ secrets.PAYMONGO_SECRET_KEY || '' }}
@@ -216,7 +215,6 @@ jobs:
             printf 'OPENAI_API_KEY=%s\n'              "$OPENAI_API_KEY"
             printf 'CHAT_WONDER_API_URL=%s\n'         "$CHAT_WONDER_API_URL"
             printf 'GOOGLE_CLIENT_ID=%s\n'            "$GOOGLE_CLIENT_ID"
-            printf 'GOOGLE_CLIENT_SECRET=%s\n'        "$GOOGLE_CLIENT_SECRET"
             printf 'FACEBOOK_APP_ID=%s\n'             "$FACEBOOK_APP_ID"
             printf 'FACEBOOK_APP_SECRET=%s\n'         "$FACEBOOK_APP_SECRET"
             printf 'PAYMONGO_SECRET_KEY=%s\n'         "$PAYMONGO_SECRET_KEY"
