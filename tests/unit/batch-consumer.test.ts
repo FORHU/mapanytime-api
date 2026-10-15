@@ -38,7 +38,7 @@ describe('consumeBatch', () => {
     await consumer.stop();
 
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler).toHaveBeenCalledWith([{ n: 1 }, { n: 2 }, { n: 3 }]);
+    expect(handler).toHaveBeenCalledWith([{ n: 1 }, { n: 2 }, { n: 3 }], expect.anything());
     expect(deleted()).toEqual(['r1', 'r2', 'r3']);
   });
 
@@ -64,7 +64,7 @@ describe('consumeBatch', () => {
     await consumer.stop();
 
     // Without the deadline a quiet queue would hold events indefinitely.
-    expect(handler).toHaveBeenCalledWith([{ n: 1 }]);
+    expect(handler).toHaveBeenCalledWith([{ n: 1 }], expect.anything());
   });
 
   it('never deletes before the handler resolves', async () => {
@@ -117,7 +117,47 @@ describe('consumeBatch', () => {
 
     // Retrying it can never succeed, so it is deleted rather than dead-lettered.
     expect(fake.callsTo('DeleteMessageCommand').map((i) => i.ReceiptHandle)).toEqual(['r1']);
-    expect(handler).toHaveBeenCalledWith([{ n: 2 }]);
+    expect(handler).toHaveBeenCalledWith([{ n: 2 }], expect.anything());
+  });
+
+  it('hands the handler each event’s metadata alongside its payload', async () => {
+    const handler = jest.fn().mockResolvedValue(undefined);
+    fake.push({ n: 1 });
+
+    const consumer = consumeBatch({ ...OPTIONS, batchSize: 1 }, handler);
+    await waitFor(() => handler.mock.calls.length === 1);
+    await consumer.stop();
+
+    expect(handler).toHaveBeenCalledWith([{ n: 1 }], [expect.objectContaining({ eventId: 'e1' })]);
+  });
+
+  it('unwraps an SNS envelope when the subscription lacks raw delivery', async () => {
+    const handler = jest.fn().mockResolvedValue(undefined);
+    fake.push({ n: 1 }, { snsEnvelope: true });
+
+    const consumer = consumeBatch({ ...OPTIONS, batchSize: 1 }, handler);
+    await waitFor(() => handler.mock.calls.length === 1);
+    await consumer.stop();
+
+    expect(handler).toHaveBeenCalledWith([{ n: 1 }], expect.anything());
+    expect(deleted()).toEqual(['r1']);
+  });
+
+  it('drops events of a type it does not handle instead of writing them', async () => {
+    const handler = jest.fn().mockResolvedValue(undefined);
+    fake.push({ n: 1 }, { eventType: 'email.send.requested' });
+    fake.push({ n: 2 }, { eventType: 'analytics.event.recorded' });
+
+    const consumer = consumeBatch(
+      { ...OPTIONS, batchSize: 1, eventTypes: ['analytics.event.recorded'] },
+      handler,
+    );
+    await waitFor(() => handler.mock.calls.length === 1 && deleted().length === 2);
+    await consumer.stop();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith([{ n: 2 }], expect.anything());
+    expect(fake.callsTo('DeleteMessageCommand').map((i) => i.ReceiptHandle)).toEqual(['r1']);
   });
 
   it('deletes a batch larger than ten in SQS-sized chunks', async () => {
@@ -140,7 +180,7 @@ describe('consumeBatch', () => {
     await waitFor(() => fake.pending.length === 0);
     await consumer.stop();
 
-    expect(handler).toHaveBeenCalledWith([{ n: 1 }]);
+    expect(handler).toHaveBeenCalledWith([{ n: 1 }], expect.anything());
     expect(deleted()).toEqual(['r1']);
   });
 });
