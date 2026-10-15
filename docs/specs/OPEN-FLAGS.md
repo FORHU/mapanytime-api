@@ -31,7 +31,7 @@ down do not survive it.
 
 | Flag         | Decision                                                                                                                                                         |
 | :----------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **F109**     | **Refund it.** A payment that lands on an already-cancelled order is refunded automatically through the provider adapter. To build — #117                        |
+| **F109**     | **Refund it.** A payment that lands on an already-cancelled order is refunded automatically through the provider adapter. **Built** — #117                       |
 | **F86**      | **The platform absorbs the gateway fee on a refund**, recorded as a `PLATFORM`-payer charge row so it shows in the ledger instead of vanishing. **Built** — #118 |
 | **F65**      | **Superseded.** The gateway moves to **Stripe** (#124), so Xendit's rate card is not needed. The rule carries over: seed Stripe's rates before real money        |
 | **F98–F106** | **Superseded by Better Auth** (#122, merged in #123). JWT, refresh-token rotation and `activeSessionId` are gone; sessions are Better Auth's                     |
@@ -47,7 +47,7 @@ ported (web #89).
 | :------- | :------------------------------------------------------------------------------------------------------------ |
 | **F107** | **Fixed.** The socket gateway authenticates notification subscriptions; client-callable push and chat removed |
 | **F108** | **Fixed.** The stale-order sweeper no longer cancels cash-on-pickup orders                                    |
-| **F109** | _Half fixed._ A payment on an already-cancelled order is logged as `REFUND OWED`; the refund is a decision    |
+| **F109** | **Fixed.** Sessions close at 12 minutes; a late payment is refunded automatically (#117)                      |
 | **F110** | **Fixed.** Scheduler: TEMP schedule reverted, log-only jobs removed                                           |
 | **F111** | **Fixed.** Emergency caps follow store health; APK limiter shares Redis                                       |
 | **F112** | **Fixed.** API README rewritten around MapAnytime                                                             |
@@ -112,7 +112,15 @@ orders booked for a pickup the next day. Its test had no cash case.
 indefinitely. Its hold is still released by the reservation TTL sweeper at
 `pickupAt + 2h`, so no stock is trapped, but nothing closes the order itself.
 
-### F109. A payment after the sweeper's cancel is captured with no order — HALF FIXED 2026-10-14
+### F109. A payment after the sweeper's cancel is captured with no order — FIXED 2026-10-15 (#117)
+
+**Both halves built (#117):** Xendit checkout sessions now expire after 12
+minutes (`orders/order.ttl.ts`, under the sweeper's 15), and a payment that
+still lands on a closed order is refunded automatically through the provider
+once the webhook commits (`PaymentService.refundPaymentOnClosedOrder`), with
+`REFUND OWED` logged only if that refund fails. Building it found #139: Xendit
+refunds sent the session id, which the Refunds API does not take. PayMongo
+sessions still have no expiry set. The history below is kept for the record.
 
 The sweeper cancels an unpaid order after 15 minutes, but no checkout session is
 opened with an expiry (`xendit.provider.ts` sends none), so the hosted page stays
