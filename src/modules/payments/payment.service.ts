@@ -8,6 +8,7 @@ import { XenditProvider } from './providers/xendit.provider';
 import PricingEngineService, { OrderPricingResult } from '../pricing/pricing-engine.service';
 import InventoryStockRepository from '../inventory/inventoryStock.repository';
 import logger from '../../utils/logger';
+import { recordGatewayFeeKeptOnRefund } from './refund-ledger';
 
 /** Peso amount for buyer-facing copy: `1500` -> `₱1,500`. */
 const formatPeso = (amount: number) => `₱${amount.toLocaleString('en-PH')}`;
@@ -581,6 +582,10 @@ export default class PaymentService {
       return { status: 'ignored_no_order_id', eventId };
     }
 
+    // Set inside the transaction when money lands on an order the sweeper already
+    // closed (F109); the refund is sent after it commits, never inside it.
+    let paidOnClosedOrder = false;
+
     // 4. Execute state transition transactionally
     const { payment, justCompleted } = await prisma.$transaction(async (tx) => {
       // Upsert webhook event idempotency record
@@ -641,19 +646,20 @@ export default class PaymentService {
         });
 
         // F109: money arrived for an order that is no longer waiting for it. The stale-order
-        // sweeper cancels a PENDING order after 15 minutes and releases its stock, but the
-        // gateway session it was paid through stays open longer than that, so a buyer who
-        // pays late is charged for an order that no longer exists. Nothing refunds them
-        // automatically yet — that is a decision, not a fix — so make it impossible to miss.
+        // sweeper cancels a PENDING order after 15 minutes and releases its stock; a buyer who
+        // pays after that is charged for an order that no longer exists. Checkout sessions now
+        // close before the sweeper runs, so this should be rare; whatever still gets through is
+        // refunded automatically once this transaction commits (#117).
         if (advanced.count === 0) {
           const current = await tx.orders.findUnique({
             where: { id: orderId },
             select: { status: true },
           });
           if (current && (current.status === 'CANCELLED' || current.status === 'FAILED')) {
-            logger.error(
-              `[Payment] REFUND OWED: payment ${existingPayment.id} completed for order ${orderId} ` +
-                `which is already ${current.status} — the buyer was charged for a cancelled order`,
+            paidOnClosedOrder = true;
+            logger.warn(
+              `[Payment] Payment ${existingPayment.id} completed for order ${orderId}, which is ` +
+                `already ${current.status}. Refunding it automatically.`,
               {
                 orderId,
                 paymentId: existingPayment.id,
@@ -711,6 +717,10 @@ export default class PaymentService {
       return { payment: existingPayment, justCompleted: false };
     });
 
+    if (paidOnClosedOrder) {
+      await this.refundPaymentOnClosedOrder(adapter, payment.id, orderId);
+    }
+
     // 5. Asynchronous Notification Delivery
     if (justCompleted) {
       try {
@@ -752,5 +762,131 @@ export default class PaymentService {
     }
 
     return { status: 'processed', orderId, paymentId: payment.id };
+  }
+
+  /**
+   * Refund a payment that completed after its order was already closed (F109, #117).
+   *
+   * The money goes back through the provider that took it. Called after the
+   * webhook's transaction commits, so a provider call never holds a database
+   * transaction open, and never throws: the webhook has already been recorded,
+   * and a failure here must not make the gateway retry it.
+   *
+   * Moving the payment from COMPLETED to REFUND_PENDING is the claim, so a
+   * second caller for the same payment does nothing. If the provider refuses,
+   * the payment goes back to COMPLETED and a `REFUND OWED` error is logged for a
+   * person to refund it by hand, which was the only behaviour before this.
+   *
+   * Returns true when the money was refunded.
+   */
+  static async refundPaymentOnClosedOrder(
+    adapter: PaymentProvider,
+    paymentId: string,
+    orderId: string,
+  ): Promise<boolean> {
+    const owed = (reason: string, details: Record<string, unknown> = {}) =>
+      logger.error(
+        `[Payment] REFUND OWED: payment ${paymentId} completed for closed order ${orderId}, ` +
+          `and ${reason}. Refund it in the provider dashboard and reconcile.`,
+        { orderId, paymentId, ...details },
+      );
+    const message = (error: unknown) => (error instanceof Error ? error.message : error);
+
+    try {
+      const payment = await prisma.payments.findUnique({ where: { id: paymentId } });
+      if (!payment) {
+        owed('its payment record could not be read');
+        return false;
+      }
+      if (!payment.providerReference) {
+        owed('it has no provider reference to refund');
+        return false;
+      }
+      if (!adapter.refundPayment) {
+        owed('this provider does not support automated refunds');
+        return false;
+      }
+
+      const claimed = await prisma.payments.updateMany({
+        where: { id: paymentId, status: PAYMENTSTATUS.COMPLETED },
+        data: { status: PAYMENTSTATUS.REFUND_PENDING },
+      });
+      if (claimed.count === 0) return false;
+
+      const amount = Number(payment.amount);
+      let refundReference: string;
+      try {
+        const result = await adapter.refundPayment(
+          payment.providerReference,
+          Math.round(amount * 100),
+          'requested_by_customer',
+        );
+        refundReference = result.refundId;
+      } catch (error) {
+        await prisma.payments.update({
+          where: { id: paymentId },
+          data: { status: PAYMENTSTATUS.COMPLETED },
+        });
+        owed('the automatic refund failed', { error: message(error) });
+        return false;
+      }
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.payments.update({
+            where: { id: paymentId },
+            data: {
+              status: PAYMENTSTATUS.REFUNDED,
+              refundedAmount: payment.amount,
+              refundReference,
+              refundedAt: new Date(),
+            },
+          });
+          await recordGatewayFeeKeptOnRefund(tx, {
+            orderId,
+            paymentAmount: amount,
+            totalRefunded: amount,
+            refundReference,
+          });
+        });
+      } catch (error) {
+        // The money has gone back; only our record of it failed.
+        logger.error(
+          `[Payment] Refunded payment ${paymentId} for closed order ${orderId} at the provider ` +
+            `(refund ${refundReference}), but recording it failed. It is left REFUND_PENDING; ` +
+            `mark it REFUNDED by hand.`,
+          { orderId, paymentId, refundReference, error: message(error) },
+        );
+        return true;
+      }
+
+      logger.info(
+        `[Payment] Refunded ${formatPeso(amount)} for closed order ${orderId} (refund ${refundReference}).`,
+      );
+
+      try {
+        const order = await prisma.orders.findUnique({
+          where: { id: orderId },
+          include: { buyer: { select: { userId: true } } },
+        });
+        if (order?.buyer?.userId) {
+          emitNotificationToUser(order.buyer.userId, {
+            id: paymentId,
+            title: 'Payment refunded',
+            body:
+              `Order #${orderId} had already expired when your payment arrived, ` +
+              `so your ${formatPeso(amount)} has been refunded.`,
+            metadata: { orderId, type: 'REFUND_ISSUED' },
+            sentAt: new Date().toISOString(),
+          });
+        }
+      } catch {
+        // Notification delivery is best-effort.
+      }
+      return true;
+    } catch (error) {
+      owed('handling it failed unexpectedly', { error: message(error) });
+      return false;
+    }
   }
 }

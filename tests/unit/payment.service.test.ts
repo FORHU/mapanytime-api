@@ -2,12 +2,19 @@ import PaymentService from '../../src/modules/payments/payment.service';
 import { prisma } from '../../src/utils/prisma';
 import { emitNotificationToUser } from '../../src/infrastructure/socket';
 import logger from '../../src/utils/logger';
+import { MockProvider } from '../../src/modules/payments/providers/mock.provider';
 
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
     $transaction: jest.fn(),
     orders: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
-    payments: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
+    payments: {
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    },
     paymentProviders: { findMany: jest.fn(), findUnique: jest.fn() },
     paymentMethods: { findMany: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn() },
     paymentWebhookEvents: { findUnique: jest.fn(), upsert: jest.fn() },
@@ -39,6 +46,8 @@ const makeTx = () => ({
   inventory: { updateMany: jest.fn(), update: jest.fn() },
   inventoryReservations: { updateMany: jest.fn() },
   paymentWebhookEvents: { upsert: jest.fn() },
+  // No gateway fee recorded, so a refund writes no fee row unless a test sets one.
+  orderCharges: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn() },
   // Ending a hold is an UPDATE ... RETURNING of the rows still RESERVED.
   // Default: nothing left to claim.
   $queryRaw: jest.fn().mockResolvedValue([]),
@@ -223,24 +232,19 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
     });
 
     /**
-     * F109. The stale-order sweeper cancels an unpaid order after 15 minutes, but the
-     * gateway session stays payable for longer. A late payment must be recorded (the money
-     * did move), shouted about, and must not tell the seller to prepare a cancelled order.
+     * F109 (#117). The stale-order sweeper cancels an unpaid order after 15 minutes. A
+     * payment that still lands afterwards is recorded (the money did move), refunded
+     * automatically through the provider, and must not tell the seller to prepare a
+     * cancelled order.
      */
-    it('flags a payment that lands on an already-cancelled order and sends no notifications', async () => {
-      const pendingPayment = { id: 'pay-late', orderId: ORDER_ID, status: 'FAILED', amount: 500 };
-      tx.payments.findFirst.mockResolvedValue(pendingPayment);
-      tx.payments.update.mockResolvedValue({ ...pendingPayment, status: 'COMPLETED' });
-      tx.orders.updateMany.mockResolvedValue({ count: 0 });
-      tx.orders.findUnique.mockResolvedValue({ status: 'CANCELLED' });
-      mockOrdersFindUnique.mockResolvedValue({
-        id: ORDER_ID,
-        status: 'CANCELLED',
-        buyer: { userId: 'buyer-user' },
-        store: { storeName: 'Flagship Store', seller: { userId: 'seller-user' } },
-      });
-      const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => logger);
-
+    describe('a payment that lands on an already-cancelled order', () => {
+      const latePayment = {
+        id: 'pay-late',
+        orderId: ORDER_ID,
+        status: 'FAILED',
+        amount: 500,
+        providerReference: 'pay_ref_late',
+      };
       const payload = {
         data: {
           id: 'evt-late',
@@ -250,27 +254,100 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
           },
         },
       };
+      let refundPayment: jest.SpyInstance;
 
-      try {
-        const result = await PaymentService.processProviderWebhook(
-          'MOCK',
-          JSON.stringify(payload),
-          'sig',
-          payload,
-        );
+      beforeEach(() => {
+        tx.payments.findFirst.mockResolvedValue(latePayment);
+        tx.payments.update.mockResolvedValue({ ...latePayment, status: 'COMPLETED' });
+        tx.orders.updateMany.mockResolvedValue({ count: 0 });
+        tx.orders.findUnique.mockResolvedValue({ status: 'CANCELLED' });
+        mockOrdersFindUnique.mockResolvedValue({
+          id: ORDER_ID,
+          status: 'CANCELLED',
+          buyer: { userId: 'buyer-user' },
+          store: { storeName: 'Flagship Store', seller: { userId: 'seller-user' } },
+        });
+        (prisma.payments.findUnique as jest.Mock).mockResolvedValue({
+          ...latePayment,
+          status: 'COMPLETED',
+        });
+        (prisma.payments.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        refundPayment = jest
+          .spyOn(MockProvider.prototype, 'refundPayment')
+          .mockResolvedValue({ refundId: 'ref_late', amount: 50000, status: 'succeeded' } as never);
+      });
+
+      afterEach(() => refundPayment.mockRestore());
+
+      const deliver = () =>
+        PaymentService.processProviderWebhook('MOCK', JSON.stringify(payload), 'sig', payload);
+
+      it('records the payment, refunds it, and tells only the buyer', async () => {
+        const result = await deliver();
 
         expect(result.status).toBe('processed');
         expect(tx.payments.update).toHaveBeenCalledWith(
           expect.objectContaining({ data: expect.objectContaining({ status: 'COMPLETED' }) }),
         );
-        expect(errorSpy).toHaveBeenCalledWith(
-          expect.stringContaining('REFUND OWED'),
-          expect.objectContaining({ orderId: ORDER_ID, orderStatus: 'CANCELLED' }),
+        expect(prisma.payments.updateMany).toHaveBeenCalledWith({
+          where: { id: 'pay-late', status: 'COMPLETED' },
+          data: { status: 'REFUND_PENDING' },
+        });
+        expect(refundPayment).toHaveBeenCalledWith('pay_ref_late', 50000, 'requested_by_customer');
+        expect(tx.payments.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: 'REFUNDED', refundReference: 'ref_late' }),
+          }),
         );
-        expect(mockEmit).not.toHaveBeenCalled();
-      } finally {
-        errorSpy.mockRestore();
-      }
+        // No "Payment Confirmed" or "New Paid Order"; one refund notice to the buyer.
+        expect(mockEmit).toHaveBeenCalledTimes(1);
+        expect(mockEmit).toHaveBeenCalledWith(
+          'buyer-user',
+          expect.objectContaining({ title: 'Payment refunded' }),
+        );
+      });
+
+      it('records the gateway fee the platform absorbs on the refund', async () => {
+        tx.orderCharges.findMany.mockImplementation(({ where }: { where: { type: string } }) =>
+          Promise.resolve(where.type === 'PAYMENT_PROCESSING_FEE' ? [{ amount: 11.15 }] : []),
+        );
+
+        await deliver();
+
+        expect(tx.orderCharges.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ type: 'REFUND', payer: 'PLATFORM' }),
+          }),
+        );
+      });
+
+      it('falls back to REFUND OWED, without failing the webhook, when the refund fails', async () => {
+        refundPayment.mockRejectedValue(new Error('gateway down'));
+        const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+
+        try {
+          await expect(deliver()).resolves.toMatchObject({ status: 'processed' });
+          expect(prisma.payments.update).toHaveBeenCalledWith({
+            where: { id: 'pay-late' },
+            data: { status: 'COMPLETED' },
+          });
+          expect(errorSpy).toHaveBeenCalledWith(
+            expect.stringContaining('REFUND OWED'),
+            expect.objectContaining({ orderId: ORDER_ID, paymentId: 'pay-late' }),
+          );
+          expect(mockEmit).not.toHaveBeenCalled();
+        } finally {
+          errorSpy.mockRestore();
+        }
+      });
+
+      it('does not refund twice when another caller already claimed the payment', async () => {
+        (prisma.payments.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+        await deliver();
+
+        expect(refundPayment).not.toHaveBeenCalled();
+      });
     });
 
     it('handles payment failure by releasing inventory reservations', async () => {
