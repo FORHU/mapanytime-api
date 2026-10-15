@@ -222,8 +222,15 @@ jobs:
             "aws ssm get-parameter --name ${{ env.ENV_PARAM }} --with-decryption --region ${{ env.AWS_REGION }} --query Parameter.Value --output text >> ${{ env.MERGED_ENV }}"
             "chmod 600 ${{ env.MERGED_ENV }}"
             "aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${REGISTRY}"
-            "docker container prune -f || true"
-            "docker image prune -af || true"
+            # Only this repository's images. The box is shared with other
+            # projects, and a box-wide `docker container prune -f` /
+            # `docker image prune -af` deletes their stopped containers and
+            # images too (#136, #141). `docker images <repo>` matches the
+            # repository exactly, and rmi without -f skips an image a running
+            # container still uses, so the live version stays as the rollback
+            # copy until the next deploy. Our own containers are replaced by
+            # name below.
+            "docker images --filter dangling=false --format '{{.Repository}}:{{.Tag}}' ${REGISTRY}/${{ env.ECR_REPOSITORY }} | xargs -r docker rmi 2>/dev/null || true"
             "docker pull --platform linux/arm64 ${IMAGE}"
             "docker rm -f ${{ env.CONTAINER }} 2>/dev/null || true"
             "docker run --rm --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} --entrypoint npx ${IMAGE} prisma migrate deploy"
