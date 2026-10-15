@@ -29,13 +29,13 @@ down do not survive it.
 
 ## Decided 2026-10-14
 
-| Flag         | Decision                                                                                                                                                        |
-| :----------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **F109**     | **Refund it.** A payment that lands on an already-cancelled order is refunded automatically through the provider adapter. To build — #117                       |
-| **F86**      | **The platform absorbs the gateway fee on a refund**, recorded as a `PLATFORM`-payer charge row so it shows in the ledger instead of vanishing. To build — #118 |
-| **F65**      | **Superseded.** The gateway moves to **Stripe** (#124), so Xendit's rate card is not needed. The rule carries over: seed Stripe's rates before real money       |
-| **F98–F106** | **Superseded by Better Auth** (#122, merged in #123). JWT, refresh-token rotation and `activeSessionId` are gone; sessions are Better Auth's                    |
-| **F114**     | Being fixed as planned: legacy PBKDF2 hashes are re-hashed to scrypt on each user's next sign-in (#123)                                                         |
+| Flag         | Decision                                                                                                                                                         |
+| :----------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **F109**     | **Refund it.** A payment that lands on an already-cancelled order is refunded automatically through the provider adapter. To build — #117                        |
+| **F86**      | **The platform absorbs the gateway fee on a refund**, recorded as a `PLATFORM`-payer charge row so it shows in the ledger instead of vanishing. **Built** — #118 |
+| **F65**      | **Superseded.** The gateway moves to **Stripe** (#124), so Xendit's rate card is not needed. The rule carries over: seed Stripe's rates before real money        |
+| **F98–F106** | **Superseded by Better Auth** (#122, merged in #123). JWT, refresh-token rotation and `activeSessionId` are gone; sessions are Better Auth's                     |
+| **F114**     | Being fixed as planned: legacy PBKDF2 hashes are re-hashed to scrypt on each user's next sign-in (#123)                                                          |
 
 The web app is also now the **only admin frontend** — the `mapanytime-market-admin`
 repository no longer exists (web #87); its pricing-engine screens are to be
@@ -1199,8 +1199,14 @@ not treated as open. Open-ended is the one answer that cannot be right.
 
 ### F86. A refund hands back the gateway fee the gateway keeps
 
-**Not fixed — this is a decision, not a defect.** It needs a call the same way
-F39–F42 did.
+**Decided 2026-10-14 and built (#118):** the platform absorbs the fee. Every
+gateway refund (returns and paid-order cancellations) now writes a `REFUND` row,
+`PLATFORM` → `PAYMENT_PROVIDER`, for the gateway fee in proportion to the amount
+refunded (`src/modules/payments/refund-ledger.ts`). The analysis below is kept
+for the record.
+
+~~**Not fixed — this is a decision, not a defect.** It needs a call the same way
+F39–F42 did.~~
 
 `refundAmount` is `Number(order.totalAmount)`, and `totalAmount` is
 `pricingResult.buyerTotalAmount` — which, under the `BUYER` fee policy that is

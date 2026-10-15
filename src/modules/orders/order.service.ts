@@ -18,6 +18,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import PaymentService from '../payments/payment.service';
+import { recordGatewayFeeKeptOnRefund } from '../payments/refund-ledger';
 import PricingEngineService from '../pricing/pricing-engine.service';
 import SettlementService from '../settlements/settlement.service';
 import RewardService from '../rewards/reward.service';
@@ -854,6 +855,13 @@ export default class OrderService {
               refundReference,
               refundedAt: new Date(),
             },
+          });
+          // The gateway keeps its fee; the platform absorbs it, on the ledger (F86).
+          await recordGatewayFeeKeptOnRefund(tx, {
+            orderId,
+            paymentAmount: Number(payment.amount),
+            totalRefunded: Number(payment.amount),
+            refundReference,
           });
           return tx.orders.update({
             where: { id: orderId },
