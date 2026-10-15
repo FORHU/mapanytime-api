@@ -3,7 +3,11 @@ import { prisma } from '../../utils/prisma';
 import { AnalyticsEventPayload } from './analytics.types';
 
 /** Wire payload → the row shape Prisma expects. */
-const toRow = (event: AnalyticsEventPayload): Prisma.AnalyticsEventsCreateManyInput => ({
+const toRow = (
+  event: AnalyticsEventPayload,
+  eventId?: string,
+): Prisma.AnalyticsEventsCreateManyInput => ({
+  eventId: eventId ?? null,
   eventType: event.eventType,
   userId: event.userId,
   sessionId: event.sessionId,
@@ -23,12 +27,19 @@ export default class AnalyticsRepository {
    * `createMany` issues a single multi-row INSERT, which is the whole point of
    * routing events through a queue — see docs/analytics-evaluation.md on
    * avoiding one write per page view.
+   *
+   * `eventIds` lines up with `events`. A row whose event id is already stored
+   * is skipped, so a batch SQS delivers twice is written once.
    */
-  static async createMany(events: AnalyticsEventPayload[]): Promise<number> {
+  static async createMany(
+    events: AnalyticsEventPayload[],
+    eventIds: (string | undefined)[] = [],
+  ): Promise<number> {
     if (events.length === 0) return 0;
 
     const result = await prisma.analyticsEvents.createMany({
-      data: events.map(toRow),
+      data: events.map((event, i) => toRow(event, eventIds[i])),
+      skipDuplicates: true,
     });
     return result.count;
   }

@@ -7,7 +7,8 @@ import {
 } from '@aws-sdk/client-sqs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { sqs } from './clients';
-import { Consumer, parseEvent, WAIT_TIME_SECONDS } from './consumer';
+import { Consumer, dropUnhandled, handlesEvent, parseEvent, WAIT_TIME_SECONDS } from './consumer';
+import { EventMetadata } from './publisher';
 import logger from '../../utils/logger';
 
 export interface BatchConsumerOptions {
@@ -23,6 +24,8 @@ export interface BatchConsumerOptions {
   visibilityTimeoutSeconds?: number;
   /** Seconds before a failed batch is retried. */
   retryDelaySeconds?: number;
+  /** The event types this consumer handles. See `ConsumeOptions.eventTypes`. */
+  eventTypes?: readonly string[];
 }
 
 /** SQS batch calls (receive, delete, change visibility) take at most ten entries. */
@@ -32,6 +35,7 @@ const RECEIVE_ERROR_BACKOFF_MS = 5000;
 interface Buffered<T> {
   message: Message;
   payload: T;
+  metadata: EventMetadata;
 }
 
 /**
@@ -51,15 +55,15 @@ interface Buffered<T> {
  *   after `retryDelaySeconds`, and the redrive policy parks messages that keep
  *   failing in `<queue>-dlq`.
  * - **At least once, not exactly once.** A crash between the write and the
- *   delete redelivers the batch, so the handler must tolerate duplicates. For an
- *   append-only event log that means occasional duplicate rows, which
- *   aggregation dedupes by session anyway.
+ *   delete redelivers the batch, so the handler must tolerate duplicates. It
+ *   gets each event's metadata, in the same order as the payloads, so it can
+ *   key on `eventId`.
  * - **Stopping flushes.** On stop, whatever is buffered is written before the
  *   loop exits, so nothing waits out a visibility timeout.
  */
 export const consumeBatch = <T>(
   options: BatchConsumerOptions,
-  handler: (payloads: T[]) => Promise<void>,
+  handler: (payloads: T[], metadata: EventMetadata[]) => Promise<void>,
 ): Consumer => {
   const {
     queueUrl,
@@ -67,6 +71,7 @@ export const consumeBatch = <T>(
     flushIntervalMs,
     visibilityTimeoutSeconds = 60,
     retryDelaySeconds = 30,
+    eventTypes,
   } = options;
 
   const abort = new AbortController();
@@ -78,7 +83,10 @@ export const consumeBatch = <T>(
     buffer = [];
 
     try {
-      await handler(batch.map((b) => b.payload));
+      await handler(
+        batch.map((b) => b.payload),
+        batch.map((b) => b.metadata),
+      );
     } catch (error) {
       logger.error(
         `[EventBus][Batch] Handler failed for ${batch.length} message(s) on ${queueUrl}. Retrying in ${retryDelaySeconds}s unless dead-lettered.`,
@@ -167,8 +175,12 @@ export const consumeBatch = <T>(
             .catch(() => {});
           continue;
         }
+        if (!handlesEvent(event, eventTypes)) {
+          await dropUnhandled(queueUrl, message, event);
+          continue;
+        }
         if (buffer.length === 0) deadline = Date.now() + flushIntervalMs;
-        buffer.push({ message, payload: event.payload });
+        buffer.push({ message, payload: event.payload, metadata: event.metadata });
       }
     }
   })();

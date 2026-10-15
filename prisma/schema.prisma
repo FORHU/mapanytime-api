@@ -2019,6 +2019,9 @@ enum ANALYTICSEVENTTYPE {
 /// range on occurredAt is the documented next step before volume gets real.
 model AnalyticsEvents {
   id         String             @id @default(cuid())
+  /// The event-bus eventId it arrived with. Unique, so a redelivered message
+  /// writes nothing. Null for events written directly when the bus was down.
+  eventId    String?            @unique
   eventType  ANALYTICSEVENTTYPE
   /// Set when the request is authenticated; null for anonymous traffic.
   userId     String?
