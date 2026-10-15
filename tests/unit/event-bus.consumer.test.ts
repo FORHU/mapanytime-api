@@ -69,6 +69,34 @@ describe('consume', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it('unwraps an SNS envelope when the subscription lacks raw delivery', async () => {
+    const handler = jest.fn().mockResolvedValue(undefined);
+    fake.push({ to: 'a@example.com' }, { snsEnvelope: true });
+
+    const consumer = consume(QUEUE, handler);
+    await waitFor(() => fake.callsTo('DeleteMessageCommand').length === 1);
+    await consumer.stop();
+
+    expect(handler).toHaveBeenCalledWith(
+      { to: 'a@example.com' },
+      expect.objectContaining({ eventId: 'e1' }),
+    );
+  });
+
+  it('drops an event of a type it does not handle, without retrying it', async () => {
+    const handler = jest.fn().mockResolvedValue(undefined);
+    fake.push({ n: 1 }, { eventType: 'analytics.event.recorded' });
+    fake.push({ n: 2 }, { eventType: 'email.send.requested' });
+
+    const consumer = consume(QUEUE, handler, { eventTypes: ['email.send.requested'] });
+    await waitFor(() => fake.callsTo('DeleteMessageCommand').length === 2);
+    await consumer.stop();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({ n: 2 }, expect.anything());
+    expect(fake.callsTo('ChangeMessageVisibilityCommand')).toEqual([]);
+  });
+
   it('receives only as many messages as it can run at once', async () => {
     const consumer = consume(QUEUE, jest.fn(), { concurrency: 25 });
     await waitFor(() => fake.callsTo('ReceiveMessageCommand').length >= 1);

@@ -1,5 +1,6 @@
 import { eventBus } from '../infrastructure/event-bus';
 import { ANALYTICS_EVENTS_QUEUE_URL } from '../config';
+import { ROUTING_KEYS } from '../events/routing-keys';
 import AnalyticsRepository from '../modules/analytics/analytics.repository';
 import { AnalyticsEventPayload } from '../modules/analytics/analytics.types';
 import logger from '../utils/logger';
@@ -16,16 +17,24 @@ import logger from '../utils/logger';
 const BATCH_SIZE = Number(process.env.ANALYTICS_BATCH_SIZE || 200);
 const FLUSH_INTERVAL_MS = Number(process.env.ANALYTICS_FLUSH_INTERVAL_MS || 5000);
 
-/** Receives `analytics.event.recorded` through its SNS subscription filter. */
+/**
+ * Receives `analytics.event.recorded` through its SNS subscription filter.
+ *
+ * Rows carry the event id, so a redelivered batch writes nothing new.
+ */
 export const startAnalyticsConsumer = () =>
   eventBus.consumeBatch<AnalyticsEventPayload>(
     {
       queueUrl: ANALYTICS_EVENTS_QUEUE_URL,
       batchSize: BATCH_SIZE,
       flushIntervalMs: FLUSH_INTERVAL_MS,
+      eventTypes: [ROUTING_KEYS.ANALYTICS_EVENT_RECORDED],
     },
-    async (events) => {
-      const written = await AnalyticsRepository.createMany(events);
+    async (events, metadata) => {
+      const written = await AnalyticsRepository.createMany(
+        events,
+        metadata.map((m) => m?.eventId),
+      );
       logger.debug(`[AnalyticsConsumer] Wrote ${written} event(s)`);
     },
   );

@@ -33,18 +33,37 @@ export const makeFakeSqs = ({ emptyPollMs = 5 } = {}) => {
     }
   });
 
-  /** Queue an event the way the publisher writes it, or a raw body. */
-  const push = (payload: unknown, { raw }: { raw?: string } = {}) => {
+  /**
+   * Queue an event the way the publisher writes it, or a raw body. `snsEnvelope`
+   * wraps it the way SNS does when a subscription lacks raw message delivery.
+   */
+  const push = (
+    payload: unknown,
+    {
+      raw,
+      eventType,
+      eventId,
+      snsEnvelope,
+    }: { raw?: string; eventType?: string; eventId?: string; snsEnvelope?: boolean } = {},
+  ) => {
     seq += 1;
+    const event = JSON.stringify({
+      metadata: {
+        eventId: eventId ?? `e${seq}`,
+        eventType,
+        correlationId: `corr-${seq}`,
+        requestId: `req-${seq}`,
+      },
+      payload,
+    });
     pending.push({
       MessageId: `m${seq}`,
       ReceiptHandle: `r${seq}`,
       Body:
         raw ??
-        JSON.stringify({
-          metadata: { eventId: `e${seq}`, correlationId: `corr-${seq}`, requestId: `req-${seq}` },
-          payload,
-        }),
+        (snsEnvelope
+          ? JSON.stringify({ Type: 'Notification', MessageId: `sns-${seq}`, Message: event })
+          : event),
       Attributes: { ApproximateReceiveCount: '1' },
     });
   };

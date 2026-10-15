@@ -26,6 +26,12 @@ export interface ConsumeOptions {
   visibilityTimeoutSeconds?: number;
   /** Seconds before a failed message is retried. */
   retryDelaySeconds?: number;
+  /**
+   * The event types this consumer handles. Anything else is deleted unhandled.
+   * The queue's subscription filter policy should already keep other types out;
+   * this covers a subscription created without one.
+   */
+  eventTypes?: readonly string[];
 }
 
 export interface Consumer {
@@ -49,7 +55,12 @@ export interface Consumer {
 export const consume = <T>(
   queueUrl: string,
   handler: (payload: T, metadata: EventMetadata) => Promise<void>,
-  { concurrency = 1, visibilityTimeoutSeconds = 60, retryDelaySeconds = 30 }: ConsumeOptions = {},
+  {
+    concurrency = 1,
+    visibilityTimeoutSeconds = 60,
+    retryDelaySeconds = 30,
+    eventTypes,
+  }: ConsumeOptions = {},
 ): Consumer => {
   const abort = new AbortController();
   const batchSize = Math.max(1, Math.min(concurrency, 10));
@@ -87,7 +98,11 @@ export const consume = <T>(
 
       await Promise.all(
         messages.map((m) =>
-          handleOne(queueUrl, m, handler, visibilityTimeoutSeconds, retryDelaySeconds),
+          handleOne(queueUrl, m, handler, {
+            visibilityTimeoutSeconds,
+            retryDelaySeconds,
+            eventTypes,
+          }),
         ),
       );
     }
@@ -115,14 +130,52 @@ export const releaseMessage = (queueUrl: string, m: Message): Promise<unknown> =
     )
     .catch(() => {});
 
-/** Parse an event body, or undefined when it can never be handled. */
+/**
+ * Parse an event body, or undefined when it can never be handled.
+ *
+ * Subscriptions are meant to use raw message delivery, so the body is the event
+ * itself. Without it, SNS wraps the event in a notification whose `Message` is
+ * the event as a string. That is unwrapped here rather than dropped.
+ */
 export const parseEvent = <T>(m: Message): DomainEvent<T> | undefined => {
   try {
-    const event = JSON.parse(m.Body ?? '') as DomainEvent<T>;
-    return event && typeof event === 'object' && 'payload' in event ? event : undefined;
+    let body: unknown = JSON.parse(m.Body ?? '');
+    if (isSnsNotification(body)) body = JSON.parse(body.Message);
+    return body && typeof body === 'object' && 'payload' in body
+      ? (body as DomainEvent<T>)
+      : undefined;
   } catch {
     return undefined;
   }
+};
+
+const isSnsNotification = (body: unknown): body is { Message: string } =>
+  typeof body === 'object' &&
+  body !== null &&
+  (body as { Type?: unknown }).Type === 'Notification' &&
+  typeof (body as { Message?: unknown }).Message === 'string';
+
+/** False when the consumer lists the types it handles and this is not one of them. */
+export const handlesEvent = (
+  event: DomainEvent<unknown>,
+  eventTypes: readonly string[] | undefined,
+): boolean => !eventTypes || eventTypes.includes(event.metadata?.eventType);
+
+/**
+ * Log and delete an event of a type the consumer does not handle. Retrying
+ * cannot change its type, so it is not left for the DLQ.
+ */
+export const dropUnhandled = (
+  queueUrl: string,
+  m: Message,
+  event: DomainEvent<unknown>,
+): Promise<unknown> => {
+  logger.warn(
+    `[EventBus] Dropping ${event.metadata?.eventType ?? 'untyped'} event [eventId:${event.metadata?.eventId}] on ${queueUrl}: not a type this consumer handles. Check the subscription's filter policy.`,
+  );
+  return sqs
+    .send(new DeleteMessageCommand({ QueueUrl: queueUrl, ReceiptHandle: m.ReceiptHandle! }))
+    .catch(() => {});
 };
 
 /** Never throws, so one bad message cannot stop the loop. */
@@ -130,8 +183,12 @@ const handleOne = async <T>(
   queueUrl: string,
   m: Message,
   handler: (payload: T, metadata: EventMetadata) => Promise<void>,
-  visibilityTimeoutSeconds: number,
-  retryDelaySeconds: number,
+  {
+    visibilityTimeoutSeconds,
+    retryDelaySeconds,
+    eventTypes,
+  }: Required<Pick<ConsumeOptions, 'visibilityTimeoutSeconds' | 'retryDelaySeconds'>> &
+    Pick<ConsumeOptions, 'eventTypes'>,
 ): Promise<void> => {
   const receipt = { QueueUrl: queueUrl, ReceiptHandle: m.ReceiptHandle! };
 
@@ -142,6 +199,10 @@ const handleOne = async <T>(
       `[EventBus] Dropping unparseable message ${m.MessageId} on ${queueUrl}: ${m.Body?.slice(0, 500)}`,
     );
     await sqs.send(new DeleteMessageCommand(receipt)).catch(() => {});
+    return;
+  }
+  if (!handlesEvent(event, eventTypes)) {
+    await dropUnhandled(queueUrl, m, event);
     return;
   }
 

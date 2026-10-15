@@ -15,13 +15,8 @@ name: Deploy Dev
 #      process listens on inside the container. HOST_PORT is allocated per
 #      project and must not change; see /etc/caddy/sites/00-PORTS.md.
 #   3. Put this project's own secrets in the `dev` environment, and list them
-#      in the "Publish project env" step. DATABASE_URL and REDIS_URL come
-#      from the host — do NOT set them here.
-#   4. The event bus (#127) is this project's own SNS topic and SQS queues, not
-#      something the host shares: set EVENTS_TOPIC_ARN, EMAIL_SEND_QUEUE_URL and
-#      ANALYTICS_EVENTS_QUEUE_URL as variables of the `dev` environment this
-#      workflow deploys with (infra/README.md).
-#      The worker refuses to start without them.
+#      in the "Publish project env" step. DATABASE_URL, REDIS_URL and
+#      RABBITMQ_URL come from the host — do NOT set them here.
 
 on:
   workflow_dispatch:
@@ -48,7 +43,9 @@ env:
   NETWORK: forhu-dev
   HOST_PORT: '4001'
   APP_PORT: '3000'
-  ENV_PARAM: /forhu-dev/mapanytime/env
+  WORKER_HOST_PORT: '4002'
+  WORKER_PORT: '8080'
+  ENV_PARAM: /forhu-dev/mapanytime-api/env
   SHARED_ENV: /opt/forhu-dev/credentials/mapanytime.env
   MERGED_ENV: /opt/forhu-dev/mapanytime-api.env
 
@@ -59,8 +56,11 @@ jobs:
     # amd64, pulls cleanly, then dies with "exec format error". Do not
     # cross-build under QEMU — Node and Prisma builds take hours and look hung.
     runs-on: ubuntu-24.04-arm
-    # `dev` is the GitHub environment holding this deploy's settings. It was
-    # `staging` from 0c26d5d, an environment that never had most of them (#130).
+    # The GitHub environment holding this project's secrets, renamed from
+    # `staging` to `dev` on 2026-10-15. The name has to match exactly: naming one
+    # that does not exist does not fail — GitHub creates an empty environment and
+    # every secret resolves to a blank string, which surfaces much later as a
+    # missing-variable crash rather than a configuration error.
     environment: dev
 
     permissions:
@@ -105,8 +105,8 @@ jobs:
           provenance: false
           tags: ${{ steps.tag.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}
 
-      # This project's own config and secrets. DATABASE_URL and REDIS_* are
-      # deliberately absent: the host supplies them from
+      # This project's own config and secrets. DATABASE_URL, REDIS_* and
+      # RABBITMQ_URL are deliberately absent: the host supplies them from
       # /opt/forhu-dev/credentials/mapanytime.env and they are merged in at
       # deploy time. Setting them here would override the shared values and
       # point dev at the wrong database.
@@ -115,7 +115,9 @@ jobs:
       # looks configured and silently disables whatever reads it.
       - name: Publish project env to Parameter Store
         env:
-          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
+          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PAYMONGO_SECRET_KEY: ${{ secrets.PAYMONGO_SECRET_KEY }}
@@ -124,48 +126,76 @@ jobs:
           XENDIT_WEBHOOK_TOKEN: ${{ secrets.XENDIT_WEBHOOK_TOKEN }}
           MAILER_PASSWORD: ${{ secrets.MAILER_PASSWORD }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          CORS_ORIGIN: ${{ vars.CORS_ORIGIN || secrets.CORS_ORIGIN }}
+          MAPANYTIME_API_PUBLIC_URL: ${{ vars.MAPANYTIME_API_PUBLIC_URL || secrets.MAPANYTIME_API_PUBLIC_URL }}
+          MAPANYTIME_WEB_APP_URL: ${{ vars.MAPANYTIME_WEB_APP_URL || secrets.MAPANYTIME_WEB_APP_URL }}
+          ACCESS_TOKEN_EXPIRY: ${{ vars.ACCESS_TOKEN_EXPIRY || secrets.ACCESS_TOKEN_EXPIRY }}
+          REFRESH_TOKEN_EXPIRY: ${{ vars.REFRESH_TOKEN_EXPIRY || secrets.REFRESH_TOKEN_EXPIRY }}
+          REDIS_TTL_SECONDS: ${{ vars.REDIS_TTL_SECONDS || secrets.REDIS_TTL_SECONDS }}
+          RABBITMQ_EXCHANGE: ${{ vars.RABBITMQ_EXCHANGE || secrets.RABBITMQ_EXCHANGE }}
+          RABBITMQ_QUEUE_PREFIX: ${{ vars.RABBITMQ_QUEUE_PREFIX || secrets.RABBITMQ_QUEUE_PREFIX }}
+          INGESTION_QUEUE_NAME: ${{ vars.INGESTION_QUEUE_NAME || secrets.INGESTION_QUEUE_NAME }}
+          # The worker refuses to start unless all three are set — it was
+          # crash-looping on 2026-10-15 for exactly this reason. Created by
+          # terraform in forhu-dev/mapanytime-events.tf; take the values from
+          # `terraform output mapanytime_event_bus` rather than retyping them.
+          #
+          # No AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY here: the host's
+          # instance role already grants sns:Publish and the sqs actions on
+          # dev-*, and a partial credential pair makes the SDK skip its
+          # provider chain entirely.
+          # better-auth, added by the devs after this workflow was written. The
+          # API and the worker both refuse to start in production without the
+          # secret — on 2026-10-15 that took both containers down, not just the
+          # worker. BETTER_AUTH_URL is the public origin it issues cookies for.
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL || secrets.BETTER_AUTH_URL }}
+          EVENTS_TOPIC_ARN: ${{ vars.EVENTS_TOPIC_ARN || secrets.EVENTS_TOPIC_ARN }}
+          EMAIL_SEND_QUEUE_URL: ${{ vars.EMAIL_SEND_QUEUE_URL || secrets.EMAIL_SEND_QUEUE_URL }}
+          ANALYTICS_EVENTS_QUEUE_URL: ${{ vars.ANALYTICS_EVENTS_QUEUE_URL || secrets.ANALYTICS_EVENTS_QUEUE_URL }}
+          METRICS_INTERVAL_MS: ${{ vars.METRICS_INTERVAL_MS || secrets.METRICS_INTERVAL_MS }}
+          AWS_S3_BUCKET_NAME: ${{ vars.AWS_S3_BUCKET_NAME || secrets.AWS_S3_BUCKET_NAME }}
+          S3_CDN_URL: ${{ vars.S3_CDN_URL || secrets.S3_CDN_URL }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID || secrets.GOOGLE_CLIENT_ID }}
+          FACEBOOK_APP_ID: ${{ vars.FACEBOOK_APP_ID || secrets.FACEBOOK_APP_ID }}
+          MAILER_EMAIL: ${{ vars.MAILER_EMAIL || secrets.MAILER_EMAIL }}
+          MAILER_TRANSPORT_HOST: ${{ vars.MAILER_TRANSPORT_HOST || secrets.MAILER_TRANSPORT_HOST }}
+          MAILER_TRANSPORT_PORT: ${{ vars.MAILER_TRANSPORT_PORT || secrets.MAILER_TRANSPORT_PORT }}
+          MAILER_TRANSPORT_SECURE: ${{ vars.MAILER_TRANSPORT_SECURE || secrets.MAILER_TRANSPORT_SECURE }}
+          SMTP_HOST: ${{ vars.SMTP_HOST || secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT || secrets.SMTP_PORT }}
+          SMTP_USER: ${{ vars.SMTP_USER || secrets.SMTP_USER }}
+          XENDIT_API_URL: ${{ vars.XENDIT_API_URL || secrets.XENDIT_API_URL }}
         run: |
           set -euo pipefail
           umask 077
 
-          # The API refuses to start without it (#122) — fail here, before publishing.
-          if [ -z "${BETTER_AUTH_SECRET:-}" ]; then
-            echo "::error::Secret BETTER_AUTH_SECRET is not set for this environment." >&2
-            exit 1
-          fi
+          # Only the values this workflow owns are written unconditionally.
+          # Everything else goes through the loop below so an unset variable is
+          # left out rather than written as KEY= — an empty value reads as
+          # configured and silently disables whatever consumes it. The first
+          # deploy wrote 16 keys empty this way.
+          {
+            printf 'NODE_ENV=production\n'
+            printf 'PORT=%s\n' "${{ env.APP_PORT }}"
+            printf 'AWS_REGION=%s\n' "${{ env.AWS_REGION }}"
+            printf 'WORKER_HEALTH_PORT=%s\n' "${{ env.WORKER_PORT }}"
+            printf 'REDIS_TLS=false\n'
+          } > env.tmp
 
-          cat > env.tmp <<ENVEOF
-          NODE_ENV=production
-          PORT=${{ env.APP_PORT }}
-          AWS_REGION=${{ env.AWS_REGION }}
-          CORS_ORIGIN=${{ vars.CORS_ORIGIN }}
-          MAPANYTIME_API_PUBLIC_URL=${{ vars.MAPANYTIME_API_PUBLIC_URL }}
-          MAPANYTIME_WEB_APP_URL=${{ vars.MAPANYTIME_WEB_APP_URL }}
-          REDIS_TTL_SECONDS=${{ vars.REDIS_TTL_SECONDS }}
-          REDIS_TLS=false
-          EVENTS_TOPIC_ARN=${{ vars.EVENTS_TOPIC_ARN }}
-          EMAIL_SEND_QUEUE_URL=${{ vars.EMAIL_SEND_QUEUE_URL }}
-          ANALYTICS_EVENTS_QUEUE_URL=${{ vars.ANALYTICS_EVENTS_QUEUE_URL }}
-          WORKER_HEALTH_PORT=${{ vars.WORKER_HEALTH_PORT }}
-          METRICS_INTERVAL_MS=${{ vars.METRICS_INTERVAL_MS }}
-          AWS_S3_BUCKET_NAME=${{ vars.AWS_S3_BUCKET_NAME }}
-          S3_CDN_URL=${{ vars.S3_CDN_URL }}
-          GOOGLE_CLIENT_ID=${{ vars.GOOGLE_CLIENT_ID }}
-          FACEBOOK_APP_ID=${{ vars.FACEBOOK_APP_ID }}
-          MAILER_EMAIL=${{ vars.MAILER_EMAIL }}
-          MAILER_TRANSPORT_HOST=${{ vars.MAILER_TRANSPORT_HOST }}
-          MAILER_TRANSPORT_PORT=${{ vars.MAILER_TRANSPORT_PORT }}
-          MAILER_TRANSPORT_SECURE=${{ vars.MAILER_TRANSPORT_SECURE }}
-          SMTP_HOST=${{ vars.SMTP_HOST }}
-          SMTP_PORT=${{ vars.SMTP_PORT }}
-          SMTP_USER=${{ vars.SMTP_USER }}
-          XENDIT_API_URL=${{ vars.XENDIT_API_URL }}
-          ENVEOF
-
-          for k in BETTER_AUTH_SECRET \
+          for k in ACCESS_TOKEN_SECRET REFRESH_TOKEN_SECRET GOOGLE_CLIENT_SECRET \
                    FACEBOOK_APP_SECRET OPENAI_API_KEY PAYMONGO_SECRET_KEY \
                    PAYMONGO_WEBHOOK_SECRET_KEY XENDIT_SECRET_KEY XENDIT_WEBHOOK_TOKEN \
-                   MAILER_PASSWORD SMTP_PASS; do
+                   MAILER_PASSWORD SMTP_PASS \
+                   CORS_ORIGIN MAPANYTIME_API_PUBLIC_URL MAPANYTIME_WEB_APP_URL \
+                   ACCESS_TOKEN_EXPIRY REFRESH_TOKEN_EXPIRY REDIS_TTL_SECONDS \
+                   RABBITMQ_EXCHANGE RABBITMQ_QUEUE_PREFIX INGESTION_QUEUE_NAME \
+                   BETTER_AUTH_SECRET BETTER_AUTH_URL \
+                   EVENTS_TOPIC_ARN EMAIL_SEND_QUEUE_URL ANALYTICS_EVENTS_QUEUE_URL \
+                   METRICS_INTERVAL_MS AWS_S3_BUCKET_NAME S3_CDN_URL \
+                   GOOGLE_CLIENT_ID FACEBOOK_APP_ID MAILER_EMAIL \
+                   MAILER_TRANSPORT_HOST MAILER_TRANSPORT_PORT MAILER_TRANSPORT_SECURE \
+                   SMTP_HOST SMTP_PORT SMTP_USER XENDIT_API_URL; do
             v="${!k:-}"
             [ -n "$v" ] && printf '%s=%s\n' "$k" "$v" >> env.tmp
           done
@@ -192,42 +222,25 @@ jobs:
             "aws ssm get-parameter --name ${{ env.ENV_PARAM }} --with-decryption --region ${{ env.AWS_REGION }} --query Parameter.Value --output text >> ${{ env.MERGED_ENV }}"
             "chmod 600 ${{ env.MERGED_ENV }}"
             "aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${REGISTRY}"
-            # Only this repository's images. The box is shared with other
-            # projects, and the box-wide `docker container prune -f` /
-            # `docker image prune -af` that used to be here deleted their stopped
-            # containers and images too (#136). `docker images <repo>` matches
-            # the repository exactly, and rmi without -f skips an image a running
-            # container still uses, so the live version stays as the rollback copy
-            # until the next deploy. Our own containers are replaced by name below.
-            "docker images --filter dangling=false --format '{{.Repository}}:{{.Tag}}' ${REGISTRY}/${{ env.ECR_REPOSITORY }} | xargs -r docker rmi 2>/dev/null || true"
+            "docker container prune -f || true"
+            "docker image prune -af || true"
             "docker pull --platform linux/arm64 ${IMAGE}"
             "docker rm -f ${{ env.CONTAINER }} 2>/dev/null || true"
             "docker run --rm --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} --entrypoint npx ${IMAGE} prisma migrate deploy"
             "docker run -d --name ${{ env.CONTAINER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} -p 127.0.0.1:${{ env.HOST_PORT }}:${{ env.APP_PORT }} ${IMAGE}"
             # Production runs a worker beside the API from the same image
-            # (mapanytime-api-worker). Without it anything queued on the event bus is
-            # accepted and never processed, which reads as the API silently
-            # dropping jobs rather than as a missing container.
+            # (mapanytime-api-worker). It runs the COMPILED entrypoint: the
+            # package.json "worker" script is
+            # `nodemon --watch src --exec ts-node ./src/worker.ts`, and the
+            # runtime image has no src/ — `npm run worker` dies with
+            # MODULE_NOT_FOUND. dist/src/worker.js is what ships.
             #
-            # `start:worker` runs the compiled worker. `npm run worker` is
-            # nodemon + ts-node over ./src/worker.ts, which the image does not
-            # contain; nodemon then waits for file changes instead of exiting,
-            # so the container stayed "Up" with nothing running (F113).
-            #
-            # No -p: the health port is only probed from inside the container
-            # below. It used to publish 127.0.0.1:${WORKER_HOST_PORT}:${WORKER_PORT},
-            # neither of which this workflow defines, so docker got `-p 127.0.0.1::`
-            # and refused to start the worker at all. Host ports on this box are
-            # allocated per project (00-PORTS.md); this needs none.
+            # Without a worker, anything
+            # queued on RabbitMQ is accepted and never processed, which reads
+            # as the API silently dropping jobs rather than as a missing
+            # container.
             "docker rm -f ${{ env.WORKER }} 2>/dev/null || true"
-            "docker run -d --name ${{ env.WORKER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} ${IMAGE} npm run start:worker"
-            # /live answers only once the worker's consumers and scheduler are up.
-            # Every \$ is escaped: this array is built in double quotes on the
-            # runner, which would otherwise expand $(seq 1 20) into twenty lines
-            # and send the box `for i in 1` / `2` / ... (a syntax error, which is
-            # how the first deploy with this check failed). The port is expanded
-            # by the container's shell.
-            "for i in \$(seq 1 20); do docker exec ${{ env.WORKER }} sh -c 'wget -q -O /dev/null http://127.0.0.1:\${WORKER_HEALTH_PORT:-8080}/live' && exit 0; sleep 3; done; echo 'Worker did not start within 60 seconds:'; docker logs ${{ env.WORKER }} --tail 50; exit 1"
+            "docker run -d --name ${{ env.WORKER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} -p 127.0.0.1:${{ env.WORKER_HOST_PORT }}:${{ env.WORKER_PORT }} ${IMAGE} node ./dist/src/worker.js"
           )
 
           # jq builds the JSON, so a quote inside any command cannot break it.
