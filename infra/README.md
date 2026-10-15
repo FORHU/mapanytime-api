@@ -172,8 +172,9 @@ see §4a.
    topic `<env>-mapanytime-events`, a queue per consumer with a `-dlq` twin, the
    queue policies that let the topic deliver, and filtered raw-delivery
    subscriptions. It prints `EVENTS_TOPIC_ARN`, `EMAIL_SEND_QUEUE_URL` and
-   `ANALYTICS_EVENTS_QUEUE_URL`: set them as **variables** of that GitHub
-   environment. The worker refuses to start without them, and the API's
+   `ANALYTICS_EVENTS_QUEUE_URL`: set them as **variables** of that environment's
+   GitHub environment, which is **`dev`** for staging (`deploy-dev.yml`) and
+   `production` for production. The worker refuses to start without them, and the API's
    `/health/ready` reports `eventBus: down`.
 
 **Define the tag variables per GitHub environment, not repository-wide.** Both
