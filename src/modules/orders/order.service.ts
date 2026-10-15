@@ -19,6 +19,7 @@ import {
 } from '@prisma/client';
 import PaymentService from '../payments/payment.service';
 import { recordGatewayFeeKeptOnRefund } from '../payments/refund-ledger';
+import { PENDING_ORDER_TTL_MINUTES } from './order.ttl';
 import PricingEngineService from '../pricing/pricing-engine.service';
 import SettlementService from '../settlements/settlement.service';
 import RewardService from '../rewards/reward.service';
@@ -1070,7 +1071,9 @@ export default class OrderService {
    * not an abandoned checkout — sweeping them cancelled every cash order a seller had not
    * accepted within 15 minutes, including ones booked for a pickup the next day.
    */
-  static async expireStalePendingOrders(olderThanMinutes = 15): Promise<number> {
+  static async expireStalePendingOrders(
+    olderThanMinutes = PENDING_ORDER_TTL_MINUTES,
+  ): Promise<number> {
     const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
     const staleOrders = await prisma.orders.findMany({
       where: {

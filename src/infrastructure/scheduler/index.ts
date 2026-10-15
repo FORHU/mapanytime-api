@@ -7,6 +7,7 @@ import RewardService from '../../modules/rewards/reward.service';
 import StoreService from '../../modules/stores/store.service';
 import OrderService from '../../modules/orders/order.service';
 import { redis } from '../redis';
+import { PENDING_ORDER_TTL_MINUTES } from '../../modules/orders/order.ttl';
 
 /**
  * node-cron fires per process. There is one worker today, so nothing here is
@@ -73,7 +74,7 @@ export const startScheduler = () => {
   // ── Stale Pending Orders Expiry (F44) — runs every 2 minutes ────────────────
   cron.schedule('*/2 * * * *', async () => {
     try {
-      const expiredCount = await OrderService.expireStalePendingOrders(15);
+      const expiredCount = await OrderService.expireStalePendingOrders(PENDING_ORDER_TTL_MINUTES);
       if (expiredCount > 0) {
         logger.info(
           `[Scheduler] Expired ${expiredCount} stale pending order(s) and released holds.`,
