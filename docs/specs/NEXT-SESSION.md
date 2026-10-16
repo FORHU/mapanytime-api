@@ -1,72 +1,30 @@
 # MapAnytime — Immediate Execution Checklist (Next Session)
 
-**Updated:** 2026-10-14 (evaluation fixes, Better Auth, decisions — see RESUME HERE).
+**Updated:** 2026-10-16 (see RESUME HERE).
 
 **Primary Reference:** [`MASTER_EXECUTION_PLAN.md`](./MASTER_EXECUTION_PLAN.md)  
 **Historical Context:** [`FLAGS.md`](./FLAGS.md) · [`OPEN-FLAGS.md`](./OPEN-FLAGS.md)
 
 ---
 
-## ▶ RESUME HERE — last session 2026-10-14
+## ▶ RESUME HERE — last session 2026-10-16
 
-**The live task list is the FORHU project boards** — API #23, app #24, web #25.
-This file and the handoff are context; the boards say what is open.
+**Read [`HANDOFF-2026-10-16.md`](./HANDOFF-2026-10-16.md) first.** It has the
+current state, the next tasks in order, and how to check and build things.
 
-**Merged to `staging`, not deployed:** the evaluation fixes F107–F113 (API #114,
-web #85, app #69/#70) and the move from JWT to **Better Auth** (#123, closing
-#122 — JWT is gone entirely). PR #125 carries the one Better Auth commit that
-missed #123 (its base URL). Merging does **not** deploy: both deploy workflows
-are `workflow_dispatch` only.
+**The live task list is the FORHU project boards** — API #23, app #24, web #25
+(use the **Board** view, `views/2`). This file and the handoffs are context;
+the boards say what is open.
 
-**Before the first production deploy** — in order, details in
-[`HANDOFF-2026-10-14.md`](./HANDOFF-2026-10-14.md) §4:
+In one line: staging is deployed and healthy, the SNS + SQS event bus is
+verified end to end, production is deferred, Stripe is paused, and the admin
+frontend is now the web app (the `mapanytime-market-admin` repo is gone).
+The Stripe plan, its constraints (cards only, needs a non-PH platform account
+for Connect, 30-minute minimum Checkout expiry) and the owner questions are in
+the checkpoint comment on API #124.
 
-1. F113 pre-deploy checks (#115): worker logs, `email.queue`, matured settlements.
-2. Dispatch **Deploy Production with `ref: staging`** (#116) — the default `main`
-   has none of this. It runs the Better Auth migrations: everyone signs in once.
-   `BETTER_AUTH_SECRET` and `MAPANYTIME_API_PUBLIC_URL` are set in the
-   `production` environment.
-3. Deploy web in the same window (web #86), then publish a new APK (app #72).
-
-**Decided 2026-10-14:** the gateway moves to **Stripe** (#124 — FoxPassport's
-implementation is the reference, notes on the issue); a payment landing on a
-cancelled order is **refunded automatically** (#117); the platform **absorbs the
-gateway fee on refunds**, recorded in the ledger (#118); the **web app is the
-only admin frontend** — the `mapanytime-market-admin` repo no longer exists, and
-its pricing-engine screens are to be ported (web #89).
-
-### Open pull requests (end of 2026-10-14)
-
-| PR       | What                                                   | Merge when         |
-| :------- | :----------------------------------------------------- | :----------------- |
-| API #125 | Better Auth base URL — the one commit that missed #123 | Any time           |
-| API #126 | This documentation (closes #120)                       | Any time           |
-| web #90  | Web drops the old refresh-token flow (closes web #88)  | Any time           |
-| app #74  | App drops the old refresh-token flow (closes app #73)  | Any time; next APK |
-
-### Paused work
-
-- **Stripe (#124)** — branch `feat/stripe-payments` holds only the SDK install.
-  The full plan, design decisions and three owner questions are in the
-  checkpoint comment on #124. Key facts: Stripe takes **cards only** (no
-  GCash/Maya); paying PH sellers through Stripe Connect needs a **US (or
-  UK/EEA/CA/CH) platform account**; Stripe Checkout sessions cannot expire in
-  under 30 minutes, while unpaid orders are cancelled at 15.
-- **Admin pricing-engine port (web #89)** — the source exists only as local
-  commit `37fb6a0` on branch `feat/admin-pricing-engine` in the old
-  `mapanytime-market-admin` checkout; that repository no longer exists on
-  GitHub, so the commit cannot be pushed. Port it before that folder is lost.
-
-### Where everything is written down
-
-- **Live task list:** the FORHU project boards — API #23, app #24, web #25.
-  Every issue carries its decisions and progress as comments.
-- **Findings and decisions:** [`OPEN-FLAGS.md`](./OPEN-FLAGS.md) (F39–F114, and
-  the "Decided 2026-10-14" table).
-- **Overview of the system:** [`PROJECT-EVALUATION.md`](./PROJECT-EVALUATION.md).
-- **Deploy order:** [`HANDOFF-2026-10-14.md`](./HANDOFF-2026-10-14.md) §4.
-- **Auth:** API #122 (closed) — its comments record every Better Auth decision,
-  the spike, and the end-to-end check.
+The 2026-10-14 handoff ([`HANDOFF-2026-10-14.md`](./HANDOFF-2026-10-14.md))
+still holds the production deploy order (§4) for when production starts.
 
 The 2026-10-06 notes below are older; their unticked items are still open
 unless marked superseded.
