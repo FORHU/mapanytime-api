@@ -23,8 +23,8 @@ The Stripe plan, its constraints (cards only, needs a non-PH platform account
 for Connect, 30-minute minimum Checkout expiry) and the owner questions are in
 the checkpoint comment on API #124.
 
-The 2026-10-14 handoff ([`HANDOFF-2026-10-14.md`](./HANDOFF-2026-10-14.md))
-still holds the production deploy order (§4) for when production starts.
+The production deploy order, for when production starts, is on API #115
+(pre-deploy checks) and #116 (the deploy itself).
 
 The 2026-10-06 notes below are older; their unticked items are still open
 unless marked superseded.
