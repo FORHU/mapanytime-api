@@ -2,8 +2,7 @@
 
 Triage batch raised **2026-08-24**, worked **2026-08-25** and **2026-08-27**.
 Authentication pass raised and worked **2026-09-07** (F98–F106).
-Project evaluation raised and partly worked **2026-10-14** (F107–F113; overview in
-[`PROJECT-EVALUATION.md`](PROJECT-EVALUATION.md)).
+Project evaluation raised and worked **2026-10-14** (F107–F113).
 Continues the numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently
 F39–F114.
 

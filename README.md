@@ -3,15 +3,15 @@
 The backend for **MapAnytime**, a hyperlocal, pickup-only marketplace for the
 Philippines. Buyers find stores on a live map, reserve stock, and pay through a
 gateway or in cash at pickup. This API serves the Flutter buyer app
-(`mapanytime-market-app`), the seller/admin/agent web portal
-(`mapanytime-market-web`) and the admin console (`mapanytime-market-admin`).
+(`mapanytime-market-app`) and the seller/admin/agent web portal
+(`mapanytime-market-web`), which is also the only admin frontend.
 
 > **Start with [`docs/specs/`](docs/specs/).** The findings register —
 > [`FLAGS.md`](docs/specs/FLAGS.md) (F1–F38) and
 > [`OPEN-FLAGS.md`](docs/specs/OPEN-FLAGS.md) (F39 onward) — is the record of
 > what is known to be wrong, fixed, or decided.
-> [`PROJECT-EVALUATION.md`](docs/specs/PROJECT-EVALUATION.md) is the most recent
-> overview, and [`NEXT-SESSION.md`](docs/specs/NEXT-SESSION.md) the operational
+> [`HANDOFF-2026-10-16.md`](docs/specs/HANDOFF-2026-10-16.md) is the most recent
+> hand-off, and [`NEXT-SESSION.md`](docs/specs/NEXT-SESSION.md) the operational
 > checklist. Cite findings by their F-id, never by a filename (F82).
 
 ## Stack
