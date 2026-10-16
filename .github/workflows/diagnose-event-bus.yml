@@ -1,0 +1,117 @@
+# Diagnose Event Bus (dev)
+#
+# Proves, end to end and without AWS console access, that the SNS -> SQS path
+# works on the shared dev host: posts one analytics event to the public API,
+# waits, then reads the worker's [EventBus] log lines over SSM.
+#
+# Read-only on AWS. The one write is a single anonymous PAGE_VIEW row in the
+# dev database, tagged with sessionId "diag-<run id>".
+#
+# This repository is public, so its run logs are too: only [EventBus] and
+# [AnalyticsConsumer] lines from the last few minutes are printed, never the
+# full worker log.
+#
+# Reading the result:
+#   "[EventBus][Batch] Flushed N message(s) from ...analytics-events"
+#       -> working: raw delivery on, filter matches, the worker can read.
+#   "Dropping untyped event ... Check the subscription's filter policy"
+#       -> RawMessageDelivery is off on the subscription.
+#   "Receive failed on ..."
+#       -> the worker cannot read the queue (IAM, or a queue outside dev-*).
+#   no line for the event at all
+#       -> the event never reached the queue (filter policy or subscription).
+
+name: Diagnose Event Bus (dev)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: forhu-dev-mapanytime
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-1
+  INSTANCE_ID: i-0f95a93145ea25e7a
+  WORKER: mapanytime-api-worker
+  API_URL: https://dev.mapanytime.com/api/v1
+
+jobs:
+  diagnose:
+    name: SNS -> SQS -> worker on dev
+    runs-on: ubuntu-latest
+    # Same environment as Deploy Dev, so the OIDC role trusts this job.
+    environment: dev
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEV_DEPLOY_ROLE_ARN || 'arn:aws:iam::617163942417:role/forhu-deploy' }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Event bus readiness
+        run: curl -fsS https://dev.mapanytime.com/api/health/ready | jq .
+
+      - name: Publish one test event
+        run: |
+          set -euo pipefail
+          SESSION="diag-${{ github.run_id }}"
+          echo "sessionId: $SESSION"
+          CODE=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+            -X POST "${{ env.API_URL }}/analytics/events" \
+            -H 'Content-Type: application/json' \
+            -d "{\"eventType\":\"PAGE_VIEW\",\"sessionId\":\"$SESSION\",\"metadata\":{\"source\":\"diagnose-event-bus\"}}")
+          echo "HTTP $CODE"; cat /tmp/resp.json; echo
+          [ "$CODE" = "202" ] || { echo "::error::expected 202 from the analytics endpoint"; exit 1; }
+
+      - name: Give the worker time to receive and flush
+        run: sleep 45
+
+      - name: Read the worker's event-bus log lines
+        run: |
+          set -uo pipefail
+          COMMANDS=(
+            "docker ps --filter name=${{ env.WORKER }} --format '{{.Names}} {{.Status}}'"
+            "docker logs --since 10m ${{ env.WORKER }} 2>&1 | grep -E '\\[EventBus|\\[AnalyticsConsumer|\\[Worker\\]' | tail -n 60 || true"
+          )
+          PARAMS=$(printf '%s\n' "${COMMANDS[@]}" | jq -R . | jq -sc '{commands: .}')
+
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ env.INSTANCE_ID }}" \
+            --document-name AWS-RunShellScript \
+            --comment "diagnose event bus (read-only)" \
+            --timeout-seconds 120 \
+            --parameters "${PARAMS}" \
+            --query Command.CommandId --output text)
+
+          STATUS=Pending
+          for i in $(seq 1 24); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" \
+              --instance-id "${{ env.INSTANCE_ID }}" --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Success|Failed|Cancelled|TimedOut) break ;; esac
+            sleep 5
+          done
+
+          aws ssm get-command-invocation --command-id "$CMD_ID" \
+            --instance-id "${{ env.INSTANCE_ID }}" \
+            --query StandardOutputContent --output text | tee /tmp/worker.log
+
+          echo
+          echo "================ verdict ================"
+          if grep -q 'Dropping untyped' /tmp/worker.log; then
+            echo "::error::RawMessageDelivery looks OFF: the worker received SNS envelopes it could not read."
+            exit 1
+          elif grep -q 'Receive failed' /tmp/worker.log; then
+            echo "::error::The worker cannot read a queue (IAM or queue name)."
+            exit 1
+          elif grep -qE 'Flushed [0-9]+ message\(s\) from .*analytics-events' /tmp/worker.log; then
+            echo "Working: the event went SNS -> SQS -> worker and was written."
+          else
+            echo "::warning::No flush seen for the analytics queue: the event may not have reached it (filter policy or subscription)."
+            exit 1
+          fi
