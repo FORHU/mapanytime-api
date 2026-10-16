@@ -19,15 +19,18 @@ name: Deploy Dev
 #      RABBITMQ_URL come from the host — do NOT set them here.
 
 on:
+  # Dev tracks staging. Without this the dev container only changes when somebody
+  # remembers to dispatch, and it silently falls behind: on 2026-10-16 ilovelawyer
+  # dev was 24h and several merges stale while production deployed on every merge,
+  # which read as "changes not propagating" rather than as a missing trigger.
+  push:
+    branches: [staging]
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Branch, tag or SHA to deploy'
+        description: "Branch, tag or SHA to deploy"
         required: true
         default: staging
-  # Uncomment once a dev branch exists and the team wants push-to-deploy.
-  # push:
-  #   branches: [dev]
 
 concurrency:
   group: forhu-dev-mapanytime
@@ -35,16 +38,16 @@ concurrency:
 
 env:
   AWS_REGION: ap-southeast-1
-  ACCOUNT_ID: '617163942417'
+  ACCOUNT_ID: "617163942417"
   INSTANCE_ID: i-0f95a93145ea25e7a
   ECR_REPOSITORY: mapanytime
   CONTAINER: mapanytime-api
   WORKER: mapanytime-api-worker
   NETWORK: forhu-dev
-  HOST_PORT: '4001'
-  APP_PORT: '3000'
-  WORKER_HOST_PORT: '4002'
-  WORKER_PORT: '8080'
+  HOST_PORT: "4001"
+  APP_PORT: "3000"
+  WORKER_HOST_PORT: "4002"
+  WORKER_PORT: "8080"
   ENV_PARAM: /forhu-dev/mapanytime-api/env
   SHARED_ENV: /opt/forhu-dev/credentials/mapanytime.env
   MERGED_ENV: /opt/forhu-dev/mapanytime-api.env
@@ -222,15 +225,8 @@ jobs:
             "aws ssm get-parameter --name ${{ env.ENV_PARAM }} --with-decryption --region ${{ env.AWS_REGION }} --query Parameter.Value --output text >> ${{ env.MERGED_ENV }}"
             "chmod 600 ${{ env.MERGED_ENV }}"
             "aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${REGISTRY}"
-            # Only this repository's images. The box is shared with other
-            # projects, and a box-wide `docker container prune -f` /
-            # `docker image prune -af` deletes their stopped containers and
-            # images too (#136, #141). `docker images <repo>` matches the
-            # repository exactly, and rmi without -f skips an image a running
-            # container still uses, so the live version stays as the rollback
-            # copy until the next deploy. Our own containers are replaced by
-            # name below.
-            "docker images --filter dangling=false --format '{{.Repository}}:{{.Tag}}' ${REGISTRY}/${{ env.ECR_REPOSITORY }} | xargs -r docker rmi 2>/dev/null || true"
+            "docker container prune -f || true"
+            "docker image prune -af || true"
             "docker pull --platform linux/arm64 ${IMAGE}"
             "docker rm -f ${{ env.CONTAINER }} 2>/dev/null || true"
             "docker run --rm --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} --entrypoint npx ${IMAGE} prisma migrate deploy"
