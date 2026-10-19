@@ -183,4 +183,70 @@ describe('consumeBatch', () => {
     expect(handler).toHaveBeenCalledWith([{ n: 1 }], expect.anything());
     expect(deleted()).toEqual(['r1']);
   });
+
+  it('reports healthy status and tracks lastSuccessfulReceiveAt', async () => {
+    fake.push({ n: 1 });
+    const consumer = consumeBatch(OPTIONS, jest.fn().mockResolvedValue(undefined));
+    await waitFor(() => fake.pending.length === 0);
+
+    const status = consumer.getStatus();
+    expect(status.healthy).toBe(true);
+    expect(status.queueUrl).toBe(OPTIONS.queueUrl);
+    expect(status.lastSuccessfulReceiveAt).toBeInstanceOf(Date);
+    expect(status.lastError).toBeNull();
+    expect(status.consecutiveErrors).toBe(0);
+
+    await consumer.stop();
+  });
+
+  it('marks consumer unhealthy after 3 consecutive receive errors and records last error', async () => {
+    let failCount = 0;
+    fake.send.mockImplementation(async (command: { constructor: { name: string } }) => {
+      if (command.constructor.name === 'ReceiveMessageCommand') {
+        failCount += 1;
+        if (failCount <= 3) {
+          throw new Error('AccessDenied: cannot read batch queue');
+        }
+        await new Promise((r) => setTimeout(r, 10));
+        return { Messages: [] };
+      }
+      return {};
+    });
+
+    const consumer = consumeBatch({ ...OPTIONS, receiveErrorBackoffMs: 5 }, jest.fn());
+
+    await waitFor(() => consumer.getStatus().consecutiveErrors >= 3);
+    const unhealthyStatus = consumer.getStatus();
+    expect(unhealthyStatus.healthy).toBe(false);
+    expect(unhealthyStatus.consecutiveErrors).toBe(3);
+    expect(unhealthyStatus.lastError).toContain('AccessDenied');
+    expect(unhealthyStatus.lastErrorAt).toBeInstanceOf(Date);
+
+    // Recovers once receive succeeds
+    await waitFor(() => consumer.getStatus().healthy === true);
+    const recoveredStatus = consumer.getStatus();
+    expect(recoveredStatus.healthy).toBe(true);
+    expect(recoveredStatus.consecutiveErrors).toBe(0);
+    expect(recoveredStatus.lastSuccessfulReceiveAt).toBeInstanceOf(Date);
+
+    await consumer.stop();
+  });
+
+  it('marks consumer unhealthy when receive has timed out beyond healthThresholdMs', async () => {
+    let release!: (v?: any) => void;
+    fake.send.mockImplementationOnce(
+      () =>
+        new Promise<any>((r) => {
+          release = r;
+        }),
+    );
+    const consumer = consumeBatch({ ...OPTIONS, healthThresholdMs: 30 }, jest.fn());
+    await new Promise((r) => setTimeout(r, 50));
+
+    const status = consumer.getStatus();
+    expect(status.healthy).toBe(false);
+
+    release({ Messages: [] });
+    await consumer.stop();
+  });
 });

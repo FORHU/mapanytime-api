@@ -2,7 +2,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import os from 'os';
-import http from 'http';
 import { Consumer } from './infrastructure/event-bus';
 import { redis } from './infrastructure/redis';
 import { startEmailConsumer } from './consumers/email.consumer';
@@ -13,6 +12,8 @@ import { startScheduler } from './infrastructure/scheduler';
 import { ANALYTICS_EVENTS_QUEUE_URL, EMAIL_SEND_QUEUE_URL, EVENTS_TOPIC_ARN } from './config';
 import logger from './utils/logger';
 
+import { createHealthServer } from './worker-health';
+
 const WORKER_HEALTH_PORT = Number(process.env.WORKER_HEALTH_PORT || 8080);
 const cpuCount = os.cpus().length;
 
@@ -21,34 +22,10 @@ let isReady = false;
 let consumers: Consumer[] = [];
 let stopping = false;
 
-/**
- * Lightweight health HTTP server — runs on a separate port from the API.
- * Kubernetes/ECS probes this independently to manage worker lifecycle.
- *
- * GET /health → 503 while starting, 200 with metrics snapshot when ready
- * GET /live   → always 200 (process is alive)
- */
-const healthServer = http.createServer((req, res) => {
-  if (req.url === '/live') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', uptime: Math.floor(process.uptime()) }));
-    return;
-  }
-
-  if (req.url === '/health' || req.url === '/ready') {
-    if (isReady) {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(workerMetrics.getSnapshot()));
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'starting' }));
-    }
-    return;
-  }
-
-  res.writeHead(404);
-  res.end();
-});
+const healthServer = createHealthServer(
+  () => isReady,
+  () => consumers,
+);
 
 const startWorker = async () => {
   logger.info(
