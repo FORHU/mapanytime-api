@@ -15,8 +15,8 @@ name: Deploy Dev
 #      process listens on inside the container. HOST_PORT is allocated per
 #      project and must not change; see /etc/caddy/sites/00-PORTS.md.
 #   3. Put this project's own secrets in the `dev` environment, and list them
-#      in the "Publish project env" step. DATABASE_URL, REDIS_URL and
-#      RABBITMQ_URL come from the host — do NOT set them here.
+#      in the "Publish project env" step. DATABASE_URL and REDIS_URL
+#      come from the host — do NOT set them here.
 
 on:
   push:
@@ -104,8 +104,8 @@ jobs:
           provenance: false
           tags: ${{ steps.tag.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}
 
-      # This project's own config and secrets. DATABASE_URL, REDIS_* and
-      # RABBITMQ_URL are deliberately absent: the host supplies them from
+      # This project's own config and secrets. DATABASE_URL and REDIS_*
+      # are deliberately absent: the host supplies them from
       # /opt/forhu-dev/credentials/mapanytime.env and they are merged in at
       # deploy time. Setting them here would override the shared values and
       # point dev at the wrong database.
@@ -114,9 +114,6 @@ jobs:
       # looks configured and silently disables whatever reads it.
       - name: Publish project env to Parameter Store
         env:
-          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
-          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PAYMONGO_SECRET_KEY: ${{ secrets.PAYMONGO_SECRET_KEY }}
@@ -128,12 +125,7 @@ jobs:
           CORS_ORIGIN: ${{ vars.CORS_ORIGIN || secrets.CORS_ORIGIN }}
           MAPANYTIME_API_PUBLIC_URL: ${{ vars.MAPANYTIME_API_PUBLIC_URL || secrets.MAPANYTIME_API_PUBLIC_URL }}
           MAPANYTIME_WEB_APP_URL: ${{ vars.MAPANYTIME_WEB_APP_URL || secrets.MAPANYTIME_WEB_APP_URL }}
-          ACCESS_TOKEN_EXPIRY: ${{ vars.ACCESS_TOKEN_EXPIRY || secrets.ACCESS_TOKEN_EXPIRY }}
-          REFRESH_TOKEN_EXPIRY: ${{ vars.REFRESH_TOKEN_EXPIRY || secrets.REFRESH_TOKEN_EXPIRY }}
           REDIS_TTL_SECONDS: ${{ vars.REDIS_TTL_SECONDS || secrets.REDIS_TTL_SECONDS }}
-          RABBITMQ_EXCHANGE: ${{ vars.RABBITMQ_EXCHANGE || secrets.RABBITMQ_EXCHANGE }}
-          RABBITMQ_QUEUE_PREFIX: ${{ vars.RABBITMQ_QUEUE_PREFIX || secrets.RABBITMQ_QUEUE_PREFIX }}
-          INGESTION_QUEUE_NAME: ${{ vars.INGESTION_QUEUE_NAME || secrets.INGESTION_QUEUE_NAME }}
           # The worker refuses to start unless all three are set — it was
           # crash-looping on 2026-10-15 for exactly this reason. Created by
           # terraform in forhu-dev/mapanytime-events.tf; take the values from
@@ -182,13 +174,11 @@ jobs:
             printf 'REDIS_TLS=false\n'
           } > env.tmp
 
-          for k in ACCESS_TOKEN_SECRET REFRESH_TOKEN_SECRET GOOGLE_CLIENT_SECRET \
-                   FACEBOOK_APP_SECRET OPENAI_API_KEY PAYMONGO_SECRET_KEY \
+          for k in FACEBOOK_APP_SECRET OPENAI_API_KEY PAYMONGO_SECRET_KEY \
                    PAYMONGO_WEBHOOK_SECRET_KEY XENDIT_SECRET_KEY XENDIT_WEBHOOK_TOKEN \
                    MAILER_PASSWORD SMTP_PASS \
                    CORS_ORIGIN MAPANYTIME_API_PUBLIC_URL MAPANYTIME_WEB_APP_URL \
-                   ACCESS_TOKEN_EXPIRY REFRESH_TOKEN_EXPIRY REDIS_TTL_SECONDS \
-                   RABBITMQ_EXCHANGE RABBITMQ_QUEUE_PREFIX INGESTION_QUEUE_NAME \
+                   REDIS_TTL_SECONDS \
                    BETTER_AUTH_SECRET BETTER_AUTH_URL \
                    EVENTS_TOPIC_ARN EMAIL_SEND_QUEUE_URL ANALYTICS_EVENTS_QUEUE_URL \
                    METRICS_INTERVAL_MS AWS_S3_BUCKET_NAME S3_CDN_URL \
@@ -242,7 +232,7 @@ jobs:
             # MODULE_NOT_FOUND. dist/src/worker.js is what ships.
             #
             # Without a worker, anything
-            # queued on RabbitMQ is accepted and never processed, which reads
+            # published to the event bus is accepted and never processed, which reads
             # as the API silently dropping jobs rather than as a missing
             # container.
             "docker rm -f ${{ env.WORKER }} 2>/dev/null || true"
