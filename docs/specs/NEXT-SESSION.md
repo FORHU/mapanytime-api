@@ -1,27 +1,32 @@
 # MapAnytime — Immediate Execution Checklist (Next Session)
 
-**Updated:** 2026-10-16 (see RESUME HERE).
+**Updated:** 2026-10-19 (Checkpoint / Turning Point).
 
 **Primary Reference:** [`MASTER_EXECUTION_PLAN.md`](./MASTER_EXECUTION_PLAN.md)  
 **Historical Context:** [`FLAGS.md`](./FLAGS.md) · [`OPEN-FLAGS.md`](./OPEN-FLAGS.md)
 
 ---
 
-## ▶ RESUME HERE — last session 2026-10-16
+## ▶ RESUME HERE — Checkpoint 2026-10-19 (Turning Point)
 
-**Read [`HANDOFF-2026-10-16.md`](./HANDOFF-2026-10-16.md) first.** It has the
-current state, the next tasks in order, and how to check and build things.
+**Current Staging State:**
 
-**The live task list is the FORHU project boards** — API #23, app #24, web #25
-(use the **Board** view, `views/2`). This file and the handoffs are context;
-the boards say what is open.
+- All 3 repositories (`mapanytime-api`, `mapanytime-market-web`, `mapanytime-market-app`) are cleanly synchronized on `staging` with 0 uncommitted changes.
+- **API PR #158** merged: Phase 2 (P2-1) Analytics Daily Rollups & Rule-Based Ranking implemented and verified. Staging deploy succeeded (`https://dev.mapanytime.com/api/health/ready` is ready: DB up, Redis up, EventBus up). Issue #157 and PR #158 closed & marked **Done** on Project #23.
+- **Web PR #99 & #100** merged: Admin Pricing UI and `.gitattributes` LF enforcement.
+- **App PR #65** merged: Visual bug and Save button fixes (Issue #64 closed, all 214 tests passing).
 
-In one line: staging is deployed and healthy, the SNS + SQS event bus is
-verified end to end, production is deferred, Stripe is paused, and the admin
-frontend is now the web app (the `mapanytime-market-admin` repo is gone).
-The Stripe plan, its constraints (cards only, needs a non-PH platform account
-for Connect, 30-minute minimum Checkout expiry) and the owner questions are in
-the checkpoint comment on API #124.
+**Strict Directive:**
+
+- **No Over-Engineering** (codified in `.agents/rules/no-overengineering.md`). Minimal, direct solutions only.
+
+**Immediate Next Tasks When Resuming:**
+
+1. **P2-2. Merchant Advertising Marketing Wallet** (`mapanytime-api`): Simple marketing deposit wallet (`MarketingWallet` + `MarketingWalletTransactions`) to fund sponsored map pin ad spend (`/v1/merchant-ads`).
+2. **Publish New Staging Mobile APK ([app #72](https://github.com/FORHU/mapanytime-market-app/issues/72))** (`mapanytime-market-app`): Build staging APK (`flutter build apk --flavor staging -t lib/main_staging.dart`) and publish via App Releases.
+3. **P3-1. Buyer Loyalty Rewards (`RewardWallet`)** (`mapanytime-api`): Minimal buyer loyalty points ledger (₱100 spend = 1 point, 100 points = ₱10 discount) hooked into order completion.
+
+---
 
 The production deploy order, for when production starts, is on API #115
 (pre-deploy checks) and #116 (the deploy itself).
@@ -180,7 +185,7 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
   - Complete the client flow: Pin tap $\rightarrow$ store summary preview $\rightarrow$ storefront $\rightarrow$ products $\rightarrow$ cart.
 - [ ] **P1-7. Scheduled Cron Hygiene**
   - Verify reservation expiration job; remove or implement empty cron shells.
-- [ ] **P1-8. Add `.gitattributes` to `-web`**
+- [x] **P1-8. Add `.gitattributes` to `-web`**
   - Ensure consistent line endings across environments.
 - [x] **P1-9. Admin Pricing Engine UI**
   - Build frontend screens in `mapanytime-market-admin` to manage Pricing Configurations and Components via existing API routes.
@@ -189,7 +194,7 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
 
 ## 3. PHASE 3 (P2): GROWTH ANALYTICS & ADVERTISING
 
-- [ ] **P2-1. Analytics Daily Rollups & Rule-Based Ranking**
+- [x] **P2-1. Analytics Daily Rollups & Rule-Based Ranking**
   - Implement daily aggregation cron, most-viewed, trending, and proximity-based sorting.
 - [ ] **P2-2. Merchant Advertising Marketing Wallet**
   - Build merchant marketing deposit wallet to fund sponsored map pin ad spend.
