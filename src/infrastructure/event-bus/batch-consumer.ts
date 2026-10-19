@@ -7,7 +7,15 @@ import {
 } from '@aws-sdk/client-sqs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { sqs } from './clients';
-import { Consumer, dropUnhandled, handlesEvent, parseEvent, WAIT_TIME_SECONDS } from './consumer';
+import {
+  Consumer,
+  ConsumerStatus,
+  CONSUMER_UNHEALTHY_THRESHOLD_MS,
+  dropUnhandled,
+  handlesEvent,
+  parseEvent,
+  WAIT_TIME_SECONDS,
+} from './consumer';
 import { EventMetadata } from './publisher';
 import logger from '../../utils/logger';
 
@@ -26,11 +34,15 @@ export interface BatchConsumerOptions {
   retryDelaySeconds?: number;
   /** The event types this consumer handles. See `ConsumeOptions.eventTypes`. */
   eventTypes?: readonly string[];
+  /** Milliseconds without a successful receive before the consumer is marked unhealthy. */
+  healthThresholdMs?: number;
+  /** Milliseconds to back off after a receive error. */
+  receiveErrorBackoffMs?: number;
 }
 
 /** SQS batch calls (receive, delete, change visibility) take at most ten entries. */
 const SQS_BATCH_LIMIT = 10;
-const RECEIVE_ERROR_BACKOFF_MS = 5000;
+const DEFAULT_RECEIVE_ERROR_BACKOFF_MS = 5000;
 
 interface Buffered<T> {
   message: Message;
@@ -72,11 +84,19 @@ export const consumeBatch = <T>(
     visibilityTimeoutSeconds = 60,
     retryDelaySeconds = 30,
     eventTypes,
+    healthThresholdMs = CONSUMER_UNHEALTHY_THRESHOLD_MS,
+    receiveErrorBackoffMs = DEFAULT_RECEIVE_ERROR_BACKOFF_MS,
   } = options;
 
   const abort = new AbortController();
   let buffer: Buffered<T>[] = [];
   let deadline = 0;
+
+  const startedAt = Date.now();
+  let lastSuccessfulReceiveAt: Date | null = null;
+  let lastError: string | null = null;
+  let lastErrorAt: Date | null = null;
+  let consecutiveErrors = 0;
 
   const flush = async () => {
     const batch = buffer;
@@ -153,9 +173,14 @@ export const consumeBatch = <T>(
           // No abortSignal: see the note in consumer.ts.
         );
         messages = res.Messages ?? [];
+        lastSuccessfulReceiveAt = new Date();
+        consecutiveErrors = 0;
       } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        lastErrorAt = new Date();
+        consecutiveErrors++;
         logger.warn(`[EventBus][Batch] Receive failed on ${queueUrl}. Backing off.`, error);
-        await sleep(RECEIVE_ERROR_BACKOFF_MS, undefined, { signal: abort.signal }).catch(() => {});
+        await sleep(receiveErrorBackoffMs, undefined, { signal: abort.signal }).catch(() => {});
         continue;
       }
 
@@ -193,6 +218,20 @@ export const consumeBatch = <T>(
     stop: async () => {
       abort.abort();
       await loop;
+    },
+    getStatus: (): ConsumerStatus => {
+      const now = Date.now();
+      const lastSuccess = lastSuccessfulReceiveAt ? lastSuccessfulReceiveAt.getTime() : startedAt;
+      const timedOut = now - lastSuccess > healthThresholdMs;
+      const healthy = consecutiveErrors < 3 && !timedOut;
+      return {
+        queueUrl,
+        healthy,
+        lastSuccessfulReceiveAt,
+        lastError,
+        lastErrorAt,
+        consecutiveErrors,
+      };
     },
   };
 };

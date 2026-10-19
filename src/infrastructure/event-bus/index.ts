@@ -33,6 +33,6 @@ export const eventBus = {
   },
 };
 
-export type { Consumer, ConsumeOptions, DomainEventMessage } from './consumer';
+export type { Consumer, ConsumerStatus, ConsumeOptions, DomainEventMessage } from './consumer';
 export type { BatchConsumerOptions } from './batch-consumer';
 export type { DomainEvent, EventMetadata } from './publisher';

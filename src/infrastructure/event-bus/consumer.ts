@@ -16,8 +16,19 @@ export type DomainEventMessage<T> = DomainEvent<T>;
 
 /** SQS long-poll ceiling. An idle consumer makes about three requests a minute. */
 export const WAIT_TIME_SECONDS = 20;
+/** Default threshold before an idle/failing consumer is marked unhealthy (3 poll intervals). */
+export const CONSUMER_UNHEALTHY_THRESHOLD_MS = 3 * WAIT_TIME_SECONDS * 1000;
 /** How long to back off after a failed receive, which returns at once. */
-const RECEIVE_ERROR_BACKOFF_MS = 5000;
+const DEFAULT_RECEIVE_ERROR_BACKOFF_MS = 5000;
+
+export interface ConsumerStatus {
+  queueUrl: string;
+  healthy: boolean;
+  lastSuccessfulReceiveAt: Date | null;
+  lastError: string | null;
+  lastErrorAt: Date | null;
+  consecutiveErrors: number;
+}
 
 export interface ConsumeOptions {
   /** Messages handled at the same time. Also the receive size, so SQS caps it at 10. */
@@ -32,6 +43,10 @@ export interface ConsumeOptions {
    * this covers a subscription created without one.
    */
   eventTypes?: readonly string[];
+  /** Milliseconds without a successful receive before the consumer is marked unhealthy. */
+  healthThresholdMs?: number;
+  /** Milliseconds to back off after a receive error. */
+  receiveErrorBackoffMs?: number;
 }
 
 export interface Consumer {
@@ -40,6 +55,8 @@ export interface Consumer {
    * to WAIT_TIME_SECONDS longer when a poll is open — see the receive below.
    */
   stop(): Promise<void>;
+  /** Current health and receive status for this consumer's queue. */
+  getStatus(): ConsumerStatus;
 }
 
 /**
@@ -60,10 +77,18 @@ export const consume = <T>(
     visibilityTimeoutSeconds = 60,
     retryDelaySeconds = 30,
     eventTypes,
+    healthThresholdMs = CONSUMER_UNHEALTHY_THRESHOLD_MS,
+    receiveErrorBackoffMs = DEFAULT_RECEIVE_ERROR_BACKOFF_MS,
   }: ConsumeOptions = {},
 ): Consumer => {
   const abort = new AbortController();
   const batchSize = Math.max(1, Math.min(concurrency, 10));
+
+  const startedAt = Date.now();
+  let lastSuccessfulReceiveAt: Date | null = null;
+  let lastError: string | null = null;
+  let lastErrorAt: Date | null = null;
+  let consecutiveErrors = 0;
 
   const loop = (async () => {
     while (!abort.signal.aborted) {
@@ -84,9 +109,14 @@ export const consume = <T>(
           // for the whole visibility timeout.
         );
         messages = res.Messages ?? [];
+        lastSuccessfulReceiveAt = new Date();
+        consecutiveErrors = 0;
       } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        lastErrorAt = new Date();
+        consecutiveErrors++;
         logger.warn(`[EventBus] Receive failed on ${queueUrl}. Backing off.`, error);
-        await sleep(RECEIVE_ERROR_BACKOFF_MS, undefined, { signal: abort.signal }).catch(() => {});
+        await sleep(receiveErrorBackoffMs, undefined, { signal: abort.signal }).catch(() => {});
         continue;
       }
 
@@ -114,6 +144,20 @@ export const consume = <T>(
     stop: async () => {
       abort.abort();
       await loop;
+    },
+    getStatus: (): ConsumerStatus => {
+      const now = Date.now();
+      const lastSuccess = lastSuccessfulReceiveAt ? lastSuccessfulReceiveAt.getTime() : startedAt;
+      const timedOut = now - lastSuccess > healthThresholdMs;
+      const healthy = consecutiveErrors < 3 && !timedOut;
+      return {
+        queueUrl,
+        healthy,
+        lastSuccessfulReceiveAt,
+        lastError,
+        lastErrorAt,
+        consecutiveErrors,
+      };
     },
   };
 };
