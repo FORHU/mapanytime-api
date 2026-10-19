@@ -19,10 +19,6 @@ name: Deploy Dev
 #      RABBITMQ_URL come from the host — do NOT set them here.
 
 on:
-  # Dev tracks staging. Without this the dev container only changes when somebody
-  # remembers to dispatch, and it silently falls behind: on 2026-10-16 ilovelawyer
-  # dev was 24h and several merges stale while production deployed on every merge,
-  # which read as "changes not propagating" rather than as a missing trigger.
   push:
     branches: [staging]
   workflow_dispatch:
