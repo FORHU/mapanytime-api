@@ -126,6 +126,11 @@ export default class ProductController {
           is: Joi.exist(),
           then: Joi.number().min(Joi.ref('minPrice')),
         }),
+      sortBy: Joi.string()
+        .valid('createdAt', 'price_asc', 'price_desc', 'most_viewed', 'trending', 'proximity')
+        .optional(),
+      lat: Joi.number().min(-90).max(90).optional(),
+      lng: Joi.number().min(-180).max(180).optional(),
     }).unknown(true);
 
     const { error, value } = schema.validate(req.query);
@@ -139,6 +144,9 @@ export default class ProductController {
         search: value.search,
         minPrice: value.minPrice,
         maxPrice: value.maxPrice,
+        sortBy: value.sortBy,
+        centerLat: value.lat,
+        centerLng: value.lng,
         page,
         limit,
         skip,
