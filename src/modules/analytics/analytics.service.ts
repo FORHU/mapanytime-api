@@ -78,4 +78,41 @@ export default class AnalyticsService {
 
     return { accepted: payloads.length, transport: 'direct' };
   }
+
+  /**
+   * Run daily rollup aggregation for a target date (defaults to yesterday UTC).
+   */
+  static async generateDailyRollups(targetDate?: Date): Promise<number> {
+    const now = new Date();
+    const d =
+      targetDate ??
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+    const startDate = new Date(
+      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0),
+    );
+    const endDate = new Date(
+      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999),
+    );
+
+    const [productRollups, storeRollups] = await Promise.all([
+      AnalyticsRepository.aggregateProductRollups(startDate, endDate),
+      AnalyticsRepository.aggregateStoreRollups(startDate, endDate),
+    ]);
+
+    return AnalyticsRepository.saveDailyRollups(startDate, productRollups, storeRollups);
+  }
+
+  /**
+   * Get most viewed products or stores.
+   */
+  static async getMostViewed(targetType: 'PRODUCT' | 'STORE' = 'PRODUCT', days = 7, limit = 20) {
+    return AnalyticsRepository.getMostViewed(targetType, days, limit);
+  }
+
+  /**
+   * Get trending products or stores over the recent window (default 24h).
+   */
+  static async getTrending(targetType: 'PRODUCT' | 'STORE' = 'PRODUCT', hours = 24, limit = 20) {
+    return AnalyticsRepository.getTrending(targetType, hours, limit);
+  }
 }

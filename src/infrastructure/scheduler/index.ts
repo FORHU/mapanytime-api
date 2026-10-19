@@ -6,6 +6,7 @@ import MerchantAdsService from '../../modules/merchantAds/merchantAds.service';
 import RewardService from '../../modules/rewards/reward.service';
 import StoreService from '../../modules/stores/store.service';
 import OrderService from '../../modules/orders/order.service';
+import AnalyticsService from '../../modules/analytics/analytics.service';
 import { redis } from '../redis';
 import { PENDING_ORDER_TTL_MINUTES } from '../../modules/orders/order.ttl';
 
@@ -156,6 +157,21 @@ export const startScheduler = () => {
       }
     } catch (err) {
       logger.error('[Scheduler] Rejected-store purge failed:', err);
+    }
+  });
+
+  // ── Analytics Daily Rollup — runs daily at 00:05 UTC ────────────────────
+  // Aggregates previous day's events into daily rollups for ranking and trending.
+  cron.schedule('5 0 * * *', async () => {
+    try {
+      await withJobLock('analytics-daily-rollup', 1800, async () => {
+        const count = await AnalyticsService.generateDailyRollups();
+        if (count > 0) {
+          logger.info(`[Scheduler] Generated ${count} analytics daily rollup record(s).`);
+        }
+      });
+    } catch (err) {
+      logger.error('[Scheduler] Failed to generate analytics daily rollups:', err);
     }
   });
 
