@@ -8,6 +8,11 @@ import { deriveAdState, windowsOverlap, START_GRACE_MS, type AdWindowState } fro
 import { publish } from '../../infrastructure/event-bus/publisher';
 import { assertStoreInScope, resolveAccessibleStoreIds } from '../organization/storeAccess';
 import type { AuthUser } from '../auth/auth.repository';
+import { prisma } from '../../utils/prisma';
+import MarketingWalletService from '../marketingWallet/marketingWallet.service';
+
+export const AD_COST_PER_CLICK = 0.5;
+export const AD_COST_PER_IMPRESSION = 0.05;
 
 async function resolveImageUrl(file: { path: string; bucket?: string | null }): Promise<string> {
   if (S3_CDN_URL) return `${S3_CDN_URL}/${file.path}`;
@@ -563,11 +568,54 @@ export default class MerchantAdsService {
 
     await MerchantAdsRepository.recordAdEvent({ adId, ...data, revenueAmount });
 
+    // Calculate billable ad spend
+    let spendAmount = 0;
+    if (data.eventType === 'CLICK') {
+      spendAmount = AD_COST_PER_CLICK;
+    } else if (data.eventType === 'IMPRESSION') {
+      spendAmount = AD_COST_PER_IMPRESSION;
+    }
+
+    if (spendAmount > 0) {
+      const store = await prisma.stores.findUnique({
+        where: { id: ad.storeId },
+        select: { sellerId: true },
+      });
+
+      if (store?.sellerId) {
+        const currentSpent = Number(ad.spentAmount) || 0;
+        const totalBudget = ad.totalBudget ? Number(ad.totalBudget) : null;
+
+        if (totalBudget && currentSpent + spendAmount > totalBudget) {
+          // Total budget reached; deactivate ad
+          await MerchantAdsRepository.setActive(adId, false);
+          spendAmount = 0;
+        } else {
+          const deduction = await MarketingWalletService.deductAdSpend(
+            store.sellerId,
+            adId,
+            spendAmount,
+            `Ad ${data.eventType.toLowerCase()} spend on "${ad.title}"`,
+            { eventType: data.eventType, adId, storeId: ad.storeId },
+          );
+
+          if (deduction && !deduction.success) {
+            // Insufficient wallet funds; pause ad
+            await MerchantAdsRepository.setActive(adId, false);
+            spendAmount = 0;
+          } else if (totalBudget && currentSpent + spendAmount >= totalBudget) {
+            await MerchantAdsRepository.setActive(adId, false);
+          }
+        }
+      }
+    }
+
     await MerchantAdsRepository.incrementAdMetrics(adId, {
       impressions: data.eventType === 'IMPRESSION' ? 1 : 0,
       clicks: data.eventType === 'CLICK' ? 1 : 0,
       conversions: data.eventType === 'CONVERSION' ? 1 : 0,
       revenue: revenueAmount,
+      spend: spendAmount,
     });
   }
 

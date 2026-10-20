@@ -22,7 +22,7 @@
 
 **Immediate Next Tasks When Resuming:**
 
-1. **P2-2. Merchant Advertising Marketing Wallet** (`mapanytime-api`): Simple marketing deposit wallet (`MarketingWallet` + `MarketingWalletTransactions`) to fund sponsored map pin ad spend (`/v1/merchant-ads`).
+1. [x] **P2-2. Merchant Advertising Marketing Wallet** (`mapanytime-api`): Simple marketing deposit wallet (`MarketingWallet` + `MarketingWalletTransactions`) to fund sponsored map pin ad spend (`/v1/merchant-ads`).
 2. **Publish New Staging Mobile APK ([app #72](https://github.com/FORHU/mapanytime-market-app/issues/72))** (`mapanytime-market-app`): Build staging APK (`flutter build apk --flavor staging -t lib/main_staging.dart`) and publish via App Releases.
 3. **P3-1. Buyer Loyalty Rewards (`RewardWallet`)** (`mapanytime-api`): Minimal buyer loyalty points ledger (₱100 spend = 1 point, 100 points = ₱10 discount) hooked into order completion.
 
@@ -196,7 +196,7 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
 
 - [x] **P2-1. Analytics Daily Rollups & Rule-Based Ranking**
   - Implement daily aggregation cron, most-viewed, trending, and proximity-based sorting.
-- [ ] **P2-2. Merchant Advertising Marketing Wallet**
+- [x] **P2-2. Merchant Advertising Marketing Wallet**
   - Build merchant marketing deposit wallet to fund sponsored map pin ad spend.
 
 ---
