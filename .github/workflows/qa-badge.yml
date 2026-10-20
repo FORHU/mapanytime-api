@@ -51,7 +51,9 @@ jobs:
             const { owner, repo } = context.repo;
             const projectClient = getOctokit(PROJECT_TOKEN);
 
-            const inQA = new Set();
+            // Decide per project item from its own Status and labels (no label-filtered listing,
+            // which can lag behind or miss labels with special characters).
+            let added = 0, removed = 0, inQA = 0;
             let cursor = null;
             do {
               const res = await projectClient.graphql(
@@ -65,8 +67,8 @@ jobs:
                             ... on ProjectV2ItemFieldSingleSelectValue { name }
                           }
                           content {
-                            ... on Issue { number repository { name } }
-                            ... on PullRequest { number repository { name } }
+                            ... on Issue { number repository { name } labels(first: 50) { nodes { name } } }
+                            ... on PullRequest { number repository { name } labels(first: 50) { nodes { name } } }
                           }
                         }
                       }
@@ -77,29 +79,19 @@ jobs:
               );
               const items = res.organization.projectV2.items;
               for (const n of items.nodes) {
-                if (n.content?.repository?.name === repo && n.status?.name === QA_STATUS) {
-                  inQA.add(n.content.number);
+                if (n.content?.repository?.name !== repo) continue;
+                const wants = n.status?.name === QA_STATUS;
+                const has = (n.content.labels?.nodes || []).some((l) => l.name === LABEL);
+                if (wants) inQA++;
+                if (wants && !has) {
+                  await github.rest.issues.addLabels({ owner, repo, issue_number: n.content.number, labels: [LABEL] });
+                  added++;
+                } else if (!wants && has) {
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: n.content.number, name: LABEL });
+                  removed++;
                 }
               }
               cursor = items.pageInfo.hasNextPage ? items.pageInfo.endCursor : null;
             } while (cursor);
 
-            const labeled = await github.paginate(github.rest.issues.listForRepo, {
-              owner, repo, labels: LABEL, state: "all", per_page: 100,
-            });
-            const hasLabel = new Set(labeled.map((i) => i.number));
-
-            let added = 0, removed = 0;
-            for (const num of inQA) {
-              if (!hasLabel.has(num)) {
-                await github.rest.issues.addLabels({ owner, repo, issue_number: num, labels: [LABEL] });
-                added++;
-              }
-            }
-            for (const num of hasLabel) {
-              if (!inQA.has(num)) {
-                await github.rest.issues.removeLabel({ owner, repo, issue_number: num, name: LABEL });
-                removed++;
-              }
-            }
-            core.info(`${repo}: ${inQA.size} in "${QA_STATUS}" | label added ${added}, removed ${removed}`);
+            core.info(`${repo}: ${inQA} in "${QA_STATUS}" | label added ${added}, removed ${removed}`);
