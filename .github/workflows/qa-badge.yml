@@ -1,0 +1,105 @@
+# Keeps the "(QA)" label in sync with the GitHub Project's Status:
+# items in "To QA" get the label; items that leave "To QA" (QA Verified, Rejected, ...) lose it.
+#
+# Setup: add an org or repo secret QA_BADGE_TOKEN - a token that can READ the FORHU project
+# (classic PAT with `read:project`, or a fine-grained token with Organization > Projects: read).
+# Label changes use this repo's own GITHUB_TOKEN. Without the secret the job logs a notice and exits.
+#
+# Note: scheduled and issue/PR-event workflows only run from the repository's default branch.
+name: QA badge
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+  issues:
+    types: [closed, reopened]
+  pull_request:
+    types: [closed]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: qa-badge
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Sync (QA) label with project status
+        uses: actions/github-script@v7
+        env:
+          PROJECT_TOKEN: ${{ secrets.QA_BADGE_TOKEN }}
+          PROJECT_NUMBER: "32"
+          QA_STATUS: "To QA"
+          LABEL: "(QA)"
+        with:
+          script: |
+            const { PROJECT_TOKEN, PROJECT_NUMBER, QA_STATUS, LABEL } = process.env;
+            if (!PROJECT_TOKEN) {
+              core.notice("QA_BADGE_TOKEN secret is not set - skipping the (QA) label sync.");
+              return;
+            }
+            // Issue/PR events: give the project's own automation a moment to update Status first.
+            if (context.eventName === "issues" || context.eventName === "pull_request") {
+              await new Promise((r) => setTimeout(r, 30000));
+            }
+            const { owner, repo } = context.repo;
+            const projectClient = getOctokit(PROJECT_TOKEN);
+
+            const inQA = new Set();
+            let cursor = null;
+            do {
+              const res = await projectClient.graphql(
+                `query($org: String!, $num: Int!, $cursor: String) {
+                  organization(login: $org) {
+                    projectV2(number: $num) {
+                      items(first: 100, after: $cursor) {
+                        pageInfo { hasNextPage endCursor }
+                        nodes {
+                          status: fieldValueByName(name: "Status") {
+                            ... on ProjectV2ItemFieldSingleSelectValue { name }
+                          }
+                          content {
+                            ... on Issue { number repository { name } }
+                            ... on PullRequest { number repository { name } }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }`,
+                { org: owner, num: Number(PROJECT_NUMBER), cursor }
+              );
+              const items = res.organization.projectV2.items;
+              for (const n of items.nodes) {
+                if (n.content?.repository?.name === repo && n.status?.name === QA_STATUS) {
+                  inQA.add(n.content.number);
+                }
+              }
+              cursor = items.pageInfo.hasNextPage ? items.pageInfo.endCursor : null;
+            } while (cursor);
+
+            const labeled = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, labels: LABEL, state: "all", per_page: 100,
+            });
+            const hasLabel = new Set(labeled.map((i) => i.number));
+
+            let added = 0, removed = 0;
+            for (const num of inQA) {
+              if (!hasLabel.has(num)) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: num, labels: [LABEL] });
+                added++;
+              }
+            }
+            for (const num of hasLabel) {
+              if (!inQA.has(num)) {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: num, name: LABEL });
+                removed++;
+              }
+            }
+            core.info(`${repo}: ${inQA.size} in "${QA_STATUS}" | label added ${added}, removed ${removed}`);
