@@ -236,6 +236,7 @@ model Sellers {
   payouts               SellerPayouts[]
   returnRequests        ReturnRequests[]
   organizationMembers   SellerOrganizationMembers[]
+  marketingWallet       MarketingWallet?
 
   @@index([applicationStatus])
   @@index([reviewedAt])
@@ -713,7 +714,8 @@ model MerchantAds {
   badge      PromotionBadges?     @relation(fields: [badgeId], references: [id], onDelete: SetNull)
   products   MerchantAdProducts[]
   orderItems OrderItems[]
-  adEvents   AdEvents[]
+  adEvents              AdEvents[]
+  marketingTransactions MarketingWalletTransactions[]
 
   @@index([storeId, isActive])
   @@index([radiusKm])
@@ -763,6 +765,56 @@ model AdEvents {
   @@index([adId, eventType, occurredAt])
   @@index([buyerId])
   @@index([orderId])
+}
+
+// =========================================================================
+// 💳 FEATURE DOMAIN: MERCHANT ADVERTISING MARKETING WALLET
+// =========================================================================
+
+enum MARKETINGTRANSACTIONTYPE {
+  DEPOSIT
+  AD_SPEND
+  REFUND
+  ADJUSTMENT
+}
+
+model MarketingWallet {
+  id                String   @id @default(cuid())
+  sellerId          String   @unique
+  balance           Decimal  @default(0) @db.Decimal(12, 2)
+  lifetimeDeposited Decimal  @default(0) @db.Decimal(12, 2)
+  lifetimeSpent     Decimal  @default(0) @db.Decimal(12, 2)
+  currency          String   @default("PHP")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  seller       Sellers                       @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  transactions MarketingWalletTransactions[]
+
+  @@index([sellerId])
+}
+
+model MarketingWalletTransactions {
+  id           String                   @id @default(cuid())
+  walletId     String
+  type         MARKETINGTRANSACTIONTYPE
+  amount       Decimal                  @db.Decimal(12, 2)
+  balanceAfter Decimal                  @db.Decimal(12, 2)
+
+  adId         String?
+  referenceKey String?                  @unique
+  description  String?
+  metadata     Json?
+
+  createdAt DateTime @default(now())
+
+  wallet MarketingWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  ad     MerchantAds?    @relation(fields: [adId], references: [id], onDelete: SetNull)
+
+  @@index([walletId, createdAt])
+  @@index([adId])
+  @@index([type])
 }
 
 // =========================================================================
