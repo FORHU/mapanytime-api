@@ -115,8 +115,31 @@ export default class AuthSvc {
       await prisma.$transaction(async (tx) => {
         const rolesToConnect =
           data.roleName === 'SELLER'
-            ? [{ roleName: 'SELLER' }, { roleName: 'BUYER' }]
-            : [{ roleName: data.roleName }];
+            ? [
+                {
+                  where: { roleName: 'SELLER' },
+                  create: {
+                    roleName: 'SELLER',
+                    description: 'Merchant seller account for managing storefronts and catalog',
+                  },
+                },
+                {
+                  where: { roleName: 'BUYER' },
+                  create: {
+                    roleName: 'BUYER',
+                    description: 'Buyer account for map discovery and local checkout',
+                  },
+                },
+              ]
+            : [
+                {
+                  where: { roleName: data.roleName },
+                  create: {
+                    roleName: data.roleName,
+                    description: `${data.roleName} role`,
+                  },
+                },
+              ];
 
         const user = await tx.users.create({
           data: {
@@ -131,7 +154,7 @@ export default class AuthSvc {
             sex: data.sex,
             isEmailVerified: true,
             accountStatus: 'ACTIVE',
-            roles: { connect: rolesToConnect },
+            roles: { connectOrCreate: rolesToConnect },
           },
         });
 
@@ -424,7 +447,17 @@ export default class AuthSvc {
           lastName: profile.lastName,
           isEmailVerified: true,
           accountStatus: 'ACTIVE',
-          roles: { connect: [{ roleName: 'BUYER' }] },
+          roles: {
+            connectOrCreate: [
+              {
+                where: { roleName: 'BUYER' },
+                create: {
+                  roleName: 'BUYER',
+                  description: 'Buyer account for map discovery and local checkout',
+                },
+              },
+            ],
+          },
         },
       });
       await tx.buyers.create({
