@@ -7,6 +7,7 @@ import RewardService from '../../modules/rewards/reward.service';
 import StoreService from '../../modules/stores/store.service';
 import OrderService from '../../modules/orders/order.service';
 import AnalyticsService from '../../modules/analytics/analytics.service';
+import { PaymentReconciliationJob } from '../../modules/payments/jobs/payment-reconciliation.job';
 import { redis } from '../redis';
 import { PENDING_ORDER_TTL_MINUTES } from '../../modules/orders/order.ttl';
 
@@ -172,6 +173,24 @@ export const startScheduler = () => {
       });
     } catch (err) {
       logger.error('[Scheduler] Failed to generate analytics daily rollups:', err);
+    }
+  });
+
+  // ── Stripe Payment Reconciliation Sweeper — runs every 5 minutes ─────────
+  // Sweeps pending payments older than 10 minutes to verify status with Stripe.
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      await withJobLock('stripe-payment-reconciliation', 250, async () => {
+        const job = new PaymentReconciliationJob();
+        const result = await job.runReconciliation(10);
+        if (result.inspected > 0) {
+          logger.info(
+            `[Scheduler] Stripe payment reconciliation completed: inspected=${result.inspected}, completed=${result.completed}, failed=${result.failed}, skipped=${result.skipped}`,
+          );
+        }
+      });
+    } catch (err) {
+      logger.error('[Scheduler] Stripe payment reconciliation failed:', err);
     }
   });
 

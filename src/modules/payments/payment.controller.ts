@@ -130,6 +130,7 @@ export const handleProviderWebhook = async (req: Request, res: Response, next: N
   try {
     const provider = req.params.provider || 'paymongo';
     const signature =
+      (req.headers['stripe-signature'] as string) ||
       (req.headers['paymongo-signature'] as string) ||
       (req.headers['x-callback-token'] as string) ||
       (req.headers['x-signature'] as string) ||

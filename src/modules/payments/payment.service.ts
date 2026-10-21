@@ -5,6 +5,7 @@ import { PaymentProvider } from './providers/payment-provider.interface';
 import { PayMongoProvider } from './providers/paymongo.provider';
 import { MockProvider } from './providers/mock.provider';
 import { XenditProvider } from './providers/xendit.provider';
+import { StripeProvider } from './providers/stripe.provider';
 import PricingEngineService, { OrderPricingResult } from '../pricing/pricing-engine.service';
 import InventoryStockRepository from '../inventory/inventoryStock.repository';
 import logger from '../../utils/logger';
@@ -56,6 +57,12 @@ export default class PaymentService {
           return new MockProvider();
         }
         return new XenditProvider();
+      case 'STRIPE':
+        if (!process.env.STRIPE_SECRET_KEY) {
+          this.warnUnconfigured('STRIPE', 'STRIPE_SECRET_KEY');
+          return new MockProvider();
+        }
+        return new StripeProvider();
       case 'MOCK':
       default:
         return new MockProvider();

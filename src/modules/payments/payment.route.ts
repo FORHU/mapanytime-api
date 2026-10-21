@@ -31,6 +31,10 @@ router.get('/xendit/return', handleXenditReturn);
 // Provider webhooks. Signature-verified inside the service, so no `authenticate`
 // — the signature is the credential.
 router.post('/webhook/:provider', handleProviderWebhook);
+router.post('/webhooks/stripe', (req, res, next) => {
+  (req.params as Record<string, string>).provider = 'stripe';
+  return handleProviderWebhook(req, res, next);
+});
 
 // Mock payment routes never exist in production: MockProvider accepts any
 // signature, so a reachable mock webhook is an open "mark any order paid"
