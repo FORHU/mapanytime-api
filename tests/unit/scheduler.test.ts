@@ -36,6 +36,13 @@ jest.mock('../../src/modules/orders/order.service', () => ({
   __esModule: true,
   default: { expireStalePendingOrders: jest.fn().mockResolvedValue(0) },
 }));
+jest.mock('../../src/modules/payments/jobs/payment-reconciliation.job', () => ({
+  PaymentReconciliationJob: jest.fn().mockImplementation(() => ({
+    runReconciliation: jest
+      .fn()
+      .mockResolvedValue({ inspected: 0, completed: 0, failed: 0, skipped: 0 }),
+  })),
+}));
 
 const schedule = cron.schedule as unknown as jest.Mock;
 const getClient = redis.getClient as jest.Mock;
