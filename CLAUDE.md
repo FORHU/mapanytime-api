@@ -31,6 +31,12 @@ git log --oneline origin/main..origin/staging   # what staging has that main doe
 git checkout staging && git pull
 git checkout -b <type>/<short-description>      # feat/, fix/, docs/, test/, chore/ ...
 
+# Before committing or opening a PR: run full CI validation pipeline
+npm run format:check   # run 'npm run format:write' if formatting fails
+npm run lint           # must pass with 0 errors
+npm run build          # TypeScript compilation check
+npm test               # verify test suites
+
 # Finish a task: open a PR into staging (never into main)
 gh pr create --base staging
 

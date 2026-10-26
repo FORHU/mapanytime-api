@@ -89,7 +89,58 @@ export async function seedPaymentProviders(prisma: PrismaClient) {
     });
   }
 
-  // 3. Mock Provider (for dev / test)
+  // 3. Stripe Provider — for Credit and Debit Card payments (coexists with Xendit).
+  // Issue #128: Cards route through Stripe, while e-wallets (GCash, Maya) route through Xendit.
+  const stripe = await prisma.paymentProviders.upsert({
+    where: { code: 'STRIPE' },
+    update: { isActive: true, priority: 3 },
+    create: {
+      code: 'STRIPE',
+      name: 'Stripe',
+      description: 'Global Payment Gateway (Credit/Debit Cards & Wallets)',
+      isActive: true,
+      priority: 3,
+    },
+  });
+
+  const stripeMethods = [
+    {
+      code: 'CARD',
+      name: 'Credit / Debit Card (Stripe)',
+      type: PAYMENTMETHODTYPE.CARD,
+      priority: 1,
+      minOrderAmount: 100,
+    },
+  ];
+
+  for (const m of stripeMethods) {
+    await prisma.paymentMethods.upsert({
+      where: {
+        providerId_code: {
+          providerId: stripe.id,
+          code: m.code,
+        },
+      },
+      update: {
+        name: m.name,
+        type: m.type,
+        isActive: true,
+        priority: m.priority,
+        minOrderAmount: m.minOrderAmount,
+      },
+      create: {
+        providerId: stripe.id,
+        code: m.code,
+        name: m.name,
+        type: m.type,
+        isActive: true,
+        priority: m.priority,
+        minOrderAmount: m.minOrderAmount,
+      },
+    });
+  }
+
+  // 4. Mock Provider (for dev / test)
   //
   // Seeded INACTIVE in production. The mock provider accepts any webhook
   // signature and marks any order paid; the webhook is gated at the processor,
