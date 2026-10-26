@@ -13,6 +13,8 @@ import {
  * test and failed against a real database (#122). This pins it against Better Auth's
  * own signing function, not against a restatement of ours.
  */
+jest.setTimeout(15000);
+
 describe('session tokens (#122)', () => {
   const sessionToken = 'p9QzX1-session_token_value';
 

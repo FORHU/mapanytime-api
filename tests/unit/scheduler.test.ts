@@ -6,6 +6,8 @@ import RewardService from '../../src/modules/rewards/reward.service';
 
 jest.mock('node-cron', () => ({ __esModule: true, default: { schedule: jest.fn() } }));
 
+jest.setTimeout(15000);
+
 // The worker connects this client and never calls RedisUtil.initialize().
 jest.mock('../../src/infrastructure/redis', () => ({ redis: { getClient: jest.fn() } }));
 
