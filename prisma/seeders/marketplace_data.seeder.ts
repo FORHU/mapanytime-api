@@ -163,176 +163,186 @@ export async function seedMarketplaceData(prisma: PrismaClient) {
   const fee1 = Math.round(subtotal1 * 0.02 * 100) / 100;
   const net1 = subtotal1 - fee1;
 
-  const completedOrder = await prisma.orders.create({
-    data: {
-      buyerId: buyer.id,
-      storeId: primaryStore.id,
-      storeName: primaryStore.storeName,
-      sellerName: 'Grace Piatos',
-      storeAddressSnapshot: 'Baguio City Public Market, Magsaysay Ave, Baguio',
-      sellerPhoneSnapshot: '+639171112222',
-      totalAmount: subtotal1,
-      subtotalAmount: subtotal1,
-      marketplaceFeeAmount: fee1,
-      sellerNetAmount: net1,
-      type: FULLFILLMENTTYPE.PICKUP,
-      status: ORDERSTATUS.COMPLETED,
-      pickupAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-      completedAt: new Date(Date.now() - 12 * 60 * 60 * 1000),
-      orderitems: {
-        create: [
-          {
-            productId: orderProduct1.id,
-            productName: orderProduct1.name,
-            quantity: 2,
-            unitPrice: Number(orderProduct1.price),
-          },
-        ],
-      },
-    },
+  let completedOrder = await prisma.orders.findFirst({
+    where: { buyerId: buyer.id, storeId: primaryStore.id, status: ORDERSTATUS.COMPLETED },
   });
 
-  const processingOrder = await prisma.orders.create({
-    data: {
-      buyerId: buyer.id,
-      storeId: secondaryStore.id,
-      storeName: secondaryStore.storeName,
-      sellerName: 'Alex Mercer',
-      storeAddressSnapshot: 'Session Road, Baguio City',
-      totalAmount: Number(orderProduct2.price),
-      subtotalAmount: Number(orderProduct2.price),
-      marketplaceFeeAmount: Math.round(Number(orderProduct2.price) * 0.02 * 100) / 100,
-      sellerNetAmount: Number(orderProduct2.price) * 0.98,
-      type: FULLFILLMENTTYPE.PICKUP,
-      status: ORDERSTATUS.PROCESSING,
-      pickupAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
-      orderitems: {
-        create: [
-          {
-            productId: orderProduct2.id,
-            productName: orderProduct2.name,
-            quantity: 1,
-            unitPrice: Number(orderProduct2.price),
-          },
-        ],
-      },
-    },
-  });
-
-  // ── 7. Payments ──────────────────────────────────────────────────────────
-  console.log('  → Seeding Payments...');
-  const cashMethod = await prisma.paymentMethods.findFirst({ where: { code: 'COD' } });
-  const gcashMethod = await prisma.paymentMethods.findFirst({ where: { code: 'GCASH' } });
-
-  await prisma.payments.create({
-    data: {
-      orderId: completedOrder.id,
-      amount: completedOrder.totalAmount,
-      providerId: cashMethod?.providerId,
-      paymentMethodId: cashMethod?.id,
-      status: PAYMENTSTATUS.COMPLETED,
-      referenceNumber: `PAY-COD-${completedOrder.id.slice(-8).toUpperCase()}`,
-      paidAt: completedOrder.completedAt,
-    },
-  });
-
-  await prisma.payments.create({
-    data: {
-      orderId: processingOrder.id,
-      amount: processingOrder.totalAmount,
-      providerId: gcashMethod?.providerId,
-      paymentMethodId: gcashMethod?.id,
-      status: PAYMENTSTATUS.COMPLETED,
-      referenceNumber: `PAY-GCASH-${processingOrder.id.slice(-8).toUpperCase()}`,
-      providerReference: `REF-GCASH-${Date.now()}`,
-      paidAt: new Date(),
-    },
-  });
-
-  // ── 8. ReturnRequests ────────────────────────────────────────────────────
-  // Shipments were removed with the rest of the courier apparatus on
-  // 2026-08-20 — fulfillment is pickup at the stall. See FIX-PLAN.md item 15.
-  console.log('  → Seeding ReturnRequests...');
-  await prisma.returnRequests.create({
-    data: {
-      orderId: completedOrder.id,
-      buyerId: buyer.id,
-      sellerId: primaryStore.sellerId,
-      reason: 'Package seal was slightly opened upon pickup inspection.',
-      status: RETURNSTATUS.APPROVED,
-      refundAmount: Number(completedOrder.totalAmount),
-      approvedAt: new Date(),
-    },
-  });
-
-  // ── 9. InventoryReservations & InventoryMovements ────────────────────────
-  console.log('  → Seeding InventoryReservations & InventoryMovements...');
-  const invRow = await prisma.inventory.findFirst({
-    where: { productId: orderProduct1.id },
-  });
-  if (invRow) {
-    await prisma.inventoryReservations.create({
+  if (!completedOrder) {
+    completedOrder = await prisma.orders.create({
       data: {
-        inventoryId: invRow.id,
         buyerId: buyer.id,
-        orderId: processingOrder.id,
-        quantity: 1,
-        status: RESERVATIONSTATUS.CONSUMED,
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        storeId: primaryStore.id,
+        storeName: primaryStore.storeName,
+        sellerName: 'Grace Piatos',
+        storeAddressSnapshot: 'Baguio City Public Market, Magsaysay Ave, Baguio',
+        sellerPhoneSnapshot: '+639171112222',
+        totalAmount: subtotal1,
+        subtotalAmount: subtotal1,
+        marketplaceFeeAmount: fee1,
+        sellerNetAmount: net1,
+        type: FULLFILLMENTTYPE.PICKUP,
+        status: ORDERSTATUS.COMPLETED,
+        pickupAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        completedAt: new Date(Date.now() - 12 * 60 * 60 * 1000),
+        orderitems: {
+          create: [
+            {
+              productId: orderProduct1.id,
+              productName: orderProduct1.name,
+              quantity: 2,
+              unitPrice: Number(orderProduct1.price),
+            },
+          ],
+        },
       },
     });
 
-    await prisma.inventoryMovements.create({
+    console.log('  → Seeding Payments for completed order...');
+    const cashMethod = await prisma.paymentMethods.findFirst({ where: { code: 'COD' } });
+    await prisma.payments.create({
       data: {
-        inventoryId: invRow.id,
-        productId: orderProduct1.id,
-        storeId: primaryStore.id,
-        movementType: INVENTORYMOVEMENTTYPE.SALE,
-        quantityDelta: -2,
-        previousOnHand: invRow.quantityOnHand + 2,
-        newOnHand: invRow.quantityOnHand,
-        referenceId: completedOrder.id,
-        referenceType: INVENTORYREFERENCETYPE.ORDER,
-        note: `Order checkout completed #${completedOrder.id.slice(-6)}`,
+        orderId: completedOrder.id,
+        amount: completedOrder.totalAmount,
+        providerId: cashMethod?.providerId,
+        paymentMethodId: cashMethod?.id,
+        status: PAYMENTSTATUS.COMPLETED,
+        referenceNumber: `PAY-COD-${completedOrder.id.slice(-8).toUpperCase()}`,
+        paidAt: completedOrder.completedAt,
+      },
+    });
+
+    console.log('  → Seeding ReturnRequests...');
+    await prisma.returnRequests.create({
+      data: {
+        orderId: completedOrder.id,
+        buyerId: buyer.id,
+        sellerId: primaryStore.sellerId,
+        reason: 'Package seal was slightly opened upon pickup inspection.',
+        status: RETURNSTATUS.APPROVED,
+        refundAmount: Number(completedOrder.totalAmount),
+        approvedAt: new Date(),
+      },
+    });
+
+    const invRow = await prisma.inventory.findFirst({
+      where: { productId: orderProduct1.id },
+    });
+    if (invRow) {
+      await prisma.inventoryMovements.create({
+        data: {
+          inventoryId: invRow.id,
+          productId: orderProduct1.id,
+          storeId: primaryStore.id,
+          movementType: INVENTORYMOVEMENTTYPE.SALE,
+          quantityDelta: -2,
+          previousOnHand: invRow.quantityOnHand + 2,
+          newOnHand: invRow.quantityOnHand,
+          referenceId: completedOrder.id,
+          referenceType: INVENTORYREFERENCETYPE.ORDER,
+          note: `Order checkout completed #${completedOrder.id.slice(-6)}`,
+        },
+      });
+    }
+
+    console.log('  → Seeding Settlements & SellerPayouts...');
+    const settlement = await prisma.settlements.create({
+      data: {
+        orderId: completedOrder.id,
+        sellerId: primaryStore.sellerId,
+        subtotalAmount: completedOrder.subtotalAmount,
+        commissionAmount: completedOrder.marketplaceFeeAmount,
+        paymentFeeAmount: 0,
+        sellerNetAmount: completedOrder.sellerNetAmount,
+        status: SETTLEMENTSTATUS.RELEASED,
+        releaseEligibleAt: new Date(Date.now() - 6 * 60 * 60 * 1000),
+        settledAt: new Date(),
+      },
+    });
+
+    const payout = await prisma.sellerPayouts.create({
+      data: {
+        sellerId: primaryStore.sellerId,
+        payoutNumber: `PO-BAGUIO-${Date.now().toString().slice(-6)}`,
+        totalAmount: settlement.sellerNetAmount,
+        status: PAYOUTSTATUS.COMPLETED,
+        payoutMethod: 'BANK_TRANSFER',
+        referenceNo: `TRF-BDO-${Math.floor(100000 + Math.random() * 900000)}`,
+        processedAt: new Date(),
+      },
+    });
+
+    await prisma.sellerPayoutItems.create({
+      data: {
+        payoutId: payout.id,
+        settlementId: settlement.id,
+        amount: settlement.sellerNetAmount,
       },
     });
   }
 
-  // ── 10. Settlements & SellerPayouts ──────────────────────────────────────
-  console.log('  → Seeding Settlements & SellerPayouts...');
-  const settlement = await prisma.settlements.create({
-    data: {
-      orderId: completedOrder.id,
-      sellerId: primaryStore.sellerId,
-      subtotalAmount: completedOrder.subtotalAmount,
-      commissionAmount: completedOrder.marketplaceFeeAmount,
-      paymentFeeAmount: 0,
-      sellerNetAmount: completedOrder.sellerNetAmount,
-      status: SETTLEMENTSTATUS.RELEASED,
-      releaseEligibleAt: new Date(Date.now() - 6 * 60 * 60 * 1000),
-      settledAt: new Date(),
-    },
+  let processingOrder = await prisma.orders.findFirst({
+    where: { buyerId: buyer.id, storeId: secondaryStore.id, status: ORDERSTATUS.PROCESSING },
   });
 
-  const payout = await prisma.sellerPayouts.create({
-    data: {
-      sellerId: primaryStore.sellerId,
-      payoutNumber: `PO-BAGUIO-${Date.now().toString().slice(-6)}`,
-      totalAmount: settlement.sellerNetAmount,
-      status: PAYOUTSTATUS.COMPLETED,
-      payoutMethod: 'BANK_TRANSFER',
-      referenceNo: `TRF-BDO-${Math.floor(100000 + Math.random() * 900000)}`,
-      processedAt: new Date(),
-    },
-  });
+  if (!processingOrder) {
+    processingOrder = await prisma.orders.create({
+      data: {
+        buyerId: buyer.id,
+        storeId: secondaryStore.id,
+        storeName: secondaryStore.storeName,
+        sellerName: 'Alex Mercer',
+        storeAddressSnapshot: 'Session Road, Baguio City',
+        totalAmount: Number(orderProduct2.price),
+        subtotalAmount: Number(orderProduct2.price),
+        marketplaceFeeAmount: Math.round(Number(orderProduct2.price) * 0.02 * 100) / 100,
+        sellerNetAmount: Number(orderProduct2.price) * 0.98,
+        type: FULLFILLMENTTYPE.PICKUP,
+        status: ORDERSTATUS.PROCESSING,
+        pickupAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        orderitems: {
+          create: [
+            {
+              productId: orderProduct2.id,
+              productName: orderProduct2.name,
+              quantity: 1,
+              unitPrice: Number(orderProduct2.price),
+            },
+          ],
+        },
+      },
+    });
 
-  await prisma.sellerPayoutItems.create({
-    data: {
-      payoutId: payout.id,
-      settlementId: settlement.id,
-      amount: settlement.sellerNetAmount,
-    },
-  });
+    console.log('  → Seeding Payments for processing order...');
+    const gcashMethod = await prisma.paymentMethods.findFirst({ where: { code: 'GCASH' } });
+    await prisma.payments.create({
+      data: {
+        orderId: processingOrder.id,
+        amount: processingOrder.totalAmount,
+        providerId: gcashMethod?.providerId,
+        paymentMethodId: gcashMethod?.id,
+        status: PAYMENTSTATUS.COMPLETED,
+        referenceNumber: `PAY-GCASH-${processingOrder.id.slice(-8).toUpperCase()}`,
+        providerReference: `REF-GCASH-${Date.now()}`,
+        paidAt: new Date(),
+      },
+    });
+
+    const invRow = await prisma.inventory.findFirst({
+      where: { productId: orderProduct1.id },
+    });
+    if (invRow) {
+      await prisma.inventoryReservations.create({
+        data: {
+          inventoryId: invRow.id,
+          buyerId: buyer.id,
+          orderId: processingOrder.id,
+          quantity: 1,
+          status: RESERVATIONSTATUS.CONSUMED,
+          expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+        },
+      });
+    }
+  }
 
   // ── 11. StoreReviews & ProductReviews ────────────────────────────────────
   console.log('  → Seeding Reviews...');
