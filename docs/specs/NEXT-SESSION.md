@@ -1,30 +1,42 @@
 # MapAnytime — Immediate Execution Checklist (Next Session)
 
-**Updated:** 2026-10-19 (Checkpoint / Turning Point).
+**Updated:** 2026-10-26 (Checkpoint / Turning Point).
 
 **Primary Reference:** [`MASTER_EXECUTION_PLAN.md`](./MASTER_EXECUTION_PLAN.md)  
 **Historical Context:** [`FLAGS.md`](./FLAGS.md) · [`OPEN-FLAGS.md`](./OPEN-FLAGS.md)
 
 ---
 
-## ▶ RESUME HERE — Checkpoint 2026-10-19 (Turning Point)
+## ▶ RESUME HERE — Checkpoint 2026-10-26 (Turning Point)
 
 **Current Staging State:**
 
 - All 3 repositories (`mapanytime-api`, `mapanytime-market-web`, `mapanytime-market-app`) are cleanly synchronized on `staging` with 0 uncommitted changes.
-- **API PR #158** merged: Phase 2 (P2-1) Analytics Daily Rollups & Rule-Based Ranking implemented and verified. Staging deploy succeeded (`https://dev.mapanytime.com/api/health/ready` is ready: DB up, Redis up, EventBus up). Issue #157 and PR #158 closed & marked **Done** on Project #23.
-- **Web PR #99 & #100** merged: Admin Pricing UI and `.gitattributes` LF enforcement.
-- **App PR #65** merged: Visual bug and Save button fixes (Issue #64 closed, all 214 tests passing).
+- **API PR #167** merged: Seeded Stripe provider & domestic card rates (coexistence with Xendit). Issue #128 closed.
+- **API PR #168** merged: Made `marketplace_data.seeder.ts` fully idempotent across re-runs.
+- **API PR #169** merged: Standardized seed passwords to `Password123!` (satisfying mobile 8+ char rule) and added auto-refresh for existing accounts.
+- **App PR #81** merged: Android release signing configured with `key.properties` and automated debug fallback. Issue #76 closed.
+- **Infrastructure / Secrets:** Obsolete secrets purged (#130 closed); Gmail SMTP configured on port 465 SSL (#135 closed).
+- **Staging Database (`13.250.56.66`):** All 56 migrations up to date; all 16 modular seeders executed cleanly with 0 errors. Staging login verified (200 OK).
+- **Staging Mobile APK:** Built at `mapanytime-market-app/build/app/outputs/flutter-apk/app-release.apk` (167.2 MB) and installed onto physical Realme phone (RMX3231).
 
 **Strict Directive:**
 
 - **No Over-Engineering** (codified in `.agents/rules/no-overengineering.md`). Minimal, direct solutions only.
 
-**Immediate Next Tasks When Resuming:**
+**Immediate Next Tasks When Resuming Tomorrow:**
 
-1. [x] **P2-2. Merchant Advertising Marketing Wallet** (`mapanytime-api`): Simple marketing deposit wallet (`MarketingWallet` + `MarketingWalletTransactions`) to fund sponsored map pin ad spend (`/v1/merchant-ads`).
-2. **Publish New Staging Mobile APK ([app #72](https://github.com/FORHU/mapanytime-market-app/issues/72))** (`mapanytime-market-app`): Build staging APK (`flutter build apk --flavor staging -t lib/main_staging.dart`) and publish via App Releases.
-3. **P3-1. Buyer Loyalty Rewards (`RewardWallet`)** (`mapanytime-api`): Minimal buyer loyalty points ledger (₱100 spend = 1 point, 100 points = ₱10 discount) hooked into order completion.
+1. **Physical Phone Verification ([App #71](https://github.com/FORHU/mapanytime-market-app/issues/71))**:
+   - Log in on Realme phone with `dual@example.com` / `Password123!`.
+   - Verify: Map tab retention during tab switches, store navigation back-stack, live order toast reception, checkout "Back to Home" navigation.
+   - Close Issue #71 on Board #24 once verified.
+2. **Publish APK to Web Admin ([App #72](https://github.com/FORHU/mapanytime-market-app/issues/72))**:
+   - Upload `app-release.apk` to `https://dev.mapanytime.com/admin/app-releases` (`version: 1.0.0`, `buildNumber: 1`, `Channel: Stable`, `makeDownloadable: true`).
+   - Close Issue #72 on Board #24.
+3. **P2-2. Merchant Advertising Marketing Wallet** (`mapanytime-api`):
+   - Minimal marketing deposit wallet (`MarketingWallet` + `MarketingWalletTransactions`) to fund sponsored map pin ad spend (`/v1/merchant-ads`).
+4. **P3-1. Buyer Loyalty Rewards (`RewardWallet`)** (`mapanytime-api`):
+   - Minimal buyer loyalty points ledger (₱100 spend = 1 point, 100 points = ₱10 discount) hooked into order completion.
 
 ---
 
