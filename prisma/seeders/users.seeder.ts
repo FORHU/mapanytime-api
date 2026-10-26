@@ -25,7 +25,7 @@ export async function seedUsers(prisma: PrismaClient) {
       firstName: 'Super',
       lastName: 'Admin',
       roles: [SYSTEM_ROLES.SUPER_ADMIN],
-      passwordRaw: 'Super123',
+      passwordRaw: 'Password123!',
       isEmailVerified: true,
       countryCode: 'PH',
     },
@@ -34,7 +34,7 @@ export async function seedUsers(prisma: PrismaClient) {
       firstName: 'Lead',
       lastName: 'Developer',
       roles: [SYSTEM_ROLES.DEVELOPER],
-      passwordRaw: 'Dev123',
+      passwordRaw: 'Password123!',
       isEmailVerified: true,
       countryCode: 'PH',
     },
@@ -43,7 +43,7 @@ export async function seedUsers(prisma: PrismaClient) {
       firstName: 'System',
       lastName: 'Admin',
       roles: [SYSTEM_ROLES.ADMIN],
-      passwordRaw: 'Password123',
+      passwordRaw: 'Password123!',
       isEmailVerified: true,
       countryCode: 'PH',
     },
@@ -52,7 +52,7 @@ export async function seedUsers(prisma: PrismaClient) {
       firstName: 'Grace',
       lastName: 'Piatos',
       roles: ['SELLER'],
-      passwordRaw: 'Seller123',
+      passwordRaw: 'Password123!',
       isEmailVerified: true,
       countryCode: 'PH',
     },
@@ -61,7 +61,7 @@ export async function seedUsers(prisma: PrismaClient) {
       firstName: 'Sara',
       lastName: 'Smith',
       roles: ['BUYER'],
-      passwordRaw: 'Buyer123',
+      passwordRaw: 'Password123!',
       isEmailVerified: true,
       countryCode: 'PH',
     },
@@ -70,7 +70,7 @@ export async function seedUsers(prisma: PrismaClient) {
       firstName: 'Alex',
       lastName: 'Mercer',
       roles: ['BUYER', 'SELLER'],
-      passwordRaw: 'Dual123',
+      passwordRaw: 'Password123!',
       isEmailVerified: true,
       countryCode: 'PH',
     },
@@ -79,7 +79,7 @@ export async function seedUsers(prisma: PrismaClient) {
       firstName: 'Marco',
       lastName: 'Cordillera',
       roles: ['SELLER', 'BUYER'],
-      passwordRaw: 'Seller123',
+      passwordRaw: 'Password123!',
       isEmailVerified: true,
       countryCode: 'PH',
     },
@@ -113,7 +113,11 @@ export async function seedUsers(prisma: PrismaClient) {
       });
       console.log(`✅ Created user: ${rest.email}`);
     } else {
-      console.log(`ℹ️  User already exists: ${rest.email}`);
+      console.log(`ℹ️  User already exists: ${rest.email} (refreshing credential password)`);
+      await prisma.authAccount.updateMany({
+        where: { userId: user.id, providerId: 'credential' },
+        data: { password: await hashPassword(passwordRaw) },
+      });
     }
 
     // Ensure Buyer record exists for user
