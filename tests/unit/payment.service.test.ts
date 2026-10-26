@@ -85,10 +85,50 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
       ],
     };
 
-    const previousKey = process.env.PAYMONGO_SECRET_KEY;
+    const stripeRow = {
+      id: 'prov-stripe',
+      code: 'STRIPE',
+      name: 'Stripe',
+      description: 'Cards',
+      methods: [
+        {
+          id: 'meth-stripe-card',
+          code: 'CARD',
+          name: 'Credit / Debit Card (Stripe)',
+          type: 'CARD',
+          description: null,
+        },
+      ],
+    };
+
+    const xenditRow = {
+      id: 'prov-xendit',
+      code: 'XENDIT',
+      name: 'Xendit',
+      description: 'E-Wallets',
+      methods: [
+        {
+          id: 'meth-xendit-gcash',
+          code: 'GCASH',
+          name: 'GCash (Xendit)',
+          type: 'E_WALLET',
+          description: null,
+        },
+      ],
+    };
+
+    const prevPaymongo = process.env.PAYMONGO_SECRET_KEY;
+    const prevStripe = process.env.STRIPE_SECRET_KEY;
+    const prevXendit = process.env.XENDIT_SECRET_KEY;
     afterEach(() => {
-      if (previousKey === undefined) delete process.env.PAYMONGO_SECRET_KEY;
-      else process.env.PAYMONGO_SECRET_KEY = previousKey;
+      if (prevPaymongo === undefined) delete process.env.PAYMONGO_SECRET_KEY;
+      else process.env.PAYMONGO_SECRET_KEY = prevPaymongo;
+
+      if (prevStripe === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = prevStripe;
+
+      if (prevXendit === undefined) delete process.env.XENDIT_SECRET_KEY;
+      else process.env.XENDIT_SECRET_KEY = prevXendit;
     });
 
     it('returns active providers and their active methods', async () => {
@@ -100,6 +140,22 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
       expect(result[0].code).toBe('PAYMONGO');
       expect(result[0].methods).toHaveLength(1);
       expect(result[0].methods[0].code).toBe('GCASH');
+    });
+
+    it('supports multiple payment providers side by side (Stripe + Xendit) (Issue #128)', async () => {
+      process.env.STRIPE_SECRET_KEY = 'sk_test_stripe';
+      process.env.XENDIT_SECRET_KEY = 'xnd_test_xendit';
+      (prisma.paymentProviders.findMany as jest.Mock).mockResolvedValue([
+        stripeRow,
+        xenditRow,
+        cashRow,
+      ]);
+
+      const result = await PaymentService.getActivePaymentMethods();
+      expect(result.map((p) => p.code)).toEqual(['STRIPE', 'XENDIT', 'CASH']);
+      expect(result[0].methods[0].code).toBe('CARD');
+      expect(result[1].methods[0].code).toBe('GCASH');
+      expect(result[2].methods[0].code).toBe('COD');
     });
 
     /**
