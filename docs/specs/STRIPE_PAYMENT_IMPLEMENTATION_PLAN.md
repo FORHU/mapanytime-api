@@ -368,4 +368,3 @@ Before approving any Stripe pull request into `main`, verify:
 4. [x] All 4 failure-oriented integration tests passing (`tests/integration/stripe-failure-resilience.test.ts`).
 5. [x] All existing test suites pass with zero errors.
 6. [x] Documentation updated and verified.
-

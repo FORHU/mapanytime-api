@@ -209,7 +209,10 @@ describe('Stripe Payment Failure & Resilience Integration Tests', () => {
           return { ...pendingPayment, status: paymentStatus };
         }),
         updateMany: jest.fn().mockImplementation(async (args: any) => {
-          if (args.where?.status === PAYMENTSTATUS.PENDING && paymentStatus === PAYMENTSTATUS.PENDING) {
+          if (
+            args.where?.status === PAYMENTSTATUS.PENDING &&
+            paymentStatus === PAYMENTSTATUS.PENDING
+          ) {
             paymentStatus = PAYMENTSTATUS.COMPLETED;
             successfulTransitions++;
             return { count: 1 };
@@ -308,9 +311,7 @@ describe('Stripe Payment Failure & Resilience Integration Tests', () => {
       },
     };
 
-    (prisma.$transaction as unknown as jest.Mock).mockImplementation(async (cb: any) =>
-      cb(mockTx),
-    );
+    (prisma.$transaction as unknown as jest.Mock).mockImplementation(async (cb: any) => cb(mockTx));
 
     const stats = await reconciliationJob.runReconciliation();
 
