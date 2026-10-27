@@ -35,6 +35,7 @@ import sellerRoute from './modules/sellers/seller.route';
 import rewardRoute from './modules/rewards/reward.route';
 import mobilityRoute from './modules/mobility/mobility.route';
 import marketingWalletRoute from './modules/marketingWallet/marketingWallet.route';
+import sellerCampaignRoute from './modules/sellerCampaigns/sellerCampaign.route';
 
 const router = express.Router();
 
@@ -54,6 +55,7 @@ router.use('/v1/stores', storeRoute);
 router.use('/v1/seller/org', organizationRoute);
 router.use('/v1/merchant-ads', merchantAdsRoute);
 router.use('/v1/marketing-wallet', marketingWalletRoute);
+router.use('/v1/seller-campaigns', sellerCampaignRoute);
 router.use('/v1/pricing', pricingRoute);
 router.use('/health', healthRouter);
 router.use('/v1/categories', categoryRoute);
