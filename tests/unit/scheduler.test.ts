@@ -1,15 +1,31 @@
 import cron from 'node-cron';
-import { startScheduler } from '../../src/infrastructure/scheduler';
+import { startScheduler, stopScheduler } from '../../src/infrastructure/scheduler';
 import { redis } from '../../src/infrastructure/redis';
 import MerchantAdsService from '../../src/modules/merchantAds/merchantAds.service';
 import RewardService from '../../src/modules/rewards/reward.service';
+import SystemMaintenanceService from '../../src/infrastructure/scheduler/maintenance.service';
 
-jest.mock('node-cron', () => ({ __esModule: true, default: { schedule: jest.fn() } }));
+const mockTask = { stop: jest.fn() };
+jest.mock('node-cron', () => ({
+  __esModule: true,
+  default: { schedule: jest.fn().mockImplementation(() => mockTask) },
+}));
 
 jest.setTimeout(15000);
 
 // The worker connects this client and never calls RedisUtil.initialize().
 jest.mock('../../src/infrastructure/redis', () => ({ redis: { getClient: jest.fn() } }));
+
+jest.mock('../../src/infrastructure/scheduler/maintenance.service', () => ({
+  __esModule: true,
+  default: {
+    pruneExpiredRecords: jest.fn().mockResolvedValue({
+      sessionsPurged: 0,
+      resetTokensPurged: 0,
+      invitesExpired: 0,
+    }),
+  },
+}));
 
 jest.mock('../../src/modules/inventory/inventoryReservation.service', () => ({
   __esModule: true,
@@ -99,5 +115,27 @@ describe('scheduler job lock', () => {
     await runEveryJob();
 
     expect(lockedJobsRan()).toEqual({ ads: 1, points: 1 });
+  });
+
+  it('runs daily database cleanup under withJobLock', async () => {
+    const set = jest.fn().mockResolvedValue('OK');
+    getClient.mockReturnValue({ set });
+
+    await runEveryJob();
+
+    expect(SystemMaintenanceService.pruneExpiredRecords).toHaveBeenCalled();
+    expect(set).toHaveBeenCalledWith(
+      'scheduler:lock:daily-database-cleanup',
+      '1',
+      expect.objectContaining({ NX: true }),
+    );
+  });
+
+  it('stops all registered tasks when stopScheduler is called', () => {
+    startScheduler();
+    expect(mockTask.stop).not.toHaveBeenCalled();
+
+    stopScheduler();
+    expect(mockTask.stop).toHaveBeenCalled();
   });
 });
