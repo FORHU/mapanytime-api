@@ -570,4 +570,138 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
       ).rejects.toMatchObject({ status: 400 });
     });
   });
+
+  describe('Dynamic Multi-Gateway Payments & Failover (P3-5)', () => {
+    const prevPaymongo = process.env.PAYMONGO_SECRET_KEY;
+    const prevXendit = process.env.XENDIT_SECRET_KEY;
+    const prevStripe = process.env.STRIPE_SECRET_KEY;
+
+    beforeEach(() => {
+      process.env.PAYMONGO_SECRET_KEY = 'pk_test_paymongo';
+      process.env.XENDIT_SECRET_KEY = 'xnd_test_xendit';
+      process.env.STRIPE_SECRET_KEY = 'sk_test_stripe';
+      PaymentService.clearGatewayDegraded();
+    });
+
+    afterAll(() => {
+      PaymentService.clearGatewayDegraded();
+      process.env.PAYMONGO_SECRET_KEY = prevPaymongo;
+      process.env.XENDIT_SECRET_KEY = prevXendit;
+      process.env.STRIPE_SECRET_KEY = prevStripe;
+    });
+
+    it('tracks gateway degradation and health state', () => {
+      expect(PaymentService.isGatewayHealthy('PAYMONGO')).toBe(true);
+      expect(PaymentService.isGatewayHealthy('XENDIT')).toBe(true);
+
+      PaymentService.markGatewayDegraded('PAYMONGO', 10_000);
+      expect(PaymentService.isGatewayHealthy('PAYMONGO')).toBe(false);
+      expect(PaymentService.isGatewayHealthy('XENDIT')).toBe(true);
+
+      PaymentService.clearGatewayDegraded('PAYMONGO');
+      expect(PaymentService.isGatewayHealthy('PAYMONGO')).toBe(true);
+    });
+
+    it('resolves correct fallback provider code based on payment channel', () => {
+      expect(PaymentService.getFallbackProviderCode('PAYMONGO', 'GCASH')).toBe('XENDIT');
+      expect(PaymentService.getFallbackProviderCode('XENDIT', 'GCASH')).toBe('PAYMONGO');
+      expect(PaymentService.getFallbackProviderCode('PAYMONGO', 'MAYA')).toBe('XENDIT');
+      expect(PaymentService.getFallbackProviderCode('PAYMONGO', 'CARD')).toBe('STRIPE');
+      expect(PaymentService.getFallbackProviderCode('STRIPE', 'CARD')).toBe('PAYMONGO');
+    });
+
+    it('routes to fallback adapter via getProviderAdapter when primary is degraded', () => {
+      PaymentService.markGatewayDegraded('PAYMONGO', 60_000);
+
+      const adapter = PaymentService.getProviderAdapter('PAYMONGO', {
+        allowFailover: true,
+        paymentMethodCode: 'GCASH',
+      });
+      // Should resolve XenditProvider instead of PayMongoProvider
+      expect(adapter.constructor.name).toBe('XenditProvider');
+    });
+
+    it('executes createCheckoutSessionWithFailover without failover when primary succeeds', async () => {
+      const mockPrimary = {
+        createCheckoutSession: jest.fn().mockResolvedValue({
+          checkoutSessionId: 'sess-primary-1',
+          checkoutUrl: 'https://paymongo.test/checkout',
+        }),
+      };
+      jest.spyOn(PaymentService, 'getProviderAdapter').mockReturnValue(mockPrimary as never);
+
+      const result = await PaymentService.createCheckoutSessionWithFailover('PAYMONGO', {
+        orderId: 'ord-1',
+        amountInCentavos: 50000,
+        currency: 'PHP',
+        description: 'Test Order',
+        lineItems: [],
+        paymentMethodCode: 'GCASH',
+      });
+
+      expect(result.failoverOccurred).toBe(false);
+      expect(result.usedProviderCode).toBe('PAYMONGO');
+      expect(result.checkoutResult.checkoutSessionId).toBe('sess-primary-1');
+      expect(mockPrimary.createCheckoutSession).toHaveBeenCalled();
+    });
+
+    it('dynamically switches to fallback when primary gateway throws 502/network failure', async () => {
+      const mockPrimary = {
+        createCheckoutSession: jest
+          .fn()
+          .mockRejectedValue(new Error('PayMongo upstream gateway timed out')),
+      };
+      const mockFallback = {
+        createCheckoutSession: jest.fn().mockResolvedValue({
+          checkoutSessionId: 'sess-xendit-fallback',
+          checkoutUrl: 'https://checkout.xendit.co/v2/invoice_123',
+        }),
+      };
+
+      jest.spyOn(PaymentService, 'getProviderAdapter').mockImplementation((code: string) => {
+        if (code.toUpperCase() === 'PAYMONGO') return mockPrimary as never;
+        return mockFallback as never;
+      });
+
+      const result = await PaymentService.createCheckoutSessionWithFailover('PAYMONGO', {
+        orderId: 'ord-failover-1',
+        amountInCentavos: 100000,
+        currency: 'PHP',
+        description: 'Test Failover Order',
+        lineItems: [],
+        paymentMethodCode: 'GCASH',
+      });
+
+      expect(result.failoverOccurred).toBe(true);
+      expect(result.usedProviderCode).toBe('XENDIT');
+      expect(result.checkoutResult.checkoutSessionId).toBe('sess-xendit-fallback');
+      expect(PaymentService.isGatewayHealthy('PAYMONGO')).toBe(false);
+      expect(mockFallback.createCheckoutSession).toHaveBeenCalled();
+    });
+
+    it('rethrows error if both primary and fallback gateway fail', async () => {
+      const mockPrimary = {
+        createCheckoutSession: jest.fn().mockRejectedValue(new Error('PayMongo down')),
+      };
+      const mockFallback = {
+        createCheckoutSession: jest.fn().mockRejectedValue(new Error('Xendit down')),
+      };
+
+      jest.spyOn(PaymentService, 'getProviderAdapter').mockImplementation((code: string) => {
+        if (code.toUpperCase() === 'PAYMONGO') return mockPrimary as never;
+        return mockFallback as never;
+      });
+
+      await expect(
+        PaymentService.createCheckoutSessionWithFailover('PAYMONGO', {
+          orderId: 'ord-both-fail',
+          amountInCentavos: 100000,
+          currency: 'PHP',
+          description: 'Test Fail Order',
+          lineItems: [],
+          paymentMethodCode: 'GCASH',
+        }),
+      ).rejects.toThrow('Xendit down');
+    });
+  });
 });

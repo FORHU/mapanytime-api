@@ -228,5 +228,5 @@ _Spec: [`ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md`](./ECONOMIC_AND_PAY
   - 7-day holding window (`PENDING` $\rightarrow$ `MATURED`) and payout requests (Min ₱500).
 - [x] **P3-4. Atomic Multi-Ledger Hook in `OrderService.completeOrder`** (PR #171, PR #173)
   - Atomically commit order completion + seller settlement + buyer reward + seller campaign incentive + agent commission.
-- [ ] **P3-5. Dynamic Multi-Gateway Payments (`XenditProvider`)**
+- [x] **P3-5. Dynamic Multi-Gateway Payments (`XenditProvider`)**
   - Add `XenditProvider` and dynamic gateway switching/failover in `PaymentService.getProviderAdapter`.

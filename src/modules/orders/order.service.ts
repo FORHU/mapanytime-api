@@ -357,7 +357,6 @@ export default class OrderService {
 
     // ── External Gateway Call (outside database transaction to prevent connection lockups — F74) ──
     const providerCode = orderDataResult.method.provider.code;
-    const provider = PaymentService.getProviderAdapter(providerCode);
 
     const amountInCentavos = Math.round(Number(orderDataResult.createdOrder.totalAmount) * 100);
     const lineItems = orderDataResult.orderItemsData.map((item) => ({
@@ -368,8 +367,9 @@ export default class OrderService {
     }));
 
     let checkoutResult;
+    let usedProviderCode = providerCode;
     try {
-      checkoutResult = await provider.createCheckoutSession({
+      const res = await PaymentService.createCheckoutSessionWithFailover(providerCode, {
         orderId: orderDataResult.createdOrder.id,
         amountInCentavos,
         currency: 'PHP',
@@ -377,6 +377,8 @@ export default class OrderService {
         lineItems,
         paymentMethodCode: orderDataResult.method.code,
       });
+      checkoutResult = res.checkoutResult;
+      usedProviderCode = res.usedProviderCode;
     } catch (checkoutError) {
       logger.error(
         `[Order] Gateway checkout session creation failed for order ${orderDataResult.createdOrder.id}:`,
@@ -400,12 +402,18 @@ export default class OrderService {
     }
 
     if (prisma.payments) {
+      const fallbackProvider =
+        usedProviderCode !== providerCode
+          ? await prisma.paymentProviders.findUnique({ where: { code: usedProviderCode } })
+          : null;
+
       await prisma.payments.updateMany({
         where: { orderId: orderDataResult.createdOrder.id },
         data: {
           checkoutSessionId: checkoutResult.checkoutSessionId,
           checkoutUrl: checkoutResult.checkoutUrl,
           paymentIntentId: checkoutResult.paymentIntentId,
+          ...(fallbackProvider ? { providerId: fallbackProvider.id } : {}),
         },
       });
     }
