@@ -38,6 +38,7 @@ export interface AnalyticsEventPayload {
 /** Request-scoped context the service stamps onto every event. */
 export interface AnalyticsRequestContext {
   userId?: string | null;
+  sessionId?: string | null;
   ipAddress?: string | null;
   userAgent?: string | null;
 }

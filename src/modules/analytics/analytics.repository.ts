@@ -80,7 +80,7 @@ export default class AnalyticsRepository {
     const rows = await prisma.$queryRaw<ProductRollupSummary[]>`
       SELECT
         "productId",
-        COUNT(DISTINCT CASE WHEN "eventType"::text = 'PRODUCT_VIEW' THEN COALESCE("sessionId", "id") END)::int AS "views",
+        COUNT(DISTINCT CASE WHEN "eventType"::text = 'PRODUCT_VIEW' THEN CONCAT(COALESCE("sessionId", "id"), '_', date_trunc('hour', "occurredAt")) END)::int AS "views",
         COUNT(CASE WHEN "eventType"::text = 'PRODUCT_CLICK' THEN 1 END)::int AS "clicks",
         COUNT(CASE WHEN "eventType"::text = 'ADD_TO_CART' THEN 1 END)::int AS "cartAdds",
         COUNT(CASE WHEN "eventType"::text = 'ORDER_COMPLETED' THEN 1 END)::int AS "orders"
@@ -101,7 +101,7 @@ export default class AnalyticsRepository {
     const rows = await prisma.$queryRaw<StoreRollupSummary[]>`
       SELECT
         "storeId",
-        COUNT(DISTINCT CASE WHEN "eventType"::text = 'STORE_VIEW' THEN COALESCE("sessionId", "id") END)::int AS "views",
+        COUNT(DISTINCT CASE WHEN "eventType"::text = 'STORE_VIEW' THEN CONCAT(COALESCE("sessionId", "id"), '_', date_trunc('hour', "occurredAt")) END)::int AS "views",
         COUNT(CASE WHEN "eventType"::text = 'PRODUCT_CLICK' THEN 1 END)::int AS "clicks",
         COUNT(CASE WHEN "eventType"::text = 'ADD_TO_CART' THEN 1 END)::int AS "cartAdds",
         COUNT(CASE WHEN "eventType"::text = 'ORDER_COMPLETED' THEN 1 END)::int AS "orders"
@@ -176,7 +176,7 @@ export default class AnalyticsRepository {
     const eventType = targetType === 'PRODUCT' ? 'PRODUCT_VIEW' : 'STORE_VIEW';
     const col = targetType === 'PRODUCT' ? Prisma.sql`"productId"` : Prisma.sql`"storeId"`;
     const eventRows = await prisma.$queryRaw<Array<{ id: string; score: number }>>`
-      SELECT ${col} AS "id", COUNT(DISTINCT COALESCE("sessionId", "id"))::int AS "score"
+      SELECT ${col} AS "id", COUNT(DISTINCT CONCAT(COALESCE("sessionId", "id"), '_', date_trunc('hour', "occurredAt")))::int AS "score"
       FROM "AnalyticsEvents"
       WHERE "eventType"::text = ${eventType} AND "occurredAt" >= ${since} AND ${col} IS NOT NULL
       GROUP BY ${col}
@@ -198,7 +198,7 @@ export default class AnalyticsRepository {
     const eventType = targetType === 'PRODUCT' ? 'PRODUCT_VIEW' : 'STORE_VIEW';
     const col = targetType === 'PRODUCT' ? Prisma.sql`"productId"` : Prisma.sql`"storeId"`;
     const rows = await prisma.$queryRaw<Array<{ id: string; score: number }>>`
-      SELECT ${col} AS "id", COUNT(DISTINCT COALESCE("sessionId", "id"))::int AS "score"
+      SELECT ${col} AS "id", COUNT(DISTINCT CONCAT(COALESCE("sessionId", "id"), '_', date_trunc('hour', "occurredAt")))::int AS "score"
       FROM "AnalyticsEvents"
       WHERE "eventType"::text = ${eventType} AND "occurredAt" >= ${since} AND ${col} IS NOT NULL
       GROUP BY ${col}

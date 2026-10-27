@@ -47,6 +47,7 @@ export default class AnalyticsController {
         // Authentication is optional on this route; anonymous events are the
         // normal case and are tied together by the client's sessionId instead.
         userId: (req.user as { id: string } | undefined)?.id ?? null,
+        sessionId: (req.get('x-session-id') || req.get('x-device-session-id'))?.trim() ?? null,
         ipAddress: clientIp(req) ?? null,
         userAgent: req.get('user-agent') ?? null,
       });
