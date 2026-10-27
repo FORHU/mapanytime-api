@@ -43,8 +43,105 @@ export default class PaymentService {
    * working, which is what the pre-rework code did.
    * See FLAGS.md.
    */
-  static getProviderAdapter(providerCode: string): PaymentProvider {
-    switch (providerCode.toUpperCase()) {
+  // In-memory degradation map: providerCode -> degradation expiry timestamp (ms)
+  private static degradedGateways = new Map<string, number>();
+
+  /** Mark a payment gateway as temporarily degraded (e.g. after network failure or 5xx). */
+  static markGatewayDegraded(providerCode: string, durationMs = 5 * 60_000) {
+    const code = providerCode.toUpperCase();
+    this.degradedGateways.set(code, Date.now() + durationMs);
+    logger.warn(`[payments] Marked gateway ${code} as DEGRADED for ${durationMs / 1000}s`);
+  }
+
+  /** Clear degradation status for a gateway (or all gateways). */
+  static clearGatewayDegraded(providerCode?: string) {
+    if (providerCode) {
+      this.degradedGateways.delete(providerCode.toUpperCase());
+    } else {
+      this.degradedGateways.clear();
+    }
+  }
+
+  /** Check if a gateway is configured and healthy (not marked degraded). */
+  static isGatewayHealthy(providerCode: string): boolean {
+    const code = providerCode.toUpperCase();
+    const expiry = this.degradedGateways.get(code);
+    if (expiry && expiry > Date.now()) {
+      return false;
+    }
+    if (expiry && expiry <= Date.now()) {
+      this.degradedGateways.delete(code);
+    }
+
+    if (code === 'PAYMONGO') return !!process.env.PAYMONGO_SECRET_KEY;
+    if (code === 'XENDIT') return !!process.env.XENDIT_SECRET_KEY;
+    if (code === 'STRIPE') return !!process.env.STRIPE_SECRET_KEY;
+    if (code === 'CASH') return true;
+    if (code === 'MOCK') return process.env.NODE_ENV !== 'production';
+    return false;
+  }
+
+  /**
+   * Resolves a secondary/fallback provider code when the primary gateway is degraded.
+   *
+   * GCash / Maya: PayMongo <-> Xendit
+   * Card: PayMongo <-> Stripe
+   */
+  static getFallbackProviderCode(primaryCode: string, paymentMethodCode?: string): string | null {
+    const primary = primaryCode.toUpperCase();
+    const method = paymentMethodCode?.toUpperCase();
+
+    if (primary === 'CASH' || primary === 'MOCK' || method === 'COD' || method === 'CASH') {
+      return null;
+    }
+
+    if (method === 'CARD') {
+      if (primary === 'PAYMONGO' && this.isGatewayHealthy('STRIPE')) return 'STRIPE';
+      if (primary === 'STRIPE' && this.isGatewayHealthy('PAYMONGO')) return 'PAYMONGO';
+    }
+
+    if (method === 'GCASH' || method === 'MAYA' || method === 'QRPH' || method === 'GRAB_PAY') {
+      if (primary === 'PAYMONGO' && this.isGatewayHealthy('XENDIT')) return 'XENDIT';
+      if (primary === 'XENDIT' && this.isGatewayHealthy('PAYMONGO')) return 'PAYMONGO';
+    }
+
+    // Generic fallback across other healthy gateways
+    const candidates = ['PAYMONGO', 'XENDIT', 'STRIPE'].filter(
+      (c) => c !== primary && this.isGatewayHealthy(c),
+    );
+    return candidates[0] || null;
+  }
+
+  /**
+   * Resolves the appropriate provider adapter by provider code.
+   *
+   * PayMongo is only handed out when a secret key is actually configured.
+   * PayMongo has no separate sandbox host — test and live both post to
+   * api.paymongo.com and the mode is decided by the key prefix — so an empty
+   * key is not "sandbox mode", it is an unauthenticated call to the production
+   * host that 401s. Since the seeder activates PAYMONGO at priority 1, that
+   * 401 would surface inside the order-creation transaction and roll the whole
+   * order back. Falling back to MockProvider keeps a keyless environment
+   * working, which is what the pre-rework code did.
+   * See FLAGS.md.
+   */
+  static getProviderAdapter(
+    providerCode: string,
+    options: { allowFailover?: boolean; paymentMethodCode?: string } = {},
+  ): PaymentProvider {
+    const code = providerCode.toUpperCase();
+
+    if (options.allowFailover && !this.isGatewayHealthy(code)) {
+      const fallbackCode = this.getFallbackProviderCode(code, options.paymentMethodCode);
+      if (fallbackCode) {
+        logger.warn(
+          `[payments] Dynamic failover active: routing ${code} -> ${fallbackCode} for method ${options.paymentMethodCode || 'ANY'}`,
+        );
+        return this.getProviderAdapter(fallbackCode, { allowFailover: false });
+      }
+    }
+
+    switch (code) {
       case 'PAYMONGO':
         if (!process.env.PAYMONGO_SECRET_KEY) {
           this.warnUnconfigured('PAYMONGO', 'PAYMONGO_SECRET_KEY');
@@ -66,6 +163,85 @@ export default class PaymentService {
       case 'MOCK':
       default:
         return new MockProvider();
+    }
+  }
+
+  /**
+   * Creates a checkout session with dynamic gateway switching & failover.
+   *
+   * If the primary gateway is degraded or throws an external communication error,
+   * it dynamically marks the gateway degraded and falls back to an alternate healthy
+   * gateway (e.g. PayMongo <-> Xendit) to complete the checkout session.
+   */
+  static async createCheckoutSessionWithFailover(
+    primaryProviderCode: string,
+    input: import('./providers/payment-provider.interface').CreateCheckoutInput,
+  ): Promise<{
+    checkoutResult: import('./providers/payment-provider.interface').CheckoutResult;
+    usedProviderCode: string;
+    failoverOccurred: boolean;
+  }> {
+    const primaryCode = primaryProviderCode.toUpperCase();
+    if (primaryCode === 'CASH' || primaryCode === 'MOCK' || input.paymentMethodCode === 'COD') {
+      const adapter = this.getProviderAdapter(primaryCode, { allowFailover: false });
+      const result = await adapter.createCheckoutSession(input);
+      return {
+        checkoutResult: result,
+        usedProviderCode: primaryCode,
+        failoverOccurred: false,
+      };
+    }
+
+    const primaryAdapter = this.getProviderAdapter(primaryCode, { allowFailover: false });
+
+    // If primary is already known to be degraded, switch immediately
+    if (!this.isGatewayHealthy(primaryCode)) {
+      const fallbackCode = this.getFallbackProviderCode(primaryCode, input.paymentMethodCode);
+      if (fallbackCode) {
+        logger.warn(
+          `[payments] Primary gateway ${primaryCode} is degraded; switching checkout session to ${fallbackCode} for order ${input.orderId}`,
+        );
+        const fallbackAdapter = this.getProviderAdapter(fallbackCode, { allowFailover: false });
+        const result = await fallbackAdapter.createCheckoutSession(input);
+        return {
+          checkoutResult: result,
+          usedProviderCode: fallbackCode,
+          failoverOccurred: true,
+        };
+      }
+    }
+
+    try {
+      const result = await primaryAdapter.createCheckoutSession(input);
+      return {
+        checkoutResult: result,
+        usedProviderCode: primaryCode,
+        failoverOccurred: false,
+      };
+    } catch (primaryError) {
+      logger.error(
+        `[payments] Primary gateway ${primaryCode} checkout session creation failed for order ${input.orderId}: ${(primaryError as Error).message}`,
+      );
+
+      // Mark degraded
+      this.markGatewayDegraded(primaryCode);
+
+      const fallbackCode = this.getFallbackProviderCode(primaryCode, input.paymentMethodCode);
+      if (!fallbackCode) {
+        throw primaryError;
+      }
+
+      logger.warn(
+        `[payments] Attempting dynamic checkout failover: ${primaryCode} -> ${fallbackCode} for order ${input.orderId}`,
+      );
+      const fallbackAdapter = this.getProviderAdapter(fallbackCode, { allowFailover: false });
+      const fallbackResult = await fallbackAdapter.createCheckoutSession(input);
+
+      return {
+        checkoutResult: fallbackResult,
+        usedProviderCode: fallbackCode,
+        failoverOccurred: true,
+      };
     }
   }
 
@@ -375,7 +551,6 @@ export default class PaymentService {
       throw { status: 400, message: 'Selected payment method is currently unavailable.' };
     }
 
-    const provider = this.getProviderAdapter(method.provider.code);
     const amountInCentavos = Math.round(Number(order.totalAmount) * 100);
 
     const lineItems = order.orderitems.map((item) => ({
@@ -385,20 +560,33 @@ export default class PaymentService {
       currency: 'PHP',
     }));
 
-    const checkoutResult = await provider.createCheckoutSession({
-      orderId: order.id,
-      amountInCentavos,
-      currency: 'PHP',
-      description: `Order ${order.id} - ${order.store?.storeName || 'Marketplace Store'}`,
-      lineItems,
-      customer,
-      paymentMethodCode: method.code,
-      metadata: {
+    const { checkoutResult, usedProviderCode } = await this.createCheckoutSessionWithFailover(
+      method.provider.code,
+      {
         orderId: order.id,
-        storeId: order.storeId,
+        amountInCentavos,
+        currency: 'PHP',
+        description: `Order ${order.id} - ${order.store?.storeName || 'Marketplace Store'}`,
+        lineItems,
+        customer,
         paymentMethodCode: method.code,
+        metadata: {
+          orderId: order.id,
+          storeId: order.storeId,
+          paymentMethodCode: method.code,
+        },
       },
-    });
+    );
+
+    let providerId = method.provider.id;
+    if (usedProviderCode !== method.provider.code) {
+      const fallbackProvider = await prisma.paymentProviders.findUnique({
+        where: { code: usedProviderCode },
+      });
+      if (fallbackProvider) {
+        providerId = fallbackProvider.id;
+      }
+    }
 
     // createOrder already opened a PENDING row for this order, so reuse it
     // rather than stacking a second one. Both this and the webhook resolve a
@@ -407,7 +595,7 @@ export default class PaymentService {
     // See FLAGS.md.
     const sessionFields = {
       currency: 'PHP',
-      providerId: method.provider.id,
+      providerId,
       paymentMethodId: method.id,
       status: PAYMENTSTATUS.PENDING,
       checkoutSessionId: checkoutResult.checkoutSessionId,
