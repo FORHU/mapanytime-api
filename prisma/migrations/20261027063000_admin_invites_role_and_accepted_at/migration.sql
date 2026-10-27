@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "AdminInvites" ADD COLUMN "role" TEXT NOT NULL DEFAULT 'ADMIN',
+ADD COLUMN "acceptedAt" TIMESTAMP(3);
