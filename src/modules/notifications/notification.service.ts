@@ -33,11 +33,18 @@ export default class NotificationService {
     return notification;
   }
 
-  static async getUserNotifications(userId: string, options: { unreadOnly?: boolean } = {}) {
+  static async getUserNotifications(
+    userId: string,
+    options: { unreadOnly?: boolean; page?: number; limit?: number } = {},
+  ) {
+    const limit = Math.min(100, Math.max(1, options.limit ?? 50));
+    const skip = options.page ? (Math.max(1, options.page) - 1) * limit : undefined;
+
     return prisma.notifications.findMany({
       where: { userId, ...(options.unreadOnly ? { readAt: null } : {}) },
       orderBy: { createdAt: 'desc' },
-      take: 50,
+      ...(skip !== undefined ? { skip } : {}),
+      take: limit,
     });
   }
 

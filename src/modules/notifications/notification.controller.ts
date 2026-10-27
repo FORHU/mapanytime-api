@@ -10,7 +10,16 @@ export default class NotificationController {
       if (!userId) return responseError(res, 401, 'Unauthorized access.');
 
       const unreadOnly = req.query.unreadOnly === 'true';
-      const notifications = await NotificationService.getUserNotifications(userId, { unreadOnly });
+      const pageQuery = req.query.page ? parseInt(req.query.page as string, 10) : undefined;
+      const limitQuery = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+      const page = pageQuery && !Number.isNaN(pageQuery) ? pageQuery : undefined;
+      const limit = limitQuery && !Number.isNaN(limitQuery) ? limitQuery : undefined;
+
+      const notifications = await NotificationService.getUserNotifications(userId, {
+        unreadOnly,
+        page,
+        limit,
+      });
       return responseSuccess(res, 200, notifications, 'Notifications fetched successfully');
     } catch (error) {
       next(error);
