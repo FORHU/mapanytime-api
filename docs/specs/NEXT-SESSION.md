@@ -223,10 +223,10 @@ _Spec: [`ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md`](./ECONOMIC_AND_PAY
   - 12-month rolling expiration with explicit `-EXPIRATION` ledger entries.
 - [x] **P3-2. Seller Incentives (`SellerCampaigns` + `SellerCampaignTransactions`)** (PR #171)
   - Merchant-funded buyer point campaigns with budget tracking, in-transaction order completion hook, and ROI metrics.
-- [ ] **P3-3. Agent Recruiter Commissions (`AgentCommissionAccount` + `AgentCommissionTransactions` + `AgentPayouts`)**
+- [x] **P3-3. Agent Recruiter Commissions (`AgentCommissionAccount` + `AgentCommissionTransactions` + `AgentPayouts`)** (PR #173)
   - Real PHP commissions (0.05% GMV configurable).
   - 7-day holding window (`PENDING` $\rightarrow$ `MATURED`) and payout requests (Min ₱500).
-- [ ] **P3-4. Atomic Multi-Ledger Hook in `OrderService.completeOrder`**
-  - Atomically commit order completion + seller settlement + buyer reward + agent commission.
+- [x] **P3-4. Atomic Multi-Ledger Hook in `OrderService.completeOrder`** (PR #171, PR #173)
+  - Atomically commit order completion + seller settlement + buyer reward + seller campaign incentive + agent commission.
 - [ ] **P3-5. Dynamic Multi-Gateway Payments (`XenditProvider`)**
   - Add `XenditProvider` and dynamic gateway switching/failover in `PaymentService.getProviderAdapter`.
