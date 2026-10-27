@@ -30,9 +30,9 @@
    - Log in on Realme phone with `dual@example.com` / `Password123!`.
    - Verify: Map tab retention during tab switches, store navigation back-stack, live order toast reception, checkout "Back to Home" navigation.
    - Close Issue #71 on Board #24 once verified.
-2. **Publish APK to Web Admin ([App #72](https://github.com/FORHU/mapanytime-market-app/issues/72))**:
-   - Upload `app-release.apk` to `https://dev.mapanytime.com/admin/app-releases` (`version: 1.0.0`, `buildNumber: 1`, `Channel: Stable`, `makeDownloadable: true`).
-   - Close Issue #72 on Board #24.
+2. **Publish APK to Web Admin ([App #72](https://github.com/FORHU/mapanytime-market-app/issues/72))** [COMPLETED]:
+   - Uploaded `app-release.apk` (167.2 MB, SHA256 `eb39ca254311f2d392ec326ae4aeda6d081e976f581ce6ca26c8f6361680356d`) to `https://dev.mapanytime.com/admin/app-releases`.
+   - Release `1.0.0` (build 1, Channel: Stable) marked active & downloadable; public download verified via `/api/v1/app/download`. Issue #72 closed.
 3. **P2-2. Merchant Advertising Marketing Wallet** (`mapanytime-api`):
    - Minimal marketing deposit wallet (`MarketingWallet` + `MarketingWalletTransactions`) to fund sponsored map pin ad spend (`/v1/merchant-ads`).
 4. **P3-1. Buyer Loyalty Rewards (`RewardWallet`)** (`mapanytime-api`):
