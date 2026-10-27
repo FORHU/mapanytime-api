@@ -31,12 +31,10 @@ permissions:
 
 env:
   NODE_ENV: production
-  CONTAINER_NAME: mapanytime-api
-  # Matches the container the old workflow created as "${CONTAINER_NAME}-worker",
-  # so this deploy replaces it rather than leaving an orphan running alongside.
-  WORKER_NAME: mapanytime-api-worker
-  DOCKER_NETWORK: mapanytime
-  ENV_FILE_PATH: /opt/mapanytime-api/production.env
+  CONTAINER_NAME: mapanytime-prod-api
+  WORKER_NAME: mapanytime-prod-worker
+  DOCKER_NETWORK: mapanytime-prod
+  ENV_FILE_PATH: /opt/mapanytime-prod/production.env
   SSM_ENV_PARAMETER: /mapanytime/production/env
 
   # Production publishes the API on the same port it listens on, unlike staging

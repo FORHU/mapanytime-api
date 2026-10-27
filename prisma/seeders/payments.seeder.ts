@@ -17,11 +17,23 @@ export async function seedPaymentProviders(prisma: PrismaClient) {
   });
 
   const paymongoMethods = [
-    { code: 'GCASH', name: 'GCash', type: PAYMENTMETHODTYPE.E_WALLET, priority: 1 },
-    { code: 'MAYA', name: 'Maya', type: PAYMENTMETHODTYPE.E_WALLET, priority: 2 },
-    { code: 'QRPH', name: 'QR Ph', type: PAYMENTMETHODTYPE.QR, priority: 3 },
-    { code: 'CARD', name: 'Credit / Debit Card', type: PAYMENTMETHODTYPE.CARD, priority: 4 },
-    { code: 'GRAB_PAY', name: 'GrabPay', type: PAYMENTMETHODTYPE.E_WALLET, priority: 5 },
+    { code: 'GCASH', name: 'GCash', type: PAYMENTMETHODTYPE.E_WALLET, priority: 1, isActive: true },
+    { code: 'MAYA', name: 'Maya', type: PAYMENTMETHODTYPE.E_WALLET, priority: 2, isActive: true },
+    { code: 'QRPH', name: 'QR Ph', type: PAYMENTMETHODTYPE.QR, priority: 3, isActive: false },
+    {
+      code: 'CARD',
+      name: 'Credit / Debit Card',
+      type: PAYMENTMETHODTYPE.CARD,
+      priority: 4,
+      isActive: true,
+    },
+    {
+      code: 'GRAB_PAY',
+      name: 'GrabPay',
+      type: PAYMENTMETHODTYPE.E_WALLET,
+      priority: 5,
+      isActive: false,
+    },
   ];
 
   for (const m of paymongoMethods) {
@@ -32,13 +44,13 @@ export async function seedPaymentProviders(prisma: PrismaClient) {
           code: m.code,
         },
       },
-      update: { name: m.name, type: m.type, isActive: true, priority: m.priority },
+      update: { name: m.name, type: m.type, isActive: m.isActive, priority: m.priority },
       create: {
         providerId: paymongo.id,
         code: m.code,
         name: m.name,
         type: m.type,
-        isActive: true,
+        isActive: m.isActive,
         priority: m.priority,
       },
     });

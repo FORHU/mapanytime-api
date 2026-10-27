@@ -184,7 +184,7 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
 - [x] **P1-1. HTTP CORS Hardening**
   - Remove wildcard origin reflection on credentialed HTTP endpoints.
   - Restrict `Access-Control-Allow-Origin` to explicit allowlisted origins (matching the WebSocket gateway).
-- [ ] **P1-2. Environment & Staging Isolation**
+- [x] **P1-2. Environment & Staging Isolation**
   - Separate staging and production container names, ports, env files, and databases.
 - [x] **P1-3. Admin Invitation Endpoint (ID-5)**
   - Implement `POST /v1/admin/invites` (token generation, expiration, email dispatch, and activation flow).

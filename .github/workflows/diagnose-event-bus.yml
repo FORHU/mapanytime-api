@@ -33,7 +33,8 @@ concurrency:
 env:
   AWS_REGION: ap-southeast-1
   INSTANCE_ID: i-0f95a93145ea25e7a
-  WORKER: mapanytime-api-worker
+  WORKER: mapanytime-dev-worker
+  LEGACY_WORKER: mapanytime-api-worker
   API_URL: https://dev.mapanytime.com/api/v1
 
 jobs:
@@ -76,8 +77,8 @@ jobs:
         run: |
           set -uo pipefail
           COMMANDS=(
-            "docker ps --filter name=${{ env.WORKER }} --format '{{.Names}} {{.Status}}'"
-            "docker logs --since 10m ${{ env.WORKER }} 2>&1 | grep -E '\\[EventBus|\\[AnalyticsConsumer|\\[Worker\\]' | tail -n 60 || true"
+            "docker ps --filter name=mapanytime.*worker --format '{{.Names}} {{.Status}}'"
+            "TARGET_WORKER=\$(docker ps --filter name=${{ env.WORKER }} --format '{{.Names}}' | head -n 1); [ -z \"\$TARGET_WORKER\" ] && TARGET_WORKER=${{ env.LEGACY_WORKER }}; docker logs --since 10m \"\$TARGET_WORKER\" 2>&1 | grep -E '\\[EventBus|\\[AnalyticsConsumer|\\[Worker\\]' | tail -n 60 || true"
           )
           PARAMS=$(printf '%s\n' "${COMMANDS[@]}" | jq -R . | jq -sc '{commands: .}')
 
