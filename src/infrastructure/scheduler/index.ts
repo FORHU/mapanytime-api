@@ -8,6 +8,7 @@ import StoreService from '../../modules/stores/store.service';
 import OrderService from '../../modules/orders/order.service';
 import AnalyticsService from '../../modules/analytics/analytics.service';
 import { PaymentReconciliationJob } from '../../modules/payments/jobs/payment-reconciliation.job';
+import AgentCommissionService from '../../modules/agent/agent-commission.service';
 import { redis } from '../redis';
 import { PENDING_ORDER_TTL_MINUTES } from '../../modules/orders/order.ttl';
 
@@ -191,6 +192,22 @@ export const startScheduler = () => {
       });
     } catch (err) {
       logger.error('[Scheduler] Stripe payment reconciliation failed:', err);
+    }
+  });
+
+  // ── Agent Commission Maturation — runs daily at 03:00 UTC ────────────────
+  // Transitions PENDING commissions past their eligibility hold days into MATURED
+  // and moves pendingBalance to availableBalance.
+  cron.schedule('0 3 * * *', async () => {
+    try {
+      await withJobLock('agent-commission-maturation', 600, async () => {
+        const matured = await AgentCommissionService.maturePendingCommissions();
+        if (matured > 0) {
+          logger.info(`[Scheduler] Matured ${matured} agent commission transaction(s).`);
+        }
+      });
+    } catch (err) {
+      logger.error('[Scheduler] Agent commission maturation sweep failed:', err);
     }
   });
 
