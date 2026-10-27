@@ -1536,7 +1536,7 @@ Everything must reconcile.
 
 [x] Environment isolation
 
-[ ] CORS hardening
+[x] CORS hardening
 
 [ ] Image pipeline
 
