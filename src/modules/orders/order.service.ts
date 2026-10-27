@@ -23,6 +23,7 @@ import { PENDING_ORDER_TTL_MINUTES } from './order.ttl';
 import PricingEngineService from '../pricing/pricing-engine.service';
 import SettlementService from '../settlements/settlement.service';
 import RewardService from '../rewards/reward.service';
+import SellerCampaignService from '../sellerCampaigns/sellerCampaign.service';
 import InventoryStockRepository from '../inventory/inventoryStock.repository';
 import NotificationService from '../notifications/notification.service';
 import { assertStoreInScope, resolveAccessibleStoreIds } from '../organization/storeAccess';
@@ -579,6 +580,9 @@ export default class OrderService {
       // reason the settlement is booked here: a ledger row for an order that
       // then failed to complete would be a phantom credit.
       await RewardService.awardPointsForCompletedOrder(tx, orderId);
+
+      // Evaluate active seller promotional campaigns and award bonus reward points
+      await SellerCampaignService.processOrderCampaignIncentive(tx, orderId);
 
       return completed;
     });
