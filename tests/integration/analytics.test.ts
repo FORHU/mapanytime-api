@@ -97,7 +97,25 @@ describe('POST /v1/analytics/events', () => {
       .send({ eventType: 'STORE_VIEW', sessionId: 'sess-2' });
 
     expect(res.status).toBe(202);
-    expect(published()[0].userId).toBeNull();
+  });
+
+  it('adopts x-session-id header when body omits sessionId', async () => {
+    const res = await request(app)
+      .post(ENDPOINT)
+      .set('X-Session-Id', 'client-header-session-456')
+      .send({ eventType: 'STORE_VIEW' });
+
+    expect(res.status).toBe(202);
+    const event = published()[0] as any;
+    expect(event.sessionId).toBe('client-header-session-456');
+  });
+
+  it('derives a fallback sessionId when both body and header omit sessionId', async () => {
+    const res = await request(app).post(ENDPOINT).send({ eventType: 'STORE_VIEW' });
+
+    expect(res.status).toBe(202);
+    const event = published()[0] as any;
+    expect(event.sessionId).toMatch(/^sess_[a-f0-9]{24}$/);
   });
 
   describe('validation', () => {

@@ -83,6 +83,27 @@ describe('AnalyticsService.record', () => {
       expect(payload.userId).toBeNull();
       expect(payload.sessionId).toBe('sess-9');
     });
+
+    it('adopts request context sessionId when event body omits it', async () => {
+      await AnalyticsService.record([{ eventType: 'PRODUCT_VIEW' }], {
+        ...context,
+        sessionId: 'sess-header-xyz',
+      });
+
+      const payload = publishedPayload();
+      expect(payload.sessionId).toBe('sess-header-xyz');
+    });
+
+    it('derives a deterministic fallback sessionId when both body and context omit it', async () => {
+      await AnalyticsService.record([{ eventType: 'PRODUCT_VIEW' }], {
+        userId: null,
+        ipAddress: '198.51.100.1',
+        userAgent: 'mobile-client/1.0',
+      });
+
+      const payload = publishedPayload();
+      expect(payload.sessionId).toMatch(/^sess_[a-f0-9]{24}$/);
+    });
   });
 
   describe('occurredAt', () => {

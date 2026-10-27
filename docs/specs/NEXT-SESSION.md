@@ -188,7 +188,7 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
   - Separate staging and production container names, ports, env files, and databases.
 - [x] **P1-3. Admin Invitation Endpoint (ID-5)**
   - Implement `POST /v1/admin/invites` (token generation, expiration, email dispatch, and activation flow).
-- [ ] **P1-4. Analytics Session ID & View Deduplication**
+- [x] **P1-4. Analytics Session ID & View Deduplication**
   - Generate client `sessionId` on web and mobile.
   - Deduplicate repeat views by `sessionId + productId + time window` before rollups.
 - [x] **P1-5. In-App Notification Feed Routes (NTF-1 to NTF-3)**

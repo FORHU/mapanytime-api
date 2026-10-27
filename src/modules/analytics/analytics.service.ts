@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { eventBus } from '../../infrastructure/event-bus';
 import { ROUTING_KEYS } from '../../events/routing-keys';
 import logger from '../../utils/logger';
@@ -14,6 +15,17 @@ export interface RecordResult {
   transport: 'queued' | 'direct';
 }
 
+/**
+ * Derives a deterministic anonymous session identifier from client IP, User-Agent,
+ * and a 30-minute time bucket when the client does not provide an explicit sessionId.
+ * Prevents anonymous page refresh bursts from inflating view counts (ANL-4).
+ */
+export function deriveSessionId(ipAddress?: string | null, userAgent?: string | null): string {
+  const windowBucket = Math.floor(Date.now() / (30 * 60 * 1000));
+  const raw = `${ipAddress || 'unknown_ip'}:${userAgent || 'unknown_ua'}:${windowBucket}`;
+  return `sess_${crypto.createHash('sha256').update(raw).digest('hex').slice(0, 24)}`;
+}
+
 export default class AnalyticsService {
   /**
    * Normalise a client-reported event into the wire payload.
@@ -22,7 +34,7 @@ export default class AnalyticsService {
    * anything self-reported here would let a caller attribute events to another
    * user and poison the rankings built on top of them.
    */
-  private static normalise(
+  public static normalise(
     input: AnalyticsEventInput,
     context: AnalyticsRequestContext,
   ): AnalyticsEventPayload {
@@ -32,10 +44,16 @@ export default class AnalyticsService {
     const supplied = input.occurredAt ? new Date(input.occurredAt) : null;
     const usable = supplied && !Number.isNaN(supplied.getTime()) && supplied <= now;
 
+    // Use client body sessionId, request header sessionId, or derive deterministic fallback
+    const resolvedSessionId =
+      input.sessionId?.trim() ||
+      context.sessionId?.trim() ||
+      deriveSessionId(context.ipAddress, context.userAgent);
+
     return {
       eventType: input.eventType,
       userId: context.userId ?? null,
-      sessionId: input.sessionId ?? null,
+      sessionId: resolvedSessionId,
       storeId: input.storeId ?? null,
       productId: input.productId ?? null,
       categoryId: input.categoryId ?? null,
