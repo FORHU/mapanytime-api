@@ -24,6 +24,7 @@ import PricingEngineService from '../pricing/pricing-engine.service';
 import SettlementService from '../settlements/settlement.service';
 import RewardService from '../rewards/reward.service';
 import SellerCampaignService from '../sellerCampaigns/sellerCampaign.service';
+import AgentCommissionService from '../agent/agent-commission.service';
 import InventoryStockRepository from '../inventory/inventoryStock.repository';
 import NotificationService from '../notifications/notification.service';
 import { assertStoreInScope, resolveAccessibleStoreIds } from '../organization/storeAccess';
@@ -583,6 +584,9 @@ export default class OrderService {
 
       // Evaluate active seller promotional campaigns and award bonus reward points
       await SellerCampaignService.processOrderCampaignIncentive(tx, orderId);
+
+      // Calculate and credit agent recruiter commission if seller was recruited
+      await AgentCommissionService.creditOrderCommission(tx, orderId);
 
       return completed;
     });
