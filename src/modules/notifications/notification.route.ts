@@ -9,6 +9,8 @@ const router = express.Router();
 router.get('/', authenticate, NotificationController.index);
 router.get('/unread-count', authenticate, NotificationController.unreadCount);
 router.patch('/read-all', authenticate, NotificationController.markAllAsRead);
+router.post('/read-all', authenticate, NotificationController.markAllAsRead);
 router.patch('/:id/read', authenticate, NotificationController.markAsRead);
+router.post('/:id/read', authenticate, NotificationController.markAsRead);
 
 export default router;

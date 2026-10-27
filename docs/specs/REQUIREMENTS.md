@@ -204,12 +204,12 @@ business rules_; `tests/unit/pricing.engine.financial-rules.test.ts` and
 
 ## NTF — Notifications
 
-| #     | Requirement                                                         | Status | Evidence                                                                                          |
-| :---- | :------------------------------------------------------------------ | :----- | :------------------------------------------------------------------------------------------------ |
-| NTF-1 | Buyer and seller are notified in real time when a payment completes | ✅     | `emitNotificationToUser` in the webhook path                                                      |
-| NTF-2 | A user reads a notification feed and marks items read               | ◐      | `NotificationService` has the methods; no route mounts them; `notification_feed_page.dart` exists |
-| NTF-3 | Transactional email is sent off the request path                    | ✅     | `email.consumer.ts` on `email.send.requested`                                                     |
-| NTF-4 | Push notifications reach the mobile app                             | ⬚      | Nothing found                                                                                     |
+| #     | Requirement                                                         | Status | Evidence                                                                   |
+| :---- | :------------------------------------------------------------------ | :----- | :------------------------------------------------------------------------- |
+| NTF-1 | Buyer and seller are notified in real time when a payment completes | ✅     | `emitNotificationToUser` in the webhook path                               |
+| NTF-2 | A user reads a notification feed and marks items read               | ✅     | `notification.route.ts` mounts feed, unread count, read-all, and mark-read |
+| NTF-3 | Transactional email is sent off the request path                    | ✅     | `email.consumer.ts` on `email.send.requested`                              |
+| NTF-4 | Push notifications reach the mobile app                             | ⬚      | Nothing found                                                              |
 
 ## ANL — Analytics & recommendations
 
