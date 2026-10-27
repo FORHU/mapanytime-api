@@ -8,7 +8,7 @@ import { startEmailConsumer } from './consumers/email.consumer';
 import { verifyMailer } from './utils/mailer';
 import { startAnalyticsConsumer } from './consumers/analytics.consumer';
 import { workerMetrics } from './utils/worker-metrics';
-import { startScheduler } from './infrastructure/scheduler';
+import { startScheduler, stopScheduler } from './infrastructure/scheduler';
 import { ANALYTICS_EVENTS_QUEUE_URL, EMAIL_SEND_QUEUE_URL, EVENTS_TOPIC_ARN } from './config';
 import logger from './utils/logger';
 
@@ -88,6 +88,7 @@ const gracefulShutdown = async (signal: string) => {
 
   isReady = false;
   workerMetrics.stop();
+  stopScheduler();
   healthServer.close();
 
   try {

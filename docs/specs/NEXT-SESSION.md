@@ -195,7 +195,7 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
   - Wire `GET /v1/notifications`, `PATCH /v1/notifications/:id/read`, `POST /v1/notifications/read-all`, and unread badge count.
 - [ ] **P1-6. Map Pin $\rightarrow$ Storefront Experience**
   - Complete the client flow: Pin tap $\rightarrow$ store summary preview $\rightarrow$ storefront $\rightarrow$ products $\rightarrow$ cart.
-- [ ] **P1-7. Scheduled Cron Hygiene**
+- [x] **P1-7. Scheduled Cron Hygiene**
   - Verify reservation expiration job; remove or implement empty cron shells.
 - [x] **P1-8. Add `.gitattributes` to `-web`**
   - Ensure consistent line endings across environments.
