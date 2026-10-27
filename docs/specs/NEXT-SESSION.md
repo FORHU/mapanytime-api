@@ -217,12 +217,12 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
 
 _Spec: [`ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md`](./ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md) and [`MAP_POINTS_FEATURE_SPEC.md`](./MAP_POINTS_FEATURE_SPEC.md)_
 
-- [ ] **P3-1. Buyer Loyalty Rewards (`RewardWallet` + `RewardTransactions` + `RewardConfigurations`)**
+- [x] **P3-1. Buyer Loyalty Rewards (`RewardWallet` + `RewardTransactions` + `RewardConfigurations`)**
   - ₱100 eligible subtotal = 1 Reward Point (~1%).
   - 100 Reward Points = ₱10 discount (max 20% order subtotal cap).
   - 12-month rolling expiration with explicit `-EXPIRATION` ledger entries.
-- [ ] **P3-2. Seller Incentives (`SellerCampaigns` + `SellerCampaignTransactions`)**
-  - Merchant-funded buyer point campaigns with budget tracking and ROI metrics.
+- [x] **P3-2. Seller Incentives (`SellerCampaigns` + `SellerCampaignTransactions`)** (PR #171)
+  - Merchant-funded buyer point campaigns with budget tracking, in-transaction order completion hook, and ROI metrics.
 - [ ] **P3-3. Agent Recruiter Commissions (`AgentCommissionAccount` + `AgentCommissionTransactions` + `AgentPayouts`)**
   - Real PHP commissions (0.05% GMV configurable).
   - 7-day holding window (`PENDING` $\rightarrow$ `MATURED`) and payout requests (Min ₱500).
