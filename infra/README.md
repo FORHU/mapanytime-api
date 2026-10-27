@@ -130,18 +130,17 @@ deploy has gone green end to end.
 The only differences between the two workflows are the `env:` block and the
 trigger:
 
-|            | staging                                      | production                                 |
-| :--------- | :------------------------------------------- | :----------------------------------------- |
-| ECR repo   | `mapanytime-api-staging`                     | `mapanytime`                               |
-| Containers | `mapanytime-api-staging` / `-worker-staging` | `mapanytime-api` / `mapanytime-api-worker` |
-| Network    | `mapanytime-staging`                         | `mapanytime`                               |
-| Ports      | 4003→4002, 8081→8080                         | 4002→4002, 8080→8080                       |
-| Parameter  | `/mapanytime/staging/env`                    | `/mapanytime/production/env`               |
-| Trigger    | after CI on `main`                           | `workflow_dispatch` only                   |
+|            | dev / staging                           | production                             |
+| :--------- | :-------------------------------------- | :------------------------------------- |
+| ECR repo   | `mapanytime` (`dev-*` tag)              | `mapanytime`                           |
+| Containers | `mapanytime-dev-api` / `-dev-worker`    | `mapanytime-prod-api` / `-prod-worker` |
+| Network    | `forhu-dev`                             | `mapanytime-prod`                      |
+| Ports      | 4001→3000, 4002→8080                    | 4002→4002, 8080→8080                   |
+| Parameter  | `/forhu-dev/mapanytime-api/env`         | `/mapanytime/production/env`           |
+| Env File   | `/opt/forhu-dev/mapanytime-api.env`     | `/opt/mapanytime-prod/production.env`  |
+| Trigger    | push to `staging` / `workflow_dispatch` | `workflow_dispatch` only               |
 
-The worker container name is deliberately `mapanytime-api-worker` — what the old
-workflow built as `"${CONTAINER_NAME}-worker"` — so the first SSM deploy replaces
-that container rather than leaving an orphan running beside the new one.
+Container names and networks are isolated per environment (`mapanytime-prod-*` on `mapanytime-prod` vs `mapanytime-dev-*` on `forhu-dev`). Deploy scripts explicitly remove legacy unnamespaced containers (`mapanytime-api`, `mapanytime-api-worker`) during cutover to prevent duplicate processes or port binding clashes.
 
 It follows the same shape as `gc3-client-web`'s production deploy — OIDC role
 assumption, tag-based SSM targeting, per-environment config in `vars` — so the

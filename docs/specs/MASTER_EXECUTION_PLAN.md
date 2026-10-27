@@ -1534,7 +1534,7 @@ Everything must reconcile.
 
 [ ] Push notifications
 
-[ ] Environment isolation
+[x] Environment isolation
 
 [ ] CORS hardening
 

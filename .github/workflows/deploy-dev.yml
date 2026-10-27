@@ -37,8 +37,8 @@ env:
   ACCOUNT_ID: '617163942417'
   INSTANCE_ID: i-0f95a93145ea25e7a
   ECR_REPOSITORY: mapanytime
-  CONTAINER: mapanytime-api
-  WORKER: mapanytime-api-worker
+  CONTAINER: mapanytime-dev-api
+  WORKER: mapanytime-dev-worker
   NETWORK: forhu-dev
   HOST_PORT: '4001'
   APP_PORT: '3000'
@@ -221,6 +221,7 @@ jobs:
             # name below.
             "docker images --filter dangling=false --format '{{.Repository}}:{{.Tag}}' ${REGISTRY}/${{ env.ECR_REPOSITORY }} | xargs -r docker rmi 2>/dev/null || true"
             "docker pull --platform linux/arm64 ${IMAGE}"
+            "docker rm -f mapanytime-api 2>/dev/null || true"
             "docker rm -f ${{ env.CONTAINER }} 2>/dev/null || true"
             "docker run --rm --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} --entrypoint npx ${IMAGE} prisma migrate deploy"
             "docker run -d --name ${{ env.CONTAINER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} -p 127.0.0.1:${{ env.HOST_PORT }}:${{ env.APP_PORT }} ${IMAGE}"
@@ -235,6 +236,7 @@ jobs:
             # published to the event bus is accepted and never processed, which reads
             # as the API silently dropping jobs rather than as a missing
             # container.
+            "docker rm -f mapanytime-api-worker 2>/dev/null || true"
             "docker rm -f ${{ env.WORKER }} 2>/dev/null || true"
             "docker run -d --name ${{ env.WORKER }} --restart unless-stopped --platform linux/arm64 --network ${{ env.NETWORK }} --env-file ${{ env.MERGED_ENV }} -p 127.0.0.1:${{ env.WORKER_HOST_PORT }}:${{ env.WORKER_PORT }} ${IMAGE} node ./dist/src/worker.js"
           )

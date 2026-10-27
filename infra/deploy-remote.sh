@@ -73,6 +73,11 @@ docker run --rm \
   "$IMAGE" \
   prisma migrate deploy
 
+# Clean up legacy unnamespaced containers if migrating to environment-isolated names
+if [ "$CONTAINER_NAME" != "mapanytime-api" ]; then
+  docker stop mapanytime-api 2>/dev/null || true
+  docker rm mapanytime-api 2>/dev/null || true
+fi
 docker stop "$CONTAINER_NAME" 2>/dev/null || true
 docker rm "$CONTAINER_NAME" 2>/dev/null || true
 docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
@@ -86,6 +91,10 @@ docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
 
 # 30s, not docker's default 10: on SIGTERM the worker lets an open SQS long poll
 # (up to 20s) end and in-flight messages finish before it exits (#127).
+if [ "$WORKER_NAME" != "mapanytime-api-worker" ]; then
+  docker stop -t 30 mapanytime-api-worker 2>/dev/null || true
+  docker rm mapanytime-api-worker 2>/dev/null || true
+fi
 docker stop -t 30 "$WORKER_NAME" 2>/dev/null || true
 docker rm "$WORKER_NAME" 2>/dev/null || true
 # The compiled worker, not `npm run worker`: that is nodemon + ts-node over
