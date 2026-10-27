@@ -193,7 +193,7 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
   - Deduplicate repeat views by `sessionId + productId + time window` before rollups.
 - [x] **P1-5. In-App Notification Feed Routes (NTF-1 to NTF-3)**
   - Wire `GET /v1/notifications`, `PATCH /v1/notifications/:id/read`, `POST /v1/notifications/read-all`, and unread badge count.
-- [ ] **P1-6. Map Pin $\rightarrow$ Storefront Experience**
+- [x] **P1-6. Map Pin $\rightarrow$ Storefront Experience**
   - Complete the client flow: Pin tap $\rightarrow$ store summary preview $\rightarrow$ storefront $\rightarrow$ products $\rightarrow$ cart.
 - [x] **P1-7. Scheduled Cron Hygiene**
   - Verify reservation expiration job; remove or implement empty cron shells.
