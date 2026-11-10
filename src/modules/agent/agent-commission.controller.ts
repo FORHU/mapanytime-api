@@ -1,8 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import AgentCommissionService from './agent-commission.service';
-import { requestPayoutSchema, updateCommissionConfigSchema } from './agent-commission.schema';
+import {
+  requestPayoutSchema,
+  updateCommissionConfigSchema,
+  rejectPayoutSchema,
+} from './agent-commission.schema';
 import { responseSuccess, responseError } from '../../helpers/response.helper';
-import { COMMISSIONSTATUS } from '@prisma/client';
+import { COMMISSIONSTATUS, PAYOUTSTATUS } from '@prisma/client';
 
 export default class AgentCommissionController {
   static async getAccountSummary(req: Request, res: Response, next: NextFunction) {
@@ -100,6 +104,38 @@ export default class AgentCommissionController {
       const { reference } = req.body;
       const data = await AgentCommissionService.approvePayout(id, reference);
       return responseSuccess(res, 200, data, 'Payout approved successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async rejectPayout(req: Request, res: Response, next: NextFunction) {
+    const { error, value } = rejectPayoutSchema.validate(req.body);
+    if (error) return responseError(res, 400, error.message);
+
+    try {
+      const { id } = req.params;
+      const data = await AgentCommissionService.rejectPayout(id, value.reason);
+      return responseSuccess(res, 200, data, 'Payout rejected and refunded successfully');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async getAdminPayouts(req: Request, res: Response, next: NextFunction) {
+    try {
+      const page = req.query.page ? Number(req.query.page) : 1;
+      const limit = req.query.limit ? Number(req.query.limit) : 20;
+      const status = req.query.status as PAYOUTSTATUS | undefined;
+      const search = req.query.search as string | undefined;
+
+      const data = await AgentCommissionService.getAdminPayouts({
+        page,
+        limit,
+        status,
+        search,
+      });
+      return responseSuccess(res, 200, data, 'Admin agent payouts retrieved');
     } catch (error) {
       next(error);
     }

@@ -203,6 +203,67 @@ export default class AgentCommissionService {
   }
 
   /**
+   * List paginated payout requests across all agents (Admin only).
+   */
+  static async getAdminPayouts(params: {
+    page?: number;
+    limit?: number;
+    status?: PAYOUTSTATUS;
+    search?: string;
+  }) {
+    const page = Math.max(1, params.page || 1);
+    const limit = Math.max(1, Math.min(100, params.limit || 20));
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.AgentPayoutsWhereInput = {};
+    if (params.status) {
+      where.status = params.status;
+    }
+    if (params.search && params.search.trim()) {
+      const term = params.search.trim();
+      where.agent = {
+        OR: [
+          { email: { contains: term, mode: 'insensitive' } },
+          { firstName: { contains: term, mode: 'insensitive' } },
+          { lastName: { contains: term, mode: 'insensitive' } },
+        ],
+      };
+    }
+
+    const [items, total] = await Promise.all([
+      prisma.agentPayouts.findMany({
+        where,
+        include: {
+          agent: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              phoneNumber: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.agentPayouts.count({ where }),
+    ]);
+
+    return {
+      items: items.map((p) => ({
+        ...p,
+        amount: Number(p.amount),
+      })),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
    * Agent requests a payout of available earnings.
    */
   static async requestPayout(
@@ -290,6 +351,65 @@ export default class AgentCommissionService {
           processedAt: new Date(),
         },
       });
+
+      return {
+        ...updated,
+        amount: Number(updated.amount),
+      };
+    });
+  }
+
+  /**
+   * Rejects an agent payout and refunds the deducted amount back to available balance (Admin only).
+   */
+  static async rejectPayout(payoutId: string, reason?: string) {
+    return prisma.$transaction(async (tx) => {
+      const payout = await tx.agentPayouts.findUnique({
+        where: { id: payoutId },
+      });
+
+      if (!payout) {
+        throw { status: 404, message: 'Payout request not found.' };
+      }
+      if (payout.status !== PAYOUTSTATUS.PENDING && payout.status !== PAYOUTSTATUS.PROCESSING) {
+        throw { status: 400, message: `Cannot reject payout in ${payout.status} state.` };
+      }
+
+      // Refund deducted amount back to available balance
+      await tx.agentCommissionAccount.update({
+        where: { id: payout.accountId },
+        data: {
+          availableBalance: { increment: payout.amount },
+        },
+      });
+
+      const updated = await tx.agentPayouts.update({
+        where: { id: payoutId },
+        data: {
+          status: PAYOUTSTATUS.FAILED,
+          reference: reason
+            ? `REJECTED: ${reason}`
+            : payout.reference
+              ? `REJECTED: ${payout.reference}`
+              : 'REJECTED',
+          processedAt: new Date(),
+        },
+        include: {
+          agent: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              phoneNumber: true,
+            },
+          },
+        },
+      });
+
+      logger.info(
+        `[AgentCommission] Payout ${payoutId} rejected by admin. Refunded ₱${Number(payout.amount)} to account ${payout.accountId}.`,
+      );
 
       return {
         ...updated,

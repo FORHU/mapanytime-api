@@ -22,3 +22,7 @@ export const updateCommissionConfigSchema = Joi.object({
   isEnabled: Joi.boolean().optional(),
   changeReason: Joi.string().trim().max(255).optional(),
 });
+
+export const rejectPayoutSchema = Joi.object({
+  reason: Joi.string().trim().max(255).optional().allow('', null),
+});

@@ -22,7 +22,9 @@ router.get('/commission/payouts', requireAgent, AgentCommissionController.getPay
 router.get('/commission/config', AgentCommissionController.getConfig);
 
 // Admin-only commission controls
+router.get('/admin/payouts', requireAdmin, AgentCommissionController.getAdminPayouts);
 router.patch('/admin/commission/config', requireAdmin, AgentCommissionController.updateConfig);
 router.post('/admin/payouts/:id/approve', requireAdmin, AgentCommissionController.approvePayout);
+router.post('/admin/payouts/:id/reject', requireAdmin, AgentCommissionController.rejectPayout);
 
 export default router;

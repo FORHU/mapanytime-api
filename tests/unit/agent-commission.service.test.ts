@@ -302,6 +302,89 @@ describe('AgentCommissionService', () => {
         },
       });
     });
+
+    it('rejects payout and refunds available balance back to agent', async () => {
+      mockPrisma.agentPayouts.findUnique.mockResolvedValue({
+        id: 'payout-1',
+        accountId: 'acc-1',
+        amount: new Prisma.Decimal(750),
+        status: PAYOUTSTATUS.PENDING,
+      });
+
+      mockPrisma.agentPayouts.update.mockResolvedValue({
+        id: 'payout-1',
+        amount: new Prisma.Decimal(750),
+        status: PAYOUTSTATUS.FAILED,
+        reference: 'REJECTED: Invalid account details',
+      });
+
+      const res = await AgentCommissionService.rejectPayout('payout-1', 'Invalid account details');
+      expect(res.status).toBe(PAYOUTSTATUS.FAILED);
+      expect(mockPrisma.agentCommissionAccount.update).toHaveBeenCalledWith({
+        where: { id: 'acc-1' },
+        data: {
+          availableBalance: { increment: new Prisma.Decimal(750) },
+        },
+      });
+    });
+
+    it('throws error when rejecting non-pending payout', async () => {
+      mockPrisma.agentPayouts.findUnique.mockResolvedValue({
+        id: 'payout-1',
+        status: PAYOUTSTATUS.COMPLETED,
+      });
+
+      await expect(
+        AgentCommissionService.rejectPayout('payout-1', 'Too late'),
+      ).rejects.toMatchObject({
+        status: 400,
+      });
+    });
+  });
+
+  describe('getAdminPayouts', () => {
+    it('queries all payouts with pagination, status filter, and agent include', async () => {
+      mockPrisma.agentPayouts.findMany.mockResolvedValue([
+        {
+          id: 'payout-101',
+          agentId: 'agent-1',
+          accountId: 'acc-1',
+          amount: new Prisma.Decimal(1200),
+          status: PAYOUTSTATUS.PENDING,
+          paymentMethod: 'BANK_TRANSFER',
+          reference: null,
+          createdAt: new Date(),
+          agent: {
+            id: 'agent-1',
+            email: 'agent@example.com',
+            firstName: 'Ana',
+            lastName: 'Reyes',
+            phoneNumber: '+639171234567',
+          },
+        },
+      ]);
+      mockPrisma.agentPayouts.count.mockResolvedValue(1);
+
+      const res = await AgentCommissionService.getAdminPayouts({
+        page: 1,
+        limit: 10,
+        status: PAYOUTSTATUS.PENDING,
+        search: 'Ana',
+      });
+
+      expect(res.items).toHaveLength(1);
+      expect(res.items[0].amount).toBe(1200);
+      expect(res.items[0].agent.email).toBe('agent@example.com');
+      expect(mockPrisma.agentPayouts.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: PAYOUTSTATUS.PENDING,
+          }),
+          skip: 0,
+          take: 10,
+        }),
+      );
+    });
   });
 
   describe('reverseOrderCommission', () => {
