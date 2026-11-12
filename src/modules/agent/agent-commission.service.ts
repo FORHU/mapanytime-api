@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import logger from '../../utils/logger';
+import AuditService from '../audit/audit.service';
 
 type DbClient = Prisma.TransactionClient | PrismaClient;
 
@@ -323,8 +324,9 @@ export default class AgentCommissionService {
   /**
    * Approves/completes an agent payout (Admin only).
    */
-  static async approvePayout(payoutId: string, reference?: string) {
-    return prisma.$transaction(async (tx) => {
+  static async approvePayout(payoutId: string, reference?: string, actorId?: string) {
+    let previousStatus: PAYOUTSTATUS | undefined;
+    const result = await prisma.$transaction(async (tx) => {
       const payout = await tx.agentPayouts.findUnique({
         where: { id: payoutId },
       });
@@ -335,6 +337,7 @@ export default class AgentCommissionService {
       if (payout.status !== PAYOUTSTATUS.PENDING && payout.status !== PAYOUTSTATUS.PROCESSING) {
         throw { status: 400, message: `Cannot approve payout in ${payout.status} state.` };
       }
+      previousStatus = payout.status;
 
       await tx.agentCommissionAccount.update({
         where: { id: payout.accountId },
@@ -357,13 +360,30 @@ export default class AgentCommissionService {
         amount: Number(updated.amount),
       };
     });
+
+    await AuditService.record({
+      performedById: actorId,
+      action: 'AGENT_PAYOUT_APPROVED',
+      entityType: 'AGENT_PAYOUT',
+      entityId: payoutId,
+      metadata: {
+        agentId: result.agentId,
+        amount: result.amount,
+        reference: result.reference,
+        before: { status: previousStatus },
+        after: { status: result.status },
+      },
+    });
+
+    return result;
   }
 
   /**
    * Rejects an agent payout and refunds the deducted amount back to available balance (Admin only).
    */
-  static async rejectPayout(payoutId: string, reason?: string) {
-    return prisma.$transaction(async (tx) => {
+  static async rejectPayout(payoutId: string, reason?: string, actorId?: string) {
+    let previousStatus: PAYOUTSTATUS | undefined;
+    const result = await prisma.$transaction(async (tx) => {
       const payout = await tx.agentPayouts.findUnique({
         where: { id: payoutId },
       });
@@ -374,6 +394,7 @@ export default class AgentCommissionService {
       if (payout.status !== PAYOUTSTATUS.PENDING && payout.status !== PAYOUTSTATUS.PROCESSING) {
         throw { status: 400, message: `Cannot reject payout in ${payout.status} state.` };
       }
+      previousStatus = payout.status;
 
       // Refund deducted amount back to available balance
       await tx.agentCommissionAccount.update({
@@ -416,6 +437,22 @@ export default class AgentCommissionService {
         amount: Number(updated.amount),
       };
     });
+
+    await AuditService.record({
+      performedById: actorId,
+      action: 'AGENT_PAYOUT_REJECTED',
+      entityType: 'AGENT_PAYOUT',
+      entityId: payoutId,
+      metadata: {
+        agentId: result.agentId,
+        reason: reason ?? null,
+        refundedAmount: result.amount,
+        before: { status: previousStatus },
+        after: { status: result.status },
+      },
+    });
+
+    return result;
   }
 
   /**

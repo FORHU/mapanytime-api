@@ -102,7 +102,7 @@ export default class AgentCommissionController {
     try {
       const { id } = req.params;
       const { reference } = req.body;
-      const data = await AgentCommissionService.approvePayout(id, reference);
+      const data = await AgentCommissionService.approvePayout(id, reference, req.user?.id);
       return responseSuccess(res, 200, data, 'Payout approved successfully');
     } catch (error) {
       next(error);
@@ -115,7 +115,7 @@ export default class AgentCommissionController {
 
     try {
       const { id } = req.params;
-      const data = await AgentCommissionService.rejectPayout(id, value.reason);
+      const data = await AgentCommissionService.rejectPayout(id, value.reason, req.user?.id);
       return responseSuccess(res, 200, data, 'Payout rejected and refunded successfully');
     } catch (error) {
       next(error);

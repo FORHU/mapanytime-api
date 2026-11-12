@@ -1,5 +1,6 @@
 import { prisma } from '../../utils/prisma';
 import { PAYOUTSTATUS } from '@prisma/client';
+import AuditService from '../audit/audit.service';
 
 export default class PayoutService {
   static async getPayoutsBySeller(sellerId: string) {
@@ -91,7 +92,12 @@ export default class PayoutService {
     });
   }
 
-  static async updatePayoutStatus(id: string, status: PAYOUTSTATUS, referenceNo?: string) {
+  static async updatePayoutStatus(
+    id: string,
+    status: PAYOUTSTATUS,
+    referenceNo?: string,
+    actorId?: string,
+  ) {
     const payout = await prisma.sellerPayouts.findUnique({ where: { id } });
     if (!payout) throw { status: 404, message: 'Payout not found.' };
 
@@ -104,7 +110,7 @@ export default class PayoutService {
       };
     }
 
-    return prisma.sellerPayouts.update({
+    const updated = await prisma.sellerPayouts.update({
       where: { id },
       data: {
         status,
@@ -112,5 +118,20 @@ export default class PayoutService {
         ...(status === 'COMPLETED' ? { processedAt: new Date() } : {}),
       },
     });
+
+    await AuditService.record({
+      performedById: actorId,
+      action: 'PAYOUT_STATUS_UPDATED',
+      entityType: 'PAYOUT',
+      entityId: id,
+      metadata: {
+        sellerId: payout.sellerId,
+        amount: Number(payout.totalAmount),
+        before: { status: payout.status, referenceNo: payout.referenceNo },
+        after: { status: updated.status, referenceNo: updated.referenceNo },
+      },
+    });
+
+    return updated;
   }
 }

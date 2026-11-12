@@ -25,6 +25,7 @@ import {
   adminAppReleaseRouter,
 } from './modules/appRelease/app-release.route';
 import adminInviteRoute from './modules/adminInvites/admin-invite.route';
+import auditRoute from './modules/audit/audit.route';
 import filesRoute from './modules/files/files.route';
 import analyticsRoute from './modules/analytics/analytics.route';
 import pricingRoute from './modules/pricing/pricing.route';
@@ -74,6 +75,7 @@ router.use('/v1/admin/app-releases', adminAppReleaseRouter);
 router.use('/v1/admin/approvals', adminApprovalRoute);
 router.use('/v1/admin/sellers', sellerRoute);
 router.use('/v1/admin/invites', adminInviteRoute);
+router.use('/v1/admin/audit-logs', auditRoute);
 router.use('/v1/properties', propertyRoute);
 router.use('/v1/analytics', analyticsRoute);
 router.use('/v1/reviews', reviewRoute);

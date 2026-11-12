@@ -6,6 +6,7 @@ import { sendEmail, isMailerConfigured } from '../../utils/mailer';
 import logger from '../../utils/logger';
 import { hashPassword } from '../auth/password-hash';
 import { displayName } from '../../utils/display-name.util';
+import AuditService from '../audit/audit.service';
 
 export const INVITABLE_ADMIN_ROLES: SystemRole[] = [
   SYSTEM_ROLES.SUPER_ADMIN,
@@ -124,6 +125,14 @@ export class AdminInviteService {
       );
     }
 
+    await AuditService.record({
+      performedById: params.inviterId,
+      action: 'ADMIN_INVITE_CREATED',
+      entityType: 'ADMIN_INVITE',
+      entityId: invite.id,
+      metadata: { email, role, expiresAt: expiresAt.toISOString() },
+    });
+
     return invite;
   }
 
@@ -171,7 +180,7 @@ export class AdminInviteService {
   /**
    * Revokes a pending administrative invitation.
    */
-  static async revokeInvite(inviteId: string) {
+  static async revokeInvite(inviteId: string, revokedById?: string) {
     const invite = await prisma.adminInvites.findUnique({
       where: { id: inviteId },
     });
@@ -184,10 +193,25 @@ export class AdminInviteService {
       throw { status: 400, message: 'Cannot revoke an already accepted invitation.' };
     }
 
-    return prisma.adminInvites.update({
+    const revoked = await prisma.adminInvites.update({
       where: { id: inviteId },
       data: { status: INVITESTATUS.REVOKED },
     });
+
+    await AuditService.record({
+      performedById: revokedById,
+      action: 'ADMIN_INVITE_REVOKED',
+      entityType: 'ADMIN_INVITE',
+      entityId: inviteId,
+      metadata: {
+        email: invite.email,
+        role: invite.role,
+        before: { status: invite.status },
+        after: { status: INVITESTATUS.REVOKED },
+      },
+    });
+
+    return revoked;
   }
 
   /**
@@ -355,6 +379,14 @@ export class AdminInviteService {
     logger.info(
       `[AdminInvite] Invitation accepted for ${result.user.email} (userId: ${result.user.id}, role: ${invite.role})`,
     );
+
+    await AuditService.record({
+      performedById: result.user.id,
+      action: 'ADMIN_INVITE_ACCEPTED',
+      entityType: 'ADMIN_INVITE',
+      entityId: invite.id,
+      metadata: { email: invite.email, role: invite.role, userId: result.user.id },
+    });
 
     return {
       userId: result.user.id,
