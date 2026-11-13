@@ -60,7 +60,7 @@ export class AdminInviteController {
   static async revoke(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const revoked = await AdminInviteService.revokeInvite(id);
+      const revoked = await AdminInviteService.revokeInvite(id, req.user?.id);
       return responseSuccess(res, 200, revoked, 'Admin invitation revoked successfully.');
     } catch (error) {
       next(error);

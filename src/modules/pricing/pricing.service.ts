@@ -7,6 +7,7 @@ import PricingEngineService, {
   PricingCalculationInput,
   OrderPricingResult,
 } from './pricing-engine.service';
+import AuditService from '../audit/audit.service';
 
 export interface PricingValidationIssue {
   severity: 'ERROR' | 'WARNING';
@@ -64,30 +65,91 @@ export default class PricingService {
     return config;
   }
 
-  static async createPricingConfiguration(data: CreatePricingConfigurationInput) {
+  static async createPricingConfiguration(data: CreatePricingConfigurationInput, actorId?: string) {
     // A configuration is always born a draft, whatever the caller asked for.
     // Honouring a requested ACTIVE would skip validation entirely and reprice
     // every order the moment it saved. `activateConfiguration` is the only way
     // to go live, and it validates first.
-    return PricingRepository.createConfiguration({ ...data, status: 'DRAFT' });
+    const created = await PricingRepository.createConfiguration({ ...data, status: 'DRAFT' });
+    await AuditService.record({
+      performedById: actorId,
+      action: 'PRICING_CONFIG_CREATED',
+      entityType: 'PRICING_CONFIG',
+      entityId: created.id,
+      metadata: { after: toAuditJson(data) },
+    });
+    return created;
   }
 
-  static async updatePricingConfiguration(id: string, data: UpdatePricingConfigurationInput) {
-    await this.getPricingConfiguration(id);
-    return PricingRepository.updateConfiguration(id, data);
+  static async updatePricingConfiguration(
+    id: string,
+    data: UpdatePricingConfigurationInput,
+    actorId?: string,
+  ) {
+    const existing = await this.getPricingConfiguration(id);
+    const updated = await PricingRepository.updateConfiguration(id, data);
+    await AuditService.record({
+      performedById: actorId,
+      action: 'PRICING_CONFIG_UPDATED',
+      entityType: 'PRICING_CONFIG',
+      entityId: id,
+      metadata: {
+        name: existing.name,
+        before: pickKeys(existing, Object.keys(data)),
+        after: toAuditJson(data),
+      },
+    });
+    return updated;
   }
 
-  static async addComponent(pricingId: string, component: CreatePricingComponentInput) {
+  static async addComponent(
+    pricingId: string,
+    component: CreatePricingComponentInput,
+    actorId?: string,
+  ) {
     await this.getPricingConfiguration(pricingId);
-    return PricingRepository.addComponent(pricingId, component);
+    const created = await PricingRepository.addComponent(pricingId, component);
+    await AuditService.record({
+      performedById: actorId,
+      action: 'PRICING_COMPONENT_ADDED',
+      entityType: 'PRICING_CONFIG',
+      entityId: pricingId,
+      metadata: { componentId: created.id, after: toAuditJson(component) },
+    });
+    return created;
   }
 
-  static async updateComponent(id: string, component: Partial<CreatePricingComponentInput>) {
-    return PricingRepository.updateComponent(id, component);
+  static async updateComponent(
+    id: string,
+    component: Partial<CreatePricingComponentInput>,
+    actorId?: string,
+  ) {
+    const existing = await PricingRepository.getComponentById(id);
+    const updated = await PricingRepository.updateComponent(id, component);
+    await AuditService.record({
+      performedById: actorId,
+      action: 'PRICING_COMPONENT_UPDATED',
+      entityType: 'PRICING_CONFIG',
+      entityId: updated.pricingId,
+      metadata: {
+        componentId: id,
+        before: existing ? pickKeys(existing, Object.keys(component)) : null,
+        after: toAuditJson(component),
+      },
+    });
+    return updated;
   }
 
-  static async deleteComponent(id: string) {
-    return PricingRepository.deleteComponent(id);
+  static async deleteComponent(id: string, actorId?: string) {
+    const deleted = await PricingRepository.deleteComponent(id);
+    await AuditService.record({
+      performedById: actorId,
+      action: 'PRICING_COMPONENT_DELETED',
+      entityType: 'PRICING_CONFIG',
+      entityId: deleted.pricingId,
+      metadata: { componentId: id, before: toAuditJson(deleted) },
+    });
+    return deleted;
   }
 
   /**
@@ -201,7 +263,7 @@ export default class PricingService {
    * prices off whatever this leaves behind — so the invalid cases are blocked
    * rather than merely reported.
    */
-  static async activateConfiguration(id: string) {
+  static async activateConfiguration(id: string, actorId?: string) {
     const validation = await this.validateConfiguration(id);
 
     if (!validation.valid) {
@@ -212,11 +274,23 @@ export default class PricingService {
       };
     }
 
+    const previous = await PricingRepository.getActiveConfiguration();
     const activated = await PricingRepository.activateConfiguration(id);
+    await AuditService.record({
+      performedById: actorId,
+      action: 'PRICING_CONFIG_ACTIVATED',
+      entityType: 'PRICING_CONFIG',
+      entityId: id,
+      metadata: {
+        name: activated.name,
+        before: { activeConfigurationId: previous?.id ?? null },
+        after: { activeConfigurationId: id },
+      },
+    });
     return { ...activated, warnings: validation.issues.filter((i) => i.severity === 'WARNING') };
   }
 
-  static async archiveConfiguration(id: string) {
+  static async archiveConfiguration(id: string, actorId?: string) {
     const config = await this.getPricingConfiguration(id);
 
     // Archiving the live configuration with nothing to replace it drops every
@@ -230,6 +304,28 @@ export default class PricingService {
       };
     }
 
-    return PricingRepository.archiveConfiguration(id);
+    const archived = await PricingRepository.archiveConfiguration(id);
+    await AuditService.record({
+      performedById: actorId,
+      action: 'PRICING_CONFIG_ARCHIVED',
+      entityType: 'PRICING_CONFIG',
+      entityId: id,
+      metadata: {
+        name: config.name,
+        before: { status: config.status },
+        after: { status: 'ARCHIVED' },
+      },
+    });
+    return archived;
   }
+}
+
+/** Plain JSON copy (Decimals and Dates become strings) safe for the audit metadata column. */
+function toAuditJson(value: unknown): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value ?? {}));
+}
+
+function pickKeys(source: object, keys: string[]): Record<string, unknown> {
+  const record = source as Record<string, unknown>;
+  return toAuditJson(Object.fromEntries(keys.map((k) => [k, record[k] ?? null])));
 }

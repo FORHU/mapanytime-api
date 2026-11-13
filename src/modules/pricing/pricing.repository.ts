@@ -132,6 +132,10 @@ export default class PricingRepository {
     });
   }
 
+  static async getComponentById(id: string) {
+    return prisma.pricingComponents.findUnique({ where: { id } });
+  }
+
   static async updateComponent(id: string, component: Partial<CreatePricingComponentInput>) {
     return prisma.pricingComponents.update({
       where: { id },
