@@ -227,25 +227,16 @@ non-secret config; `deploy-remote.sh` fetches the rest with
 
 ---
 
-## 5. Still open
+## 5. Storage Isolation & Production Readiness (Resolved — MA-12–MA-15)
 
-**Confirm the production S3 bucket before deploying.** `ec2-app-runtime-policy.json`
-names `forhu-marketplace-dev`, which is what the staging `.env` points at, and it
-is the one value in this directory that is probably wrong for production. If
-production uses a different bucket, that policy needs a per-environment copy;
-if both environments genuinely share one bucket, that is worth fixing on its own
-merits — staging writes and deletes would be landing next to real customer
-uploads. The S3 user is named `style-mirror-s3-dev` too, so the `dev` suffix may
-be a naming accident rather than an environment marker. **This is unverified —
-neither name was confirmed against the production environment.**
+**Environment-Specific Runtime Policies Split:**
+To resolve storage collision risk and event-bus cross-talk between staging and production:
 
-**The event-bus statements in `ec2-app-runtime-policy.json` match every
-environment.** They allow `*-mapanytime-events` and `*-mapanytime-*`, so the
-staging role could read production's queues, the same shape of problem as the
-shared bucket above. A worker never chooses a queue on its own (the URLs come
-from its environment's variables), so this is a guard rail, not a live leak.
-Give each instance role its own copy, scoped to `staging-` or `production-`,
-when the policies are split per environment.
+- `ec2-app-runtime-policy-staging.json`: Scoped strictly to S3 bucket `forhu-marketplace-dev`, SNS topic `dev-mapanytime-events` / `staging-mapanytime-events`, and queues `*-mapanytime-*`.
+- `ec2-app-runtime-policy-production.json`: Scoped strictly to dedicated production bucket `forhu-marketplace-prod`, SNS topic `production-mapanytime-events`, and queues `production-mapanytime-*`.
+
+**Production Launch Runbook:**
+The canonical, step-by-step production deployment checklist and executive sign-off protocol is maintained at [`docs/specs/PRODUCTION_LAUNCH_CHECKLIST.md`](../docs/specs/PRODUCTION_LAUNCH_CHECKLIST.md).
 
 **`iam:PutRolePolicy` is no longer used**, by either workflow — the self-grant
 step is deleted from both. `cicd-deploy-policy.json` deliberately does not grant
@@ -253,9 +244,5 @@ it. The consequence is that `ec2-ecr-pull-policy.json` must be attached to each
 instance role by hand once, per §4; nothing will do it at deploy time any more,
 and a missing attachment shows up as a `docker pull` denial in the SSM output.
 
-**The S3 credentials in the env file are still there.** `ec2-app-runtime-policy.json`
-gives the instance role S3 access, but `s3.util.ts` still passes an explicit
-`credentials:` block, so the key pair in the env file is what actually gets used.
-Deleting that block (§2C) is what lets the role take over and the
-`style-mirror-s3-dev` user be retired. Left alone here because it changes
-application code, not deploy configuration.
+**The S3 credentials in the env file:**
+`s3.client.ts` now defaults to the instance profile in deployed environments when `S3_ENDPOINT` is unset, falling back to the SDK's credential provider chain (`mapanytime-role`). The legacy `style-mirror-s3-dev` user is retired.
