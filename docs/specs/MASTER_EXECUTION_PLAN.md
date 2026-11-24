@@ -141,27 +141,27 @@ The server-side pricing engine must remain the authority for:
 
 Current overall state:
 
-- Core identity: largely complete
-- Seller onboarding: largely complete
-- Store management: largely complete
-- Map discovery: largely complete
-- Catalog: largely complete
-- Property listings: largely complete
+- Core identity: complete (Better Auth sessions, OAuth, password reset, admin invites)
+- Seller onboarding: complete
+- Store management: complete
+- Map discovery: complete (nearby pins, distance, direct storefront tap)
+- Catalog: complete (products, variants, categories, reviews, wishlists)
+- Property listings: complete
 - Cart: complete
 - Inventory: complete
-- Order lifecycle: largely complete
-- Payment gateway: operational
-- Pricing engine: operational
+- Order lifecycle: complete
+- Payment gateway: operational (Stripe, Xendit, PayMongo with dynamic failover & reconciliation sweeper)
+- Pricing engine: operational (`PricingEngineService` + admin pricing UI)
 - Charge ledger: operational
-- Seller settlement: now operational
-- Advertising: largely complete
-- Analytics ingestion: operational
-- Admin: partially wired
-- Notifications: partially wired
-- Buyer rewards: not built
-- Seller incentives: not built
-- Agent commissions: not built
-- Reconciliation: incomplete
+- Seller settlement: operational (with hourly maturation and payouts)
+- Advertising: complete (with marketing wallet)
+- Analytics ingestion & rollups: operational (session deduplication, daily rollups, rule-based ranking)
+- Admin: operational in `mapanytime-market-web` (`mapanytime-market-admin` retired)
+- Notifications: operational (realtime socket + HTTP feed + SQS email consumer)
+- Buyer rewards: operational (`RewardWallet`, `RewardTransactions`, `RewardConfigurations`)
+- Seller incentives: operational (`SellerCampaigns`, `SellerCampaignTransactions`)
+- Agent commissions: operational (`AgentCommissionAccount`, `AgentCommissionTransactions`, `AgentPayouts`)
+- Reconciliation: operational (`PaymentReconciliationJob` sweeper + provider-backed refunds)
 - Push notifications: not built
 
 ---
@@ -1404,123 +1404,123 @@ Everything must reconcile.
 
 ## P0 — Do these first
 
-[ ] Confirm actual QRPH contracted rate
+[x] Confirm actual QRPH contracted rate (deactivated unused `QRPH` & `GRAB_PAY` in #185)
 
-[ ] Confirm actual GrabPay contracted rate
+[x] Confirm actual GrabPay contracted rate (deactivated unused `QRPH` & `GRAB_PAY` in #185)
 
-[ ] Inspect CommissionRules data
+[x] Inspect CommissionRules data
 
-[ ] Migrate required CommissionRules into PricingComponents
+[x] Migrate required CommissionRules into PricingComponents
 
-[ ] Remove CommissionRules after migration verification
+[x] Remove CommissionRules after migration verification
 
-[ ] Verify Orders.taxAmount has no dependencies
+[x] Verify Orders.taxAmount has no dependencies
 
-[ ] Remove Orders.taxAmount
+[x] Remove Orders.taxAmount
 
-[ ] Confirm SETTLEMENT_HOLD_DAYS = 7 with business owner
+[x] Confirm SETTLEMENT_HOLD_DAYS = 7 with business owner
 
-[ ] Verify order → payment → settlement → payout reconciliation
+[x] Verify order → payment → settlement → payout reconciliation
 
-[ ] Implement provider payment reconciliation
+[x] Implement provider payment reconciliation
 
-[ ] Complete refund provider integration
+[x] Complete refund provider integration
 
-[ ] Complete refund/void payment states
+[x] Complete refund/void payment states
 
 ---
 
 # 51. P1 — Buyer Experience
 
-[ ] Finish map pin → storefront experience
+[x] Finish map pin → storefront experience
 
-[ ] Finish buyer checkout on all required clients
+[x] Finish buyer checkout on all required clients
 
-[ ] Finish notification feed API
+[x] Finish notification feed API
 
-[ ] Implement store reviews
+[x] Implement store reviews
 
-[ ] Implement product reviews
+[x] Implement product reviews
 
-[ ] Implement wishlist
+[x] Implement wishlist
 
-[ ] Verify pickup QR flow end-to-end
+[x] Verify pickup QR flow end-to-end
 
-[ ] Verify delivery lifecycle
+[x] Verify delivery lifecycle (withdrawn — pickup-only per F36 / ORD-5)
 
 ---
 
 # 52. P2 — Analytics
 
-[ ] Generate client sessionId
+[x] Generate client sessionId
 
-[ ] Attach sessionId to analytics events
+[x] Attach sessionId to analytics events
 
-[ ] Implement view deduplication
+[x] Implement view deduplication
 
-[ ] Validate analytics traffic
+[x] Validate analytics traffic
 
-[ ] Implement daily rollups
+[x] Implement daily rollups
 
-[ ] Implement popularity ranking
+[x] Implement popularity ranking
 
-[ ] Implement search ranking
+[x] Implement search ranking
 
-[ ] Implement rule-based recommendations
+[x] Implement rule-based recommendations
 
 ---
 
 # 53. P3 — Economic System
 
-[ ] Create RewardWallet
+[x] Create RewardWallet
 
-[ ] Create RewardTransactions
+[x] Create RewardTransactions
 
-[ ] Create RewardConfigurations
+[x] Create RewardConfigurations
 
-[ ] Implement reward earning
+[x] Implement reward earning
 
-[ ] Implement reward redemption
+[x] Implement reward redemption
 
-[ ] Implement 20% redemption cap
+[x] Implement 20% redemption cap
 
-[ ] Implement 12-month expiration
+[x] Implement 12-month expiration
 
-[ ] Create SellerCampaigns
+[x] Create SellerCampaigns
 
-[ ] Create SellerCampaignTransactions
+[x] Create SellerCampaignTransactions
 
-[ ] Create AgentCommissionAccount
+[x] Create AgentCommissionAccount
 
-[ ] Create AgentCommissionTransactions
+[x] Create AgentCommissionTransactions
 
-[ ] Create AgentPayouts
+[x] Create AgentPayouts
 
-[ ] Create AgentCommissionConfigurations
+[x] Create AgentCommissionConfigurations
 
-[ ] Implement agent commission holding period
+[x] Implement agent commission holding period
 
-[ ] Implement agent payout threshold
+[x] Implement agent payout threshold
 
-[ ] Implement atomic multi-ledger settlement
+[x] Implement atomic multi-ledger settlement
 
-[ ] Implement reward reversal
+[x] Implement reward reversal
 
-[ ] Implement commission reversal
+[x] Implement commission reversal
 
-[ ] Implement economic reconciliation
+[x] Implement economic reconciliation
 
 ---
 
 # 54. P4 — Administration & Operations
 
-[ ] Admin invitation endpoint
+[x] Admin invitation endpoint
 
-[ ] Pricing configuration update endpoint
+[x] Pricing configuration update endpoint
 
-[ ] Pricing configuration validation
+[x] Pricing configuration validation
 
-[ ] Pricing configuration activation
+[x] Pricing configuration activation
 
 [ ] Audit logging consumer
 
@@ -1686,27 +1686,27 @@ Do not start ECO-1 through ECO-11 until the core financial chain is verified.
 
 MapAnytime should be considered ready for serious transaction growth when:
 
-- [ ] Pricing has one authoritative engine
-- [ ] Payment provider rates are correct
-- [ ] Checkout total matches gateway capture
-- [ ] Inventory reservation is reliable
-- [ ] Payment webhooks are reliable
-- [ ] Refunds are provider-backed
-- [ ] Seller settlements are created
-- [ ] Settlements release correctly
-- [ ] Payouts reconcile
-- [ ] Payment-provider reconciliation works
-- [ ] Buyer checkout is complete
-- [ ] Store/product reviews work
-- [ ] Notification feed works
-- [ ] Analytics is deduplicated
-- [ ] CORS is locked down
-- [ ] Staging is isolated from production
+- [x] Pricing has one authoritative engine
+- [x] Payment provider rates are correct
+- [x] Checkout total matches gateway capture
+- [x] Inventory reservation is reliable
+- [x] Payment webhooks are reliable
+- [x] Refunds are provider-backed
+- [x] Seller settlements are created
+- [x] Settlements release correctly
+- [x] Payouts reconcile
+- [x] Payment-provider reconciliation works
+- [x] Buyer checkout is complete
+- [x] Store/product reviews work
+- [x] Notification feed works
+- [x] Analytics is deduplicated
+- [x] CORS is locked down
+- [x] Staging is isolated from production
 - [ ] Financial actions are auditable
-- [ ] Buyer rewards are ledger-based
-- [ ] Agent commissions are ledger-based
-- [ ] Reversals are implemented
-- [ ] Economic balances reconcile
+- [x] Buyer rewards are ledger-based
+- [x] Agent commissions are ledger-based
+- [x] Reversals are implemented
+- [x] Economic balances reconcile
 
 ---
 
