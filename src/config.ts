@@ -76,6 +76,26 @@ export const EMAIL_SEND_QUEUE_URL = process.env.EMAIL_SEND_QUEUE_URL || '';
 export const ANALYTICS_EVENTS_QUEUE_URL = process.env.ANALYTICS_EVENTS_QUEUE_URL || '';
 
 /**
+ * Mail transport driver.
+ *
+ * Supported values: 'ses' | 'smtp'.
+ * Defaults to 'ses' if MAIL_DRIVER is explicitly set to 'ses', or if running in
+ * production with no custom non-default SMTP host configured. Otherwise defaults to 'smtp'.
+ */
+export const MAIL_DRIVER = (
+  process.env.MAIL_DRIVER?.trim().toLowerCase() === 'ses' ||
+  (process.env.NODE_ENV === 'production' &&
+    !process.env.MAILER_TRANSPORT_HOST &&
+    !process.env.SMTP_HOST)
+    ? 'ses'
+    : 'smtp'
+) as 'ses' | 'smtp';
+
+export const AWS_SES_ENDPOINT = process.env.AWS_SES_ENDPOINT || '';
+export const AWS_SES_REGION =
+  process.env.AWS_SES_REGION || process.env.AWS_REGION || 'ap-southeast-1';
+
+/**
  * Mail transport.
  *
  * Both `MAILER_*` and `SMTP_*` spellings are written by the deploy workflows
