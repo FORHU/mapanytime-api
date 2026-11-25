@@ -16,11 +16,14 @@ import type { VehicleEventPayload } from '../../infrastructure/socket';
  */
 
 export const LIVE_TTL_SECONDS = 60;
+export const TRAIL_TTL_SECONDS = 86400; // 24 hours
+export const MAX_TRAIL_POINTS = 1000;
 
 const GEO_KEY = 'mobility:geo:vehicles';
 const SEEN_KEY = 'mobility:seen';
 const vehicleKey = (id: string) => `mobility:vehicle:${id}`;
 const driverKey = (userId: string) => `mobility:driver:${userId}`;
+const trailKey = (id: string) => `mobility:trail:${id}`;
 
 const KM_PER_DEG = 111.32;
 
@@ -47,6 +50,22 @@ export interface CachedVehicle {
   typeCode: string;
 }
 
+export interface TrailPoint {
+  lat: number;
+  lng: number;
+  speed: number | null;
+  heading: number | null;
+  accuracy: number | null;
+  status: 'moving' | 'stopped';
+  ts: number;
+}
+
+export interface TrailQueryOptions {
+  since?: number;
+  until?: number;
+  limit?: number;
+}
+
 function client() {
   const c = RedisUtil.client;
   if (!c?.isOpen) throw { status: 503, message: 'Live tracking unavailable' };
@@ -61,6 +80,17 @@ export async function getLive(vehicleId: string): Promise<VehicleEventPayload | 
 }
 
 export async function putLive(point: VehicleEventPayload, now = Date.now()): Promise<void> {
+  const trailPoint: TrailPoint = {
+    lat: point.lat,
+    lng: point.lng,
+    speed: point.speed ?? null,
+    heading: point.heading ?? null,
+    accuracy: point.accuracy ?? null,
+    status: point.status,
+    ts: point.ts,
+  };
+  const tKey = trailKey(point.id);
+
   await client()
     .multi()
     .set(vehicleKey(point.id), JSON.stringify(point), {
@@ -68,7 +98,39 @@ export async function putLive(point: VehicleEventPayload, now = Date.now()): Pro
     })
     .geoAdd(GEO_KEY, { longitude: point.lng, latitude: point.lat, member: point.id })
     .zAdd(SEEN_KEY, { score: now, value: point.id })
+    .zAdd(tKey, { score: point.ts, value: JSON.stringify(trailPoint) })
+    .expire(tKey, TRAIL_TTL_SECONDS)
+    .zRemRangeByRank(tKey, 0, -(MAX_TRAIL_POINTS + 1))
     .exec();
+}
+
+/** Queries recorded trail breadcrumbs for a vehicle within an optional time range. */
+export async function getTrail(
+  vehicleId: string,
+  options: TrailQueryOptions = {},
+): Promise<TrailPoint[]> {
+  const min = options.since != null ? options.since : '-inf';
+  const max = options.until != null ? options.until : '+inf';
+  const limit = Math.min(Math.max(options.limit ?? 100, 1), MAX_TRAIL_POINTS);
+
+  const rawPoints = await client().zRangeByScore(trailKey(vehicleId), min, max, {
+    LIMIT: { offset: 0, count: limit },
+  });
+
+  return rawPoints
+    .map((r) => {
+      try {
+        return JSON.parse(r) as TrailPoint;
+      } catch {
+        return null;
+      }
+    })
+    .filter((p): p is TrailPoint => p !== null);
+}
+
+/** Clears stored trail history for a vehicle (useful for testing or data reset). */
+export async function clearTrail(vehicleId: string): Promise<void> {
+  await client().del(trailKey(vehicleId));
 }
 
 /** Takes a vehicle off the live map; returns where it was, for `vehicle:removed`. */
