@@ -20,6 +20,8 @@ export interface NearbyStore {
   markerDisplayMode: string;
   markerPrice: number | null;
   markerSubtitle: string | null;
+  isSponsored: boolean;
+  sponsoredBadge?: string | null;
   address: {
     currentAddress: string;
     city: string;
@@ -52,6 +54,8 @@ interface NearbyRow {
   markerDisplayMode: string;
   markerPrice: Prisma.Decimal | null;
   markerSubtitle: string | null;
+  isSponsored: boolean;
+  sponsoredBadge: string | null;
 }
 
 // No hours row for today (isClosed is null) defaults to open â€” matches the
@@ -152,6 +156,21 @@ export default class StoreRepository {
         l."latitude", l."longitude",
         l."currentAddress", l."city", l."province", l."country",
         ROUND((${distanceKm})::numeric, 2) AS "distanceKm",
+        EXISTS(
+          SELECT 1 FROM "MerchantAds" ma
+          WHERE ma."storeId" = s."id"
+            AND ma."isActive" = true
+            AND (ma."startAt" IS NULL OR ma."startAt" <= NOW())
+            AND (ma."expiresAt" IS NULL OR ma."expiresAt" > NOW())
+        ) AS "isSponsored",
+        (
+          SELECT ma."badgeLabel" FROM "MerchantAds" ma
+          WHERE ma."storeId" = s."id"
+            AND ma."isActive" = true
+            AND (ma."startAt" IS NULL OR ma."startAt" <= NOW())
+            AND (ma."expiresAt" IS NULL OR ma."expiresAt" > NOW())
+          LIMIT 1
+        ) AS "sponsoredBadge",
         (
           SELECT c."name"
           FROM "Categories" c
@@ -166,7 +185,7 @@ export default class StoreRepository {
       LEFT JOIN "StoreHours" h ON h."storeId" = s."id" AND h."dayOfWeek" = ${dow}
       ${categoryJoin}
       WHERE ${inViewport}
-      ORDER BY "distanceKm" ASC
+      ORDER BY "isSponsored" DESC, "distanceKm" ASC
       LIMIT ${limit} OFFSET ${offset}
     `);
 
@@ -193,6 +212,8 @@ export default class StoreRepository {
       markerDisplayMode: r.markerDisplayMode,
       markerPrice: r.markerPrice === null ? null : Number(r.markerPrice),
       markerSubtitle: r.markerSubtitle,
+      isSponsored: Boolean(r.isSponsored),
+      sponsoredBadge: r.sponsoredBadge ?? null,
       distanceKm: Number(r.distanceKm),
       coordinates: { lat: r.latitude, lng: r.longitude },
       address: {
