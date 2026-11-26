@@ -1,7 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import nodemailer, { SendMailOptions, Transporter } from 'nodemailer';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import {
+  AWS_SES_ENDPOINT,
+  AWS_SES_REGION,
+  MAIL_DRIVER,
   MAILER_EMAIL,
   MAILER_FROM_NAME,
   MAILER_PASSWORD,
@@ -14,26 +18,65 @@ import logger from './logger';
 /**
  * One transporter for the process, not one per message.
  *
- * Nodemailer pools and reuses the underlying connection; building a fresh
- * transport on every send throws that away and reopens an SMTP connection for
- * each email.
+ * Nodemailer pools and reuses the underlying connection / SES client;
+ * building a fresh transport on every send throws that away.
  */
 let transporter: Transporter | null = null;
+let sesClientInstance: SESv2Client | null = null;
 
-function getTransporter(): Transporter {
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: MAILER_TRANSPORT_HOST,
-      port: MAILER_TRANSPORT_PORT,
-      secure: MAILER_TRANSPORT_SECURE,
-      auth: MAILER_EMAIL ? { user: MAILER_EMAIL, pass: MAILER_PASSWORD } : undefined,
+export function getSesClient(): SESv2Client {
+  if (!sesClientInstance) {
+    const isLocal = Boolean(AWS_SES_ENDPOINT);
+    const localCredentials = isLocal
+      ? {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'test',
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'test',
+        }
+      : undefined;
+
+    sesClientInstance = new SESv2Client({
+      region: AWS_SES_REGION,
+      ...(isLocal && {
+        endpoint: AWS_SES_ENDPOINT,
+        credentials: localCredentials,
+      }),
     });
+  }
+  return sesClientInstance;
+}
+
+/** Resets memoized transporter and SES client instances (for testing). */
+export function resetTransporter(): void {
+  transporter = null;
+  sesClientInstance = null;
+}
+
+export function getTransporter(): Transporter {
+  if (!transporter) {
+    if (MAIL_DRIVER === 'ses') {
+      transporter = nodemailer.createTransport({
+        SES: {
+          sesClient: getSesClient(),
+          SendEmailCommand,
+        },
+      });
+    } else {
+      transporter = nodemailer.createTransport({
+        host: MAILER_TRANSPORT_HOST,
+        port: MAILER_TRANSPORT_PORT,
+        secure: MAILER_TRANSPORT_SECURE,
+        auth: MAILER_EMAIL ? { user: MAILER_EMAIL, pass: MAILER_PASSWORD } : undefined,
+      });
+    }
   }
   return transporter;
 }
 
 /** True when enough is configured for a send to have any chance of working. */
 export function isMailerConfigured(): boolean {
+  if (MAIL_DRIVER === 'ses') {
+    return Boolean(MAILER_EMAIL);
+  }
   return Boolean(MAILER_TRANSPORT_HOST && MAILER_EMAIL && MAILER_PASSWORD);
 }
 
@@ -46,25 +89,42 @@ export function isMailerConfigured(): boolean {
  */
 export async function verifyMailer(): Promise<boolean> {
   if (!isMailerConfigured()) {
-    logger.warn(
-      '[Mailer] Not configured — MAILER_TRANSPORT_HOST / MAILER_EMAIL / MAILER_PASSWORD ' +
-        'are incomplete. Password reset codes and every other email will fail to send.',
-    );
+    if (MAIL_DRIVER === 'ses') {
+      logger.warn('[Mailer] Not configured — MAILER_EMAIL is required for AWS SES transport.');
+    } else {
+      logger.warn(
+        '[Mailer] Not configured — MAILER_TRANSPORT_HOST / MAILER_EMAIL / MAILER_PASSWORD ' +
+          'are incomplete. Password reset codes and every other email will fail to send.',
+      );
+    }
     return false;
   }
 
   try {
     await getTransporter().verify();
-    logger.info(
-      `[Mailer] Transport verified: ${MAILER_EMAIL} via ${MAILER_TRANSPORT_HOST}:${MAILER_TRANSPORT_PORT}`,
-    );
+    if (MAIL_DRIVER === 'ses') {
+      logger.info(
+        `[Mailer] AWS SES transport verified for ${MAILER_EMAIL} in region ${AWS_SES_REGION}`,
+      );
+    } else {
+      logger.info(
+        `[Mailer] Transport verified: ${MAILER_EMAIL} via ${MAILER_TRANSPORT_HOST}:${MAILER_TRANSPORT_PORT}`,
+      );
+    }
     return true;
   } catch (error) {
-    logger.error(
-      `[Mailer] Transport check FAILED for ${MAILER_TRANSPORT_HOST}:${MAILER_TRANSPORT_PORT} — ` +
-        'emails will not be delivered.',
-      error,
-    );
+    if (MAIL_DRIVER === 'ses') {
+      logger.error(
+        `[Mailer] AWS SES transport check FAILED for region ${AWS_SES_REGION} — emails will not be delivered.`,
+        error,
+      );
+    } else {
+      logger.error(
+        `[Mailer] Transport check FAILED for ${MAILER_TRANSPORT_HOST}:${MAILER_TRANSPORT_PORT} — ` +
+          'emails will not be delivered.',
+        error,
+      );
+    }
     return false;
   }
 }
@@ -87,14 +147,15 @@ export async function sendEmail({
   cc?: string | null;
 }): Promise<string> {
   if (!isMailerConfigured()) {
-    throw new Error(
-      '[Mailer] Refusing to send: mail transport is not configured. ' +
-        'Set MAILER_TRANSPORT_HOST, MAILER_EMAIL and MAILER_PASSWORD.',
-    );
+    const reason =
+      MAIL_DRIVER === 'ses'
+        ? 'Set MAILER_EMAIL for AWS SES transport.'
+        : 'Set MAILER_TRANSPORT_HOST, MAILER_EMAIL and MAILER_PASSWORD.';
+    throw new Error(`[Mailer] Refusing to send: mail transport is not configured. ${reason}`);
   }
 
   const mailOptions: SendMailOptions = {
-    from: `${MAILER_FROM_NAME} <${MAILER_EMAIL}>`,
+    from: MAILER_FROM_NAME ? `${MAILER_FROM_NAME} <${MAILER_EMAIL}>` : MAILER_EMAIL,
     to,
     subject,
   };
@@ -104,11 +165,13 @@ export async function sendEmail({
   if (cc) mailOptions.cc = cc;
 
   const info = await getTransporter().sendMail(mailOptions);
-  logger.info(`[Mailer] Sent "${subject}" to ${to} (id: ${info.messageId})`);
+  logger.info(
+    `[Mailer] Sent "${subject}" to ${to} (id: ${info.messageId}) [driver: ${MAIL_DRIVER}]`,
+  );
 
   // Ethereal is the default dev transport and delivers nowhere real; the
   // preview URL is the only way to see what was sent.
-  if (MAILER_TRANSPORT_HOST.includes('ethereal')) {
+  if (MAIL_DRIVER === 'smtp' && MAILER_TRANSPORT_HOST.includes('ethereal')) {
     logger.info(`[Mailer] Ethereal preview: ${nodemailer.getTestMessageUrl(info)}`);
   }
 
