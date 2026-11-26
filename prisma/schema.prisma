@@ -14,8 +14,15 @@ datasource db {
 model Users {
   id              String            @id @default(cuid())
   email           String            @unique
-  passwordHash    String
-  activeSessionId String?
+  /// Legacy. Superseded by AuthAccount.password (providerId "credential"):
+  /// nothing reads or writes it since Better Auth (#122). Kept one release as a
+  /// rollback safety net — the migration copied it, it was not moved — then dropped.
+  passwordHash    String?
+  /// Better Auth's required display name (`user.name`). Backfilled from
+  /// first/last name, falling back to the email's local part.
+  name            String
+  /// Better Auth's optional `user.image`.
+  image           String?
   firstName       String?
   lastName        String?
   middleName      String?
@@ -27,13 +34,16 @@ model Users {
   isPasswordSet   Boolean           @default(true)
   isOnBoarding    Boolean           @default(false)
   countryCode     String?
+  dateOfBirth     DateTime?         @db.Date
+  sex             SEX?
   lastLoginAt     DateTime?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
   roles              Roles[]                     @relation("UserRoles")
   avatarFile         Files?                      @relation("UserAvatar", fields: [avatarFileId], references: [id])
-  session            Session[]
+  authSessions       AuthSession[]
+  authAccounts       AuthAccount[]
   passwordResets     PasswordResetTokens[]
   seller             Sellers?
   reviewedSellers    Sellers[]                   @relation("SellerReviewer")
@@ -50,6 +60,9 @@ model Users {
   transportMemberships TransportOperatorMembers[]
   drivenVehicle      Vehicles?                   @relation("VehicleDriver")
   uploadedAppReleases AppRelease[]               @relation("AppReleaseUploader")
+  reviewedBuyerIds   BuyerIdVerifications[]      @relation("BuyerIdReviewer")
+  agentCommissionAccount AgentCommissionAccount?
+  agentPayouts           AgentPayouts[]
 
   @@unique([userReferralId, id])
   @@index([userReferralId])
@@ -122,46 +135,58 @@ model PasswordResetTokens {
   @@index([expiresAt])
 }
 
-/// One link in a refresh-token chain.
-///
-/// The row no longer holds the refresh token. It holds `jti` — the token's own
-/// identifier, which is what a presented token is now looked up by — and
-/// `refreshTokenHash`, which only proves a presented token is the one this row
-/// was issued for. Neither can be replayed as a credential, so read access to
-/// this table stops being equivalent to holding every live session (F100/F101).
-///
-/// Rows are retained after use rather than deleted, because a consumed row is
-/// the only evidence that lets a replayed token be told apart from an unknown
-/// one. `familyId` ties a chain together so the whole chain can be revoked at
-/// once when that happens (F103). Retention means pruning is now required —
-/// expired rows have no reader and belong to the sweeper work in F44/F52/F91.
-model Session {
-  id               String    @id @default(cuid())
-  userId           String
-  createdAt        DateTime  @default(now())
-  expiresAt        DateTime?
-  /// Token identifier, from the refresh JWT's `jti` claim. The lookup key.
-  jti              String?   @unique
-  /// SHA-256 of the refresh token. A verifier, never a credential.
-  refreshTokenHash String?   @unique
-  /// Shared by every token rotated from one login. Revoked as a unit on replay.
-  familyId         String?
-  /// Set the instant this token is claimed. The atomic-consumption latch (F102).
-  usedAt           DateTime?
-  /// Set when the chain is torn down — logout, or replay of a consumed token.
-  revokedAt        DateTime?
-  /// The `jti` this one rotated into. Makes a chain walkable after the fact.
-  replacedByJti    String?
-  provider         String
-  avatarUrl        String?
-  providerUserId   String?
-  scopes           String?
-  updatedAt        DateTime  @updatedAt
-  users            Users     @relation(fields: [userId], references: [id])
+/// Better Auth's `session` table (#122) — replaced the JWT refresh-token `Session`.
+/// Clients send `token` plus its HMAC as `Authorization: Bearer` (session-token.ts).
+model AuthSession {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@unique([provider, providerUserId])
-  @@index([familyId])
-  @@index([userId, expiresAt])
+  user Users @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Better Auth's `account` table: one row per sign-in method. Email/password is
+/// `providerId: "credential"` with `accountId` = the user's id and the bcrypt
+/// hash in `password`; Google/Facebook rows carry the provider's user id.
+model AuthAccount {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user Users @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+/// Better Auth's `verification` table: short-lived values such as the
+/// password-reset codes issued by the email-OTP plugin.
+model AuthVerification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
 }
 
 model Files {
@@ -185,6 +210,7 @@ model Files {
   logoStores      Stores[]          @relation("StoreLogo")
   bannerStores    Stores[]          @relation("StoreBanner")
   propertiesFiles PropertiesFiles[] @relation("PropertyFiles")
+  buyerIdVerification BuyerIdVerifications?
 }
 
 model Sellers {
@@ -212,6 +238,10 @@ model Sellers {
   payouts               SellerPayouts[]
   returnRequests        ReturnRequests[]
   organizationMembers   SellerOrganizationMembers[]
+  marketingWallet       MarketingWallet?
+  campaigns             SellerCampaigns[]
+  campaignTransactions  SellerCampaignTransactions[]
+  agentCommissionTransactions AgentCommissionTransactions[]
 
   @@index([applicationStatus])
   @@index([reviewedAt])
@@ -361,6 +391,7 @@ model Buyers {
   reservations    InventoryReservations[]
   rewardWallet    RewardWallet?
   claimedVouchers UserVouchers[]
+  idVerification  BuyerIdVerifications?
 }
 
 model DocumentVerifications {
@@ -397,16 +428,55 @@ enum DOCUMENTTYPES {
   SEC_CERTIFICATE
 }
 
+enum SEX {
+  MALE
+  FEMALE
+}
+
+/// Government IDs a buyer can sign up with.
+enum BUYERIDTYPE {
+  PHILSYS
+  DRIVERS_LICENSE
+  PASSPORT
+  UMID
+  POSTAL_ID
+  PRC_ID
+}
+
+/// The valid ID a buyer uploaded at sign-up, waiting for an admin to check it.
+/// The photo is a private S3 object referenced through `file`.
+model BuyerIdVerifications {
+  id                 String             @id @default(cuid())
+  buyerId            String             @unique
+  idType             BUYERIDTYPE
+  idNumber           String
+  /// The holder's address as confirmed against the ID at sign-up.
+  address            String
+  fileId             String             @unique
+  verificationStatus VerificationStatus @default(PENDING)
+  verifiedById       String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  buyer      Buyers @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  file       Files  @relation(fields: [fileId], references: [id])
+  verifiedBy Users? @relation("BuyerIdReviewer", fields: [verifiedById], references: [id])
+
+  @@index([verificationStatus])
+}
+
 model AdminInvites {
-  id        String       @id @default(cuid())
-  email     String       @unique
-  token     String       @unique
-  status    INVITESTATUS @default(PENDING)
-  inviterId String
-  expiresAt DateTime
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
-  inviter   Users        @relation(fields: [inviterId], references: [id])
+  id         String       @id @default(cuid())
+  email      String       @unique
+  token      String       @unique
+  role       String       @default("ADMIN")
+  status     INVITESTATUS @default(PENDING)
+  inviterId  String
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  inviter    Users        @relation(fields: [inviterId], references: [id])
 }
 
 enum INVITESTATUS {
@@ -474,6 +544,7 @@ model Stores {
   productProperties     ProductProperties[]     @relation("StoreProperties")
   merchantAds           MerchantAds[]
   savedBy               SavedStores[]
+  campaigns             SellerCampaigns[]
 
   @@index([sellerId])
   @@index([isActive])
@@ -651,7 +722,8 @@ model MerchantAds {
   badge      PromotionBadges?     @relation(fields: [badgeId], references: [id], onDelete: SetNull)
   products   MerchantAdProducts[]
   orderItems OrderItems[]
-  adEvents   AdEvents[]
+  adEvents              AdEvents[]
+  marketingTransactions MarketingWalletTransactions[]
 
   @@index([storeId, isActive])
   @@index([radiusKm])
@@ -701,6 +773,235 @@ model AdEvents {
   @@index([adId, eventType, occurredAt])
   @@index([buyerId])
   @@index([orderId])
+}
+
+// =========================================================================
+// 💳 FEATURE DOMAIN: MERCHANT ADVERTISING MARKETING WALLET
+// =========================================================================
+
+enum MARKETINGTRANSACTIONTYPE {
+  DEPOSIT
+  AD_SPEND
+  REFUND
+  ADJUSTMENT
+}
+
+model MarketingWallet {
+  id                String   @id @default(cuid())
+  sellerId          String   @unique
+  balance           Decimal  @default(0) @db.Decimal(12, 2)
+  lifetimeDeposited Decimal  @default(0) @db.Decimal(12, 2)
+  lifetimeSpent     Decimal  @default(0) @db.Decimal(12, 2)
+  currency          String   @default("PHP")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  seller       Sellers                       @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  transactions MarketingWalletTransactions[]
+
+  @@index([sellerId])
+}
+
+model MarketingWalletTransactions {
+  id           String                   @id @default(cuid())
+  walletId     String
+  type         MARKETINGTRANSACTIONTYPE
+  amount       Decimal                  @db.Decimal(12, 2)
+  balanceAfter Decimal                  @db.Decimal(12, 2)
+
+  adId         String?
+  referenceKey String?                  @unique
+  description  String?
+  metadata     Json?
+
+  createdAt DateTime @default(now())
+
+  wallet MarketingWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  ad     MerchantAds?    @relation(fields: [adId], references: [id], onDelete: SetNull)
+
+  @@index([walletId, createdAt])
+  @@index([adId])
+  @@index([type])
+}
+
+// =========================================================================
+// 🎯 FEATURE DOMAIN: SELLER PROMOTIONAL CAMPAIGNS & INCENTIVES
+// =========================================================================
+
+enum SELLERCAMPAIGNTYPE {
+  BONUS_POINTS
+  DOUBLE_POINTS
+  PRODUCT_BOOST
+}
+
+enum CAMPAIGNSTATUS {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  EXHAUSTED
+}
+
+model SellerCampaigns {
+  id              String             @id @default(cuid())
+  sellerId        String
+  storeId         String?
+  name            String
+  type            SELLERCAMPAIGNTYPE @default(BONUS_POINTS)
+  status          CAMPAIGNSTATUS     @default(DRAFT)
+
+  startDate       DateTime
+  endDate         DateTime
+  budgetAmount    Decimal            @db.Decimal(12, 2)
+  spentAmount     Decimal            @default(0) @db.Decimal(12, 2)
+  bonusPoints     Int?
+  maxRewardPoints Int?
+  minOrderAmount  Decimal?           @db.Decimal(12, 2)
+
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  seller          Sellers                      @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  store           Stores?                      @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  transactions    SellerCampaignTransactions[]
+
+  @@index([sellerId])
+  @@index([storeId])
+  @@index([status])
+}
+
+model SellerCampaignTransactions {
+  id            String   @id @default(cuid())
+  campaignId    String
+  sellerId      String
+  buyerId       String
+  orderId       String
+  pointsGranted Int
+  sellerCost    Decimal  @db.Decimal(12, 2)
+  referenceKey  String?  @unique
+  createdAt     DateTime @default(now())
+
+  campaign SellerCampaigns @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  seller   Sellers         @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  order    Orders          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([sellerId])
+  @@index([orderId])
+}
+
+// =========================================================================
+// 💼 FEATURE DOMAIN: AGENT RECRUITER COMMISSIONS & PAYOUTS
+// =========================================================================
+
+enum AGENTCOMMISSIONTYPE {
+  SALE_COMMISSION
+  RECRUITMENT_BONUS
+  COMMISSION_REVERSAL
+  ADJUSTMENT
+}
+
+enum COMMISSIONSTATUS {
+  PENDING
+  MATURED
+  CANCELLED
+  PAID
+}
+
+enum COMMISSIONBASE {
+  GMV
+  MARKETPLACE_FEE
+  NET_PLATFORM_REVENUE
+}
+
+model AgentCommissionAccount {
+  id               String                        @id @default(cuid())
+  agentId          String                        @unique
+  availableBalance Decimal                       @default(0) @db.Decimal(12, 2)
+  pendingBalance   Decimal                       @default(0) @db.Decimal(12, 2)
+  lifetimeEarned   Decimal                       @default(0) @db.Decimal(12, 2)
+  lifetimePaid     Decimal                       @default(0) @db.Decimal(12, 2)
+
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+
+  user             Users                         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  transactions     AgentCommissionTransactions[]
+  payouts          AgentPayouts[]
+
+  @@index([agentId])
+}
+
+model AgentCommissionTransactions {
+  id               String              @id @default(cuid())
+  accountId        String
+  agentId          String
+  sellerId         String
+  orderId          String
+  type             AGENTCOMMISSIONTYPE
+  status           COMMISSIONSTATUS    @default(PENDING)
+
+  commissionRate   Decimal             @db.Decimal(8, 5) // e.g. 0.00050 (0.05%)
+  commissionBase   COMMISSIONBASE      @default(GMV)
+  baseAmount       Decimal             @db.Decimal(12, 2)
+  commissionAmount Decimal             @db.Decimal(12, 2)
+  balanceAfter     Decimal             @db.Decimal(12, 2)
+
+  referenceKey     String?             @unique
+  description      String?
+  maturesAt        DateTime?
+  createdAt        DateTime            @default(now())
+
+  account          AgentCommissionAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  seller           Sellers                @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  order            Orders                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, createdAt])
+  @@index([agentId])
+  @@index([sellerId])
+  @@index([orderId])
+  @@index([status])
+}
+
+model AgentCommissionConfigurations {
+  id                  String         @id @default(cuid())
+  version             Int            @default(1)
+  isActive            Boolean        @default(true)
+
+  commissionRate      Decimal        @default(0.00050) @db.Decimal(8, 5) // 0.05%
+  commissionBase      COMMISSIONBASE @default(GMV)
+  eligibilityHoldDays Int            @default(7)                         // Matures after 7 days
+  payoutMinimum       Decimal        @default(500.00) @db.Decimal(12, 2) // Min ₱500 payout
+  isEnabled           Boolean        @default(true)
+
+  effectiveFrom       DateTime       @default(now())
+  effectiveTo         DateTime?
+  updatedById         String?
+  changeReason        String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@index([isActive])
+}
+
+model AgentPayouts {
+  id            String       @id @default(cuid())
+  agentId       String
+  accountId     String
+  amount        Decimal      @db.Decimal(12, 2)
+  status        PAYOUTSTATUS @default(PENDING)
+  paymentMethod String       @default("BANK_TRANSFER")
+  reference     String?
+  processedAt   DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  account       AgentCommissionAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  agent         Users                  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([status])
 }
 
 // =========================================================================
@@ -998,8 +1299,10 @@ model Orders {
   settlement     Settlements?
   returnRequests ReturnRequests[]
   reservations   InventoryReservations[]
-  charges        OrderCharges[]
-  userVouchers   UserVouchers[]
+  charges              OrderCharges[]
+  userVouchers         UserVouchers[]
+  campaignTransactions SellerCampaignTransactions[]
+  agentCommissionTransactions AgentCommissionTransactions[]
 
   @@index([buyerId])
   @@index([storeId])
@@ -1653,9 +1956,10 @@ model BuyerAddresses {
   addressLine1  String
   addressLine2  String?
   barangay      String?
-  city          String
-  province      String
-  zipCode       String
+  /// Optional: sign-up collects the address as one line in addressLine1.
+  city          String?
+  province      String?
+  zipCode       String?
   country       String
   isDefault     Boolean     @default(false)
   createdAt     DateTime    @default(now())
@@ -1956,6 +2260,9 @@ enum ANALYTICSEVENTTYPE {
 /// range on occurredAt is the documented next step before volume gets real.
 model AnalyticsEvents {
   id         String             @id @default(cuid())
+  /// The event-bus eventId it arrived with. Unique, so a redelivered message
+  /// writes nothing. Null for events written directly when the bus was down.
+  eventId    String?            @unique
   eventType  ANALYTICSEVENTTYPE
   /// Set when the request is authenticated; null for anonymous traffic.
   userId     String?
@@ -1981,6 +2288,25 @@ model AnalyticsEvents {
   @@index([sessionId, occurredAt])
   @@index([userId, occurredAt])
   @@index([occurredAt])
+}
+
+/// Pre-aggregated daily interaction counts for fast ranking, trending, and seller analytics.
+/// Populated by the daily rollup worker cron job.
+model AnalyticsDailyRollups {
+  id         String   @id @default(cuid())
+  date       DateTime @db.Date
+  targetType String   // "PRODUCT" | "STORE"
+  targetId   String
+  views      Int      @default(0)
+  clicks     Int      @default(0)
+  cartAdds   Int      @default(0)
+  orders     Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([date, targetType, targetId])
+  @@index([targetType, date, views(sort: Desc)])
+  @@index([targetId, date])
 }
 
 // ── Mobility ────────────────────────────────────────────────────────────────

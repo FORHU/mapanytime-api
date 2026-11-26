@@ -2,8 +2,9 @@
 
 Triage batch raised **2026-08-24**, worked **2026-08-25** and **2026-08-27**.
 Authentication pass raised and worked **2026-09-07** (F98–F106).
+Project evaluation raised and worked **2026-10-14** (F107–F113).
 Continues the numbering in [`FLAGS.md`](FLAGS.md), which ends at F38. Currently
-F39–F106.
+F39–F114.
 
 F84–F88 come from a sweep of the returns and refund path — the current branch's
 own module, and ground neither register had covered.
@@ -24,6 +25,251 @@ original id is given in parentheses.
 the batch was being agreed, which is the same one-copy-in-one-place state that
 lost `FIX-PLAN.md` (F55). Findings raised during a session and never written
 down do not survive it.
+
+## Decided 2026-10-14
+
+| Flag         | Decision                                                                                                                                                         |
+| :----------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **F109**     | **Refund it.** A payment that lands on an already-cancelled order is refunded automatically through the provider adapter. **Built** — #117                       |
+| **F86**      | **The platform absorbs the gateway fee on a refund**, recorded as a `PLATFORM`-payer charge row so it shows in the ledger instead of vanishing. **Built** — #118 |
+| **F65**      | **Superseded.** The gateway moves to **Stripe** (#124), so Xendit's rate card is not needed. The rule carries over: seed Stripe's rates before real money        |
+| **F98–F106** | **Superseded by Better Auth** (#122, merged in #123). JWT, refresh-token rotation and `activeSessionId` are gone; sessions are Better Auth's                     |
+| **F114**     | Being fixed as planned: legacy PBKDF2 hashes are re-hashed to scrypt on each user's next sign-in (#123)                                                          |
+
+The web app is also now the **only admin frontend** — the `mapanytime-market-admin`
+repository no longer exists (web #87); its pricing-engine screens are to be
+ported (web #89).
+
+## Raised 2026-10-14 — project evaluation
+
+| Flag     | Outcome                                                                                                       |
+| :------- | :------------------------------------------------------------------------------------------------------------ |
+| **F107** | **Fixed.** The socket gateway authenticates notification subscriptions; client-callable push and chat removed |
+| **F108** | **Fixed.** The stale-order sweeper no longer cancels cash-on-pickup orders                                    |
+| **F109** | **Fixed.** Sessions close at 12 minutes; a late payment is refunded automatically (#117)                      |
+| **F110** | **Fixed.** Scheduler: TEMP schedule reverted, log-only jobs removed                                           |
+| **F111** | **Fixed.** Emergency caps follow store health; APK limiter shares Redis                                       |
+| **F112** | **Fixed.** API README rewritten around MapAnytime                                                             |
+| **F113** | **Fixed in code, unconfirmed on a host.** The deployed worker never ran — read before deploying               |
+
+Suite after the fixes: **1001 tests / 85 suites passing**, `tsc`, ESLint and
+Prettier clean on the API, `tsc` clean on web, `flutter analyze` clean on the
+notifications feature.
+
+### ~~F107. The Socket.IO gateway authenticated nothing~~ — FIXED 2026-10-14
+
+`src/infrastructure/socket/index.ts` had no `io.use`, no handshake check and no
+token check anywhere. Three handlers trusted whatever the client sent:
+
+- `subscribe_notifications { userId }` joined `notifications:user:{userId}` for
+  any id named — so anyone could receive anyone's order, payment and store
+  notifications;
+- `send_notification { userId, … }` relayed a client-written
+  `notification:new` to any user — fake "payment confirmed" or "new paid order"
+  toasts, to anyone;
+- `join_chat_room` / `send_chat_message` let any client join any room and post
+  with any `senderId`.
+
+CORS was no defence: non-browser clients send no `Origin` and take the
+pass-through branch (the same shape that hid F94).
+
+**Fixed:** `subscribe_notifications` now takes `{ token }` and joins the channel
+of the user the token belongs to, checked under exactly `authenticate`'s rules
+by the new `resolveActiveUser` in `auth.middleware.ts` (which
+`optionalAuthenticate` now shares). A `userId` in the payload is ignored. A
+rejected subscribe emits `notifications:unauthorized` and leaves any channel
+already joined. `send_notification` and the chat events are removed — no client
+in any of the three front ends emitted them, and `emitChatMessage` had no
+caller. Viewport subscriptions stay anonymous: store and vehicle positions are
+public map data.
+
+Clients: both web call sites (`SellerLayout.tsx`, `useOrdersPipeline.ts`) and
+the Flutter `NotificationSocketDataSource` send the token, read at emit time so
+a reconnect after a refresh presents the current one.
+
+Pinned by `tests/unit/socket.notifications-auth.test.ts` (4 cases, real
+Socket.IO server and client).
+
+**Deploy consequence:** installed app builds still send `{ userId }`, so they
+stop receiving live notifications until updated. The HTTP notification feed is
+unaffected. Ship the API and web together, then publish a new APK.
+
+### ~~F108. The F44 sweeper cancelled cash-on-pickup orders~~ — FIXED 2026-10-14
+
+Every order is created `PENDING` with a `PENDING` payment
+(`order.service.ts`, `createOrder`), and a cash payment only becomes `COMPLETED`
+when the seller hands the goods over (`completeOrderInternal`). F44's
+`expireStalePendingOrders` excluded only orders with a `COMPLETED` or
+`REFUND_PENDING` payment — so every cash order the seller had not moved to
+`PROCESSING` within 15 minutes was cancelled and its stock released, including
+orders booked for a pickup the next day. Its test had no cash case.
+
+**Fixed:** the query also requires no payment with a `CASH` method. Pinned in
+`tests/unit/order.service.expire-pending.test.ts`.
+
+**Left open:** a cash order the seller never accepts now stays `PENDING`
+indefinitely. Its hold is still released by the reservation TTL sweeper at
+`pickupAt + 2h`, so no stock is trapped, but nothing closes the order itself.
+
+### F109. A payment after the sweeper's cancel is captured with no order — FIXED 2026-10-15 (#117)
+
+**Both halves built (#117):** Xendit checkout sessions now expire after 12
+minutes (`orders/order.ttl.ts`, under the sweeper's 15), and a payment that
+still lands on a closed order is refunded automatically through the provider
+once the webhook commits (`PaymentService.refundPaymentOnClosedOrder`), with
+`REFUND OWED` logged only if that refund fails. Building it found #139: Xendit
+refunds sent the session id, which the Refunds API does not take. PayMongo
+sessions still have no expiry set. The history below is kept for the record.
+
+The sweeper cancels an unpaid order after 15 minutes, but no checkout session is
+opened with an expiry (`xendit.provider.ts` sends none), so the hosted page stays
+payable for longer. A buyer who pays at minute 16:
+
+- the webhook marks the payment `COMPLETED` (the sweeper had set it `FAILED`,
+  which is not terminal);
+- `updateMany({ status: 'PENDING' → 'PROCESSING' })` matches nothing, so the
+  order stays `CANCELLED` and its stock is already back on sale;
+- the seller was still sent "New Paid Order … ready for preparation", and the
+  buyer "Payment Confirmed";
+- nothing refunds the buyer, and nothing recorded that one was owed.
+
+**Done:** the success branch now detects an order already `CANCELLED` or
+`FAILED` and logs `REFUND OWED` at error level with payment, order, amount and
+provider reference. Neither notification is sent for such an order. Pinned in
+`tests/unit/payment.service.test.ts`.
+
+**Still open — a decision:**
+
+1. **Refund automatically** through the adapter when this happens. Correct, but
+   it moves money from a webhook path and needs sandbox testing first.
+2. **Close the window at the source** — open gateway sessions with an expiry
+   below the sweeper's 15 minutes. Xendit's session expiry field needs
+   confirming against the sandbox; PayMongo needs its own answer.
+
+(2) prevents the case; (1) cleans up whatever still gets through. They are not
+alternatives for long.
+
+### F114. Passwords are PBKDF2 at 1,000 iterations — BEING FIXED IN #122
+
+Every password is hashed as PBKDF2-SHA512 with **1,000 iterations**, stored as
+`salt:hash` (`auth.service.ts` register and reset, `agent.service.ts`,
+`organization.service.ts`). OWASP's current figure for PBKDF2-SHA512 is about
+210,000. A leaked `Users` table is therefore cheap to brute-force. The
+`bcrypt`-based `utils/password.util.ts` exists but nothing in the auth path
+uses it.
+
+**Being fixed by the Better Auth migration (#122):** new hashes are Better
+Auth's scrypt, prefixed `$scrypt$` (the two formats are otherwise the same
+shape); legacy hashes still verify, and each is re-hashed to scrypt on its
+owner's next successful sign-in, so nobody is forced to reset. Accounts that
+never sign in again keep the weak hash — consider a forced reset for them
+once most active users have migrated.
+
+### 🔴 F113. The deployed worker never runs — FIXED IN CODE, NOT YET CONFIRMED ON A HOST
+
+The production image copies only `dist/` (`Dockerfile:24`). Every deploy path
+started the worker container with `npm run worker` — `infra/deploy-remote.sh`
+(staging and production, via SSM) and `deploy-dev.yml` (the shared dev host).
+That script is `nodemon --exec ts-node ./src/worker.ts`, and `src/` is not in
+the image.
+
+nodemon does not exit when its child crashes; it prints "app crashed — waiting
+for file changes" and waits. So the container shows **Up**, `--restart` never
+fires, and nothing in the worker has ever run in a deployed environment:
+
+- the **email consumer** — password-reset codes, welcome and order emails;
+- the **analytics consumer**;
+- every **scheduled job**: settlement release (so no settlement has reached
+  `RELEASED` and no payout could sweep one), MapPoints expiry, ad-window
+  notifications, the rejected-store purge, and F44's stale-order sweep.
+
+The reservation sweep is the exception: `server.ts` also starts it inside the
+API process (F91's fix), which is why stock holds did expire.
+
+`docker-compose.yml:141-145` records this exact crash and fixed it — for local
+compose only. The deploy scripts were never brought into line. Nothing caught
+it because no deploy step ever looked at the worker.
+
+**Confidence.** This is read from the image and the scripts, not observed on a
+host. Confirm before deploying the fix:
+
+```sh
+docker logs mapanytime-api-worker --tail 20   # expect "app crashed" / "Cannot find module"
+```
+
+**Fixed in code:**
+
+- `package.json` gains `start:worker` (`node ./dist/src/worker.js`), the same
+  command compose uses; both deploy paths run it.
+- `deploy-remote.sh` now waits for the worker's `/live`, which answers only
+  after RabbitMQ, Redis, the consumers and the scheduler are all up, and fails
+  the deploy with the worker's logs if it never does.
+- `deploy-dev.yml` gets the same check, run inside the container. Its worker
+  `docker run` also published `127.0.0.1:${WORKER_HOST_PORT}:${WORKER_PORT}`,
+  and that workflow defines neither, so Docker got `-p 127.0.0.1::` and refused
+  to start the worker there at all. The mapping is gone; nothing needs it.
+
+**⚠ Read before deploying — the first working worker runs everything at once:**
+
+1. **Queued email.** If `email.queue` is durable, every message published since
+   the first deploy is waiting in it — including password-reset codes long
+   expired. Inspect it, and probably purge it, _before_ the worker starts.
+2. **Settlement release.** Every settlement past its hold flips to `RELEASED`
+   on the first hourly run and becomes eligible for payout. That is the
+   intended behaviour, arriving all at once. Check the count first.
+3. **Stale-order sweep.** Every unpaid gateway order older than 15 minutes is
+   cancelled on the first run. Cash orders are excluded (F108).
+4. **Rejected-store purge** and **MapPoints expiry** catch up the same way.
+
+### ~~F110. Scheduler hygiene~~ — FIXED 2026-10-14
+
+- **The rejected-store purge ran every minute** under
+  `// TEMP: was '15 * * * *'`. Back to `'15 * * * *'`.
+- **Two jobs only logged.** The 2:00 AM "database cleanup" and the five-minute
+  "cache flush" contained nothing but `logger.info` lines, so the logs reported
+  work that never happened. Both removed. Redis keys already expire by TTL.
+  Pruning consumed `Session` rows (F103) is the real daily job still owed — add
+  it as its own job when it is built.
+- **The reservation sweep runs twice** — the worker's cron and
+  `InventoryReservationService.startSweeper()` in every API replica.
+  **Deliberately kept.** The original plan was to keep only the worker's copy,
+  but F113 shows the API's copy is the one that has actually been running.
+  The claim makes the duplicate idempotent; revisit once F113 is confirmed
+  fixed on a host.
+
+### ~~F111. Rate-limit failover gaps~~ — FIXED 2026-10-14
+
+- **Emergency caps followed the connection, not the store.** `authLimit`
+  checked `redisReady()` only. A connected Redis whose commands fail (script
+  load, OOM, ACL) still sends `FailoverStore` to memory, so the limiters stayed
+  on their normal limits while every instance counted alone. Stores now
+  register while failing and leave on the next successful command;
+  `redisHealthy()` is "ready and none failing", and the caps follow it. A
+  successful `decrement` now counts as recovery too.
+- **The APK download limiter had no shared store.** `createDownloadLimiter`
+  now uses `FailoverStore('apk-download')`.
+
+Pinned in `tests/unit/rate-limit-store.test.ts`: recovery, and the emergency
+cap under a connected-but-failing Redis. The fake `RedisStore` there now fails
+`decrement` as well as `increment` when told to, as a real failing Redis would.
+
+### ~~F112. The API README is the template's~~ — FIXED 2026-10-14
+
+Rewritten around MapAnytime: what the system is, the two processes and how to
+start each (`start:worker`, F113), local setup with the `DATABASE_URL` warning,
+the gateway-testing steps carried over from the old file, conventions, and a
+pointer to this register. The static badges are gone.
+
+The original entry, for the record:
+
+`mapanytime-api/README.md` still introduces "Node.js Enterprise Backend Template".
+It lists Socket.IO and AWS integrations as non-goals and RBAC as roadmap, though
+all three exist; its project tree lists three test files of 85; and its
+"Coverage 95%" and "Build Passing" badges are static images, not measurements.
+The first file a new developer reads describes a different system. Rewrite it
+around MapAnytime and point at `docs/specs/`.
+
+---
 
 ## ✅ Closed 2026-10-06 — Critical Reliability, Gateway Concurrency & Rate Limiting
 
@@ -960,8 +1206,14 @@ not treated as open. Open-ended is the one answer that cannot be right.
 
 ### F86. A refund hands back the gateway fee the gateway keeps
 
-**Not fixed — this is a decision, not a defect.** It needs a call the same way
-F39–F42 did.
+**Decided 2026-10-14 and built (#118):** the platform absorbs the fee. Every
+gateway refund (returns and paid-order cancellations) now writes a `REFUND` row,
+`PLATFORM` → `PAYMENT_PROVIDER`, for the gateway fee in proportion to the amount
+refunded (`src/modules/payments/refund-ledger.ts`). The analysis below is kept
+for the record.
+
+~~**Not fixed — this is a decision, not a defect.** It needs a call the same way
+F39–F42 did.~~
 
 `refundAmount` is `Number(order.totalAmount)`, and `totalAmount` is
 `pricingResult.buyerTotalAmount` — which, under the `BUYER` fee policy that is

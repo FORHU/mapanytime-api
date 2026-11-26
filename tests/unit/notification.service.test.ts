@@ -46,6 +46,28 @@ describe('NotificationService', () => {
     });
   });
 
+  it('supports pagination with page and limit, clamping limit between 1 and 100', async () => {
+    await NotificationService.getUserNotifications(USER_ID, { page: 2, limit: 20 });
+
+    let call = mockPrisma.notifications.findMany.mock.calls[0][0];
+    expect(call.skip).toBe(20);
+    expect(call.take).toBe(20);
+
+    // Limit capped at 100 max
+    mockPrisma.notifications.findMany.mockClear();
+    await NotificationService.getUserNotifications(USER_ID, { page: 1, limit: 500 });
+    call = mockPrisma.notifications.findMany.mock.calls[0][0];
+    expect(call.skip).toBe(0);
+    expect(call.take).toBe(100);
+
+    // Limit capped at 1 min
+    mockPrisma.notifications.findMany.mockClear();
+    await NotificationService.getUserNotifications(USER_ID, { page: 3, limit: -5 });
+    call = mockPrisma.notifications.findMany.mock.calls[0][0];
+    expect(call.skip).toBe(2);
+    expect(call.take).toBe(1);
+  });
+
   it('counts only unread for the badge', async () => {
     mockPrisma.notifications.count.mockResolvedValue(3);
 

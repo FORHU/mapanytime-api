@@ -26,6 +26,20 @@ const PAYMONGO_RATES = [
 ];
 
 /**
+ * Standard Stripe domestic rate card for the Philippines: 3.50% + P15.00 per successful card charge.
+ * Seeding these closes Issue #124 and F65 so Stripe card checkouts are priced accurately.
+ */
+const STRIPE_RATES = [
+  {
+    code: 'CARD',
+    rate: 0.035,
+    fixed: 15.0,
+    label: 'Stripe Visa/Mastercard 3.50% + P15.00',
+    minOrderAmount: 100,
+  },
+];
+
+/**
  * Methods with no contracted rate on file. Left active so the checkout flow is
  * unchanged, but they price off the engine's fallback constant until a rate is
  * supplied — which will understate the real cost if it is above 2.00%.
@@ -108,6 +122,41 @@ export async function seedPricingConfiguration(prisma: PrismaClient) {
     }
 
     console.log(`  ${r.label}`);
+  }
+
+  // Stripe Rates (Issue #124 / #128): Cards route through Stripe with 3.50% + P15 rate card
+  const stripe = await prisma.paymentProviders.findUnique({ where: { code: 'STRIPE' } });
+  if (stripe) {
+    for (const r of STRIPE_RATES) {
+      const method = await prisma.paymentMethods.findUnique({
+        where: { providerId_code: { providerId: stripe.id, code: r.code } },
+      });
+      if (!method) {
+        console.warn(`  Stripe payment method ${r.code} not found — skipping its rate.`);
+        continue;
+      }
+
+      await upsertComponent(prisma, config.id, {
+        type: PRICINGCOMPONENTTYPE.PAYMENT_PROCESSING_FEE,
+        calculationType: r.fixed
+          ? PRICINGCALCULATIONTYPE.PERCENTAGE_AND_FIXED
+          : PRICINGCALCULATIONTYPE.PERCENTAGE,
+        ratePercentage: r.rate,
+        fixedAmount: r.fixed || null,
+        providerId: stripe.id,
+        paymentMethodId: method.id,
+        priority: 100,
+      });
+
+      if (r.minOrderAmount !== undefined) {
+        await prisma.paymentMethods.update({
+          where: { id: method.id },
+          data: { minOrderAmount: r.minOrderAmount },
+        });
+      }
+
+      console.log(`  ${r.label}`);
+    }
   }
 
   for (const code of RATES_UNKNOWN) {

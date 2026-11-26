@@ -9,6 +9,7 @@ import {
 } from './payment-provider.interface';
 import { strictCheckoutReturnUrlBase } from '../../../config';
 import { buildReturnUrl } from '../payment-return';
+import { CHECKOUT_SESSION_TTL_MINUTES } from '../../orders/order.ttl';
 
 /**
  * Our `PaymentMethods.code` to Xendit's Payment Sessions `allowed_payment_channels`
@@ -32,6 +33,7 @@ interface XenditWebhookPayload {
   event?: string;
   data?: {
     payment_session_id?: string;
+    payment_request_id?: string | null;
     reference_id?: string;
     status?: string;
   };
@@ -96,6 +98,10 @@ export class XenditProvider implements PaymentProvider {
       cancel_return_url:
         input.cancelUrl || buildReturnUrl(returnUrlBase, input.orderId, 'cancelled'),
       ...(allowedChannels ? { allowed_payment_channels: allowedChannels } : {}),
+      // Close the session before the sweeper cancels the order, so a buyer
+      // cannot pay for an order that no longer exists (F109). Xendit's default
+      // is 30 minutes.
+      expires_at: new Date(Date.now() + CHECKOUT_SESSION_TTL_MINUTES * 60_000).toISOString(),
     };
 
     let response;
@@ -163,7 +169,9 @@ export class XenditProvider implements PaymentProvider {
       orderId,
       isSuccess,
       isFailure,
-      providerReference: p?.data?.payment_session_id || null,
+      // The payment request, not the session: it is what Xendit's Refunds API
+      // takes (#139). The session id is kept separately as checkoutSessionId.
+      providerReference: p?.data?.payment_request_id || p?.data?.payment_session_id || null,
       failureReason: isFailure ? `Xendit payment session ${status || eventType}` : null,
     };
   }
@@ -174,14 +182,21 @@ export class XenditProvider implements PaymentProvider {
     reason?: string,
   ): Promise<RefundResult> {
     const payload: Record<string, unknown> = {
-      reason: reason || 'REQUESTED_BY_CUSTOMER',
+      // Xendit's reasons are upper case; callers pass PayMongo-style lower case.
+      reason: (reason || 'REQUESTED_BY_CUSTOMER').toUpperCase(),
       currency: 'PHP',
     };
 
-    if (paymentReference.startsWith('pr-')) {
-      payload.payment_request_id = paymentReference;
+    // Payments stored before #139 hold the session id (ps-...), which the
+    // Refunds API does not accept. Look up the payment request it produced.
+    const reference = paymentReference.startsWith('ps-')
+      ? await this.paymentRequestForSession(paymentReference)
+      : paymentReference;
+
+    if (reference.startsWith('pr-')) {
+      payload.payment_request_id = reference;
     } else {
-      payload.payment_id = paymentReference;
+      payload.payment_id = reference;
     }
 
     if (amountInCentavos) {
@@ -202,5 +217,17 @@ export class XenditProvider implements PaymentProvider {
       status: refundData?.status || 'succeeded',
       rawResponse: refundData,
     };
+  }
+
+  /** The payment request a completed session produced, for refunding it (#139). */
+  private async paymentRequestForSession(sessionId: string): Promise<string> {
+    const response = await axios.get(`${this.apiUrl}/sessions/${sessionId}`, {
+      headers: { Authorization: this.authHeader },
+    });
+    const id = response.data?.payment_request_id || response.data?.latest_payment_request_id;
+    if (!id) {
+      throw new Error(`Xendit session ${sessionId} has no payment request to refund.`);
+    }
+    return id;
   }
 }

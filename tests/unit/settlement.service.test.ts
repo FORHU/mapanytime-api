@@ -16,6 +16,10 @@ jest.mock('../../src/utils/prisma', () => ({
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+    sellers: {
+      findMany: jest.fn(),
+      count: jest.fn(),
+    },
   },
 }));
 
@@ -25,6 +29,10 @@ const mockPrisma = prisma as unknown as {
     updateMany: jest.Mock;
     findUnique: jest.Mock;
     update: jest.Mock;
+  };
+  sellers: {
+    findMany: jest.Mock;
+    count: jest.Mock;
   };
 };
 
@@ -264,5 +272,136 @@ describe('SettlementService.updateSettlementStatus', () => {
     await SettlementService.updateSettlementStatus('s1', 'RELEASED');
 
     expect(mockPrisma.settlements.update.mock.calls[0][0].data.settledAt).toBeInstanceOf(Date);
+  });
+});
+
+describe('SettlementService.getAdminSummary', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('aggregates platform-wide sales, fees, holds, and paid out amounts', async () => {
+    mockPrisma.settlements.findMany.mockResolvedValue([
+      {
+        id: 's1',
+        subtotalAmount: 1000,
+        commissionAmount: 50,
+        paymentFeeAmount: 20,
+        sellerNetAmount: 930,
+        status: 'PENDING',
+        payoutItem: null,
+      },
+      {
+        id: 's2',
+        subtotalAmount: 500,
+        commissionAmount: 25,
+        paymentFeeAmount: 10,
+        sellerNetAmount: 465,
+        status: 'RELEASED',
+        payoutItem: null,
+      },
+      {
+        id: 's3',
+        subtotalAmount: 2000,
+        commissionAmount: 100,
+        paymentFeeAmount: 40,
+        sellerNetAmount: 1860,
+        status: 'RELEASED',
+        payoutItem: { id: 'p-1' },
+      },
+      {
+        id: 's4',
+        subtotalAmount: 300,
+        commissionAmount: 15,
+        paymentFeeAmount: 0,
+        sellerNetAmount: -15, // Cash commission debit
+        status: 'PENDING',
+        payoutItem: null,
+      },
+    ]);
+
+    const summary = await SettlementService.getAdminSummary();
+
+    expect(summary.totalSettlements).toBe(4);
+    expect(summary.totalSales).toBe(3800);
+    expect(summary.totalCommission).toBe(190);
+    expect(summary.totalPaymentFee).toBe(70);
+    expect(summary.pendingAmount).toBe(915); // 930 + (-15)
+    expect(summary.availableAmount).toBe(465);
+    expect(summary.paidOutAmount).toBe(1860);
+    expect(summary.cashCommissionOwed).toBe(15);
+    expect(summary.holdDays).toBe(SETTLEMENT_HOLD_DAYS);
+  });
+
+  it('filters settlements by date range when provided', async () => {
+    mockPrisma.settlements.findMany.mockResolvedValue([]);
+    const startDate = new Date('2026-11-01');
+    const endDate = new Date('2026-11-10');
+
+    await SettlementService.getAdminSummary({ startDate, endDate });
+
+    expect(mockPrisma.settlements.findMany).toHaveBeenCalledWith({
+      where: {
+        createdAt: { gte: startDate, lte: endDate },
+      },
+      include: { payoutItem: { select: { id: true } } },
+    });
+  });
+});
+
+describe('SettlementService.getAdminSellerSummaries', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('returns paginated seller settlement balances with store details', async () => {
+    const futureDate = new Date(Date.now() + 86400000 * 3);
+    mockPrisma.sellers.count.mockResolvedValue(1);
+    mockPrisma.sellers.findMany.mockResolvedValue([
+      {
+        id: 'seller-1',
+        organizationName: 'Acme Manila',
+        stores: [{ id: 'store-1', storeName: 'Acme Flagship' }],
+        users: {
+          id: 'u-1',
+          email: 'merchant@acme.ph',
+          firstName: 'Juan',
+          lastName: 'Dela Cruz',
+        },
+        settlements: [
+          {
+            id: 's-1',
+            subtotalAmount: 1000,
+            commissionAmount: 50,
+            sellerNetAmount: 950,
+            status: 'PENDING',
+            releaseEligibleAt: futureDate,
+            payoutItem: null,
+          },
+          {
+            id: 's-2',
+            subtotalAmount: 500,
+            commissionAmount: 25,
+            sellerNetAmount: 475,
+            status: 'RELEASED',
+            releaseEligibleAt: new Date(Date.now() - 86400000),
+            payoutItem: null,
+          },
+        ],
+      },
+    ]);
+
+    const result = await SettlementService.getAdminSellerSummaries({ page: 1, limit: 10 });
+
+    expect(result.total).toBe(1);
+    expect(result.page).toBe(1);
+    expect(result.totalPages).toBe(1);
+    expect(result.sellers).toHaveLength(1);
+
+    const s = result.sellers[0];
+    expect(s.sellerId).toBe('seller-1');
+    expect(s.storeName).toBe('Acme Flagship');
+    expect(s.user.email).toBe('merchant@acme.ph');
+    expect(s.totalSales).toBe(1500);
+    expect(s.totalCommission).toBe(75);
+    expect(s.pendingAmount).toBe(950);
+    expect(s.availableAmount).toBe(475);
+    expect(s.nextReleaseEligibleAt).toEqual(futureDate);
   });
 });

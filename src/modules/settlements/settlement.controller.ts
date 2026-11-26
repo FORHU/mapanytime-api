@@ -79,4 +79,38 @@ export default class SettlementController {
       next(error);
     }
   }
+
+  /** Overall platform settlement financial overview for admins. */
+  static async getAdminSummary(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { startDate, endDate } = req.query;
+      const summary = await SettlementService.getAdminSummary({
+        startDate: startDate ? new Date(String(startDate)) : undefined,
+        endDate: endDate ? new Date(String(endDate)) : undefined,
+      });
+      return responseSuccess(res, 200, summary, 'Admin settlement summary fetched successfully.');
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /** Paginated per-seller settlement breakdown for admins. */
+  static async getAdminSellerSummaries(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { page, limit, search } = req.query;
+      const result = await SettlementService.getAdminSellerSummaries({
+        page: page ? Number(page) : undefined,
+        limit: limit ? Number(limit) : undefined,
+        search: search ? String(search) : undefined,
+      });
+      return responseSuccess(
+        res,
+        200,
+        result,
+        'Admin seller settlement summaries fetched successfully.',
+      );
+    } catch (error) {
+      next(error);
+    }
+  }
 }

@@ -14,7 +14,7 @@ jest.setTimeout(20000);
  * Integration tests for the health endpoints.
  *
  * NOTE: These tests mock infrastructure connections so they run without
- * a live database, Redis, or RabbitMQ instance in CI.
+ * a live database, Redis, or event bus in CI.
  */
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
@@ -32,13 +32,13 @@ jest.mock('../../src/infrastructure/redis', () => ({
   },
 }));
 
-jest.mock('../../src/infrastructure/rabbitmq', () => ({
-  rabbitmq: {
-    connect: jest.fn().mockResolvedValue(undefined),
-    close: jest.fn().mockResolvedValue(undefined),
-    isReady: jest.fn().mockReturnValue(true),
+jest.mock('../../src/infrastructure/event-bus', () => ({
+  eventBus: {
+    ping: jest.fn().mockResolvedValue(true),
     publish: jest.fn().mockResolvedValue(true),
-    consume: jest.fn().mockResolvedValue(undefined),
+    publishMany: jest.fn().mockResolvedValue([]),
+    consume: jest.fn(),
+    consumeBatch: jest.fn(),
   },
 }));
 
@@ -60,7 +60,7 @@ describe('Health Endpoints', () => {
       expect(res.body.status).toBe('ready');
       expect(res.body.services.database).toBe('up');
       expect(res.body.services.redis).toBe('up');
-      expect(res.body.services.rabbitmq).toBe('up');
+      expect(res.body.services.eventBus).toBe('up');
     });
   });
 

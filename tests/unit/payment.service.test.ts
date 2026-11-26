@@ -1,12 +1,20 @@
 import PaymentService from '../../src/modules/payments/payment.service';
 import { prisma } from '../../src/utils/prisma';
 import { emitNotificationToUser } from '../../src/infrastructure/socket';
+import logger from '../../src/utils/logger';
+import { MockProvider } from '../../src/modules/payments/providers/mock.provider';
 
 jest.mock('../../src/utils/prisma', () => ({
   prisma: {
     $transaction: jest.fn(),
     orders: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
-    payments: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
+    payments: {
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    },
     paymentProviders: { findMany: jest.fn(), findUnique: jest.fn() },
     paymentMethods: { findMany: jest.fn(), findUnique: jest.fn(), findFirst: jest.fn() },
     paymentWebhookEvents: { findUnique: jest.fn(), upsert: jest.fn() },
@@ -30,10 +38,16 @@ const ORDER_ID = 'order-1';
 
 const makeTx = () => ({
   payments: { findFirst: jest.fn(), update: jest.fn(), create: jest.fn() },
-  orders: { updateMany: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+  orders: {
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    findUnique: jest.fn(),
+    update: jest.fn(),
+  },
   inventory: { updateMany: jest.fn(), update: jest.fn() },
   inventoryReservations: { updateMany: jest.fn() },
   paymentWebhookEvents: { upsert: jest.fn() },
+  // No gateway fee recorded, so a refund writes no fee row unless a test sets one.
+  orderCharges: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn() },
   // Ending a hold is an UPDATE ... RETURNING of the rows still RESERVED.
   // Default: nothing left to claim.
   $queryRaw: jest.fn().mockResolvedValue([]),
@@ -71,10 +85,50 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
       ],
     };
 
-    const previousKey = process.env.PAYMONGO_SECRET_KEY;
+    const stripeRow = {
+      id: 'prov-stripe',
+      code: 'STRIPE',
+      name: 'Stripe',
+      description: 'Cards',
+      methods: [
+        {
+          id: 'meth-stripe-card',
+          code: 'CARD',
+          name: 'Credit / Debit Card (Stripe)',
+          type: 'CARD',
+          description: null,
+        },
+      ],
+    };
+
+    const xenditRow = {
+      id: 'prov-xendit',
+      code: 'XENDIT',
+      name: 'Xendit',
+      description: 'E-Wallets',
+      methods: [
+        {
+          id: 'meth-xendit-gcash',
+          code: 'GCASH',
+          name: 'GCash (Xendit)',
+          type: 'E_WALLET',
+          description: null,
+        },
+      ],
+    };
+
+    const prevPaymongo = process.env.PAYMONGO_SECRET_KEY;
+    const prevStripe = process.env.STRIPE_SECRET_KEY;
+    const prevXendit = process.env.XENDIT_SECRET_KEY;
     afterEach(() => {
-      if (previousKey === undefined) delete process.env.PAYMONGO_SECRET_KEY;
-      else process.env.PAYMONGO_SECRET_KEY = previousKey;
+      if (prevPaymongo === undefined) delete process.env.PAYMONGO_SECRET_KEY;
+      else process.env.PAYMONGO_SECRET_KEY = prevPaymongo;
+
+      if (prevStripe === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = prevStripe;
+
+      if (prevXendit === undefined) delete process.env.XENDIT_SECRET_KEY;
+      else process.env.XENDIT_SECRET_KEY = prevXendit;
     });
 
     it('returns active providers and their active methods', async () => {
@@ -86,6 +140,22 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
       expect(result[0].code).toBe('PAYMONGO');
       expect(result[0].methods).toHaveLength(1);
       expect(result[0].methods[0].code).toBe('GCASH');
+    });
+
+    it('supports multiple payment providers side by side (Stripe + Xendit) (Issue #128)', async () => {
+      process.env.STRIPE_SECRET_KEY = 'sk_test_stripe';
+      process.env.XENDIT_SECRET_KEY = 'xnd_test_xendit';
+      (prisma.paymentProviders.findMany as jest.Mock).mockResolvedValue([
+        stripeRow,
+        xenditRow,
+        cashRow,
+      ]);
+
+      const result = await PaymentService.getActivePaymentMethods();
+      expect(result.map((p) => p.code)).toEqual(['STRIPE', 'XENDIT', 'CASH']);
+      expect(result[0].methods[0].code).toBe('CARD');
+      expect(result[1].methods[0].code).toBe('GCASH');
+      expect(result[2].methods[0].code).toBe('COD');
     });
 
     /**
@@ -215,6 +285,125 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
       // the same claim that takes the stock down (F43).
       expect(tx.inventoryReservations.updateMany).not.toHaveBeenCalled();
       expect(mockEmit).toHaveBeenCalledTimes(2);
+    });
+
+    /**
+     * F109 (#117). The stale-order sweeper cancels an unpaid order after 15 minutes. A
+     * payment that still lands afterwards is recorded (the money did move), refunded
+     * automatically through the provider, and must not tell the seller to prepare a
+     * cancelled order.
+     */
+    describe('a payment that lands on an already-cancelled order', () => {
+      const latePayment = {
+        id: 'pay-late',
+        orderId: ORDER_ID,
+        status: 'FAILED',
+        amount: 500,
+        providerReference: 'pay_ref_late',
+      };
+      const payload = {
+        data: {
+          id: 'evt-late',
+          type: 'payment.paid',
+          attributes: {
+            data: { id: 'pay_ref_late', attributes: { reference_number: ORDER_ID } },
+          },
+        },
+      };
+      let refundPayment: jest.SpyInstance;
+
+      beforeEach(() => {
+        tx.payments.findFirst.mockResolvedValue(latePayment);
+        tx.payments.update.mockResolvedValue({ ...latePayment, status: 'COMPLETED' });
+        tx.orders.updateMany.mockResolvedValue({ count: 0 });
+        tx.orders.findUnique.mockResolvedValue({ status: 'CANCELLED' });
+        mockOrdersFindUnique.mockResolvedValue({
+          id: ORDER_ID,
+          status: 'CANCELLED',
+          buyer: { userId: 'buyer-user' },
+          store: { storeName: 'Flagship Store', seller: { userId: 'seller-user' } },
+        });
+        (prisma.payments.findUnique as jest.Mock).mockResolvedValue({
+          ...latePayment,
+          status: 'COMPLETED',
+        });
+        (prisma.payments.updateMany as jest.Mock).mockResolvedValue({ count: 1 });
+        refundPayment = jest
+          .spyOn(MockProvider.prototype, 'refundPayment')
+          .mockResolvedValue({ refundId: 'ref_late', amount: 50000, status: 'succeeded' } as never);
+      });
+
+      afterEach(() => refundPayment.mockRestore());
+
+      const deliver = () =>
+        PaymentService.processProviderWebhook('MOCK', JSON.stringify(payload), 'sig', payload);
+
+      it('records the payment, refunds it, and tells only the buyer', async () => {
+        const result = await deliver();
+
+        expect(result.status).toBe('processed');
+        expect(tx.payments.update).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ status: 'COMPLETED' }) }),
+        );
+        expect(prisma.payments.updateMany).toHaveBeenCalledWith({
+          where: { id: 'pay-late', status: 'COMPLETED' },
+          data: { status: 'REFUND_PENDING' },
+        });
+        expect(refundPayment).toHaveBeenCalledWith('pay_ref_late', 50000, 'requested_by_customer');
+        expect(tx.payments.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: 'REFUNDED', refundReference: 'ref_late' }),
+          }),
+        );
+        // No "Payment Confirmed" or "New Paid Order"; one refund notice to the buyer.
+        expect(mockEmit).toHaveBeenCalledTimes(1);
+        expect(mockEmit).toHaveBeenCalledWith(
+          'buyer-user',
+          expect.objectContaining({ title: 'Payment refunded' }),
+        );
+      });
+
+      it('records the gateway fee the platform absorbs on the refund', async () => {
+        tx.orderCharges.findMany.mockImplementation(({ where }: { where: { type: string } }) =>
+          Promise.resolve(where.type === 'PAYMENT_PROCESSING_FEE' ? [{ amount: 11.15 }] : []),
+        );
+
+        await deliver();
+
+        expect(tx.orderCharges.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ type: 'REFUND', payer: 'PLATFORM' }),
+          }),
+        );
+      });
+
+      it('falls back to REFUND OWED, without failing the webhook, when the refund fails', async () => {
+        refundPayment.mockRejectedValue(new Error('gateway down'));
+        const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+
+        try {
+          await expect(deliver()).resolves.toMatchObject({ status: 'processed' });
+          expect(prisma.payments.update).toHaveBeenCalledWith({
+            where: { id: 'pay-late' },
+            data: { status: 'COMPLETED' },
+          });
+          expect(errorSpy).toHaveBeenCalledWith(
+            expect.stringContaining('REFUND OWED'),
+            expect.objectContaining({ orderId: ORDER_ID, paymentId: 'pay-late' }),
+          );
+          expect(mockEmit).not.toHaveBeenCalled();
+        } finally {
+          errorSpy.mockRestore();
+        }
+      });
+
+      it('does not refund twice when another caller already claimed the payment', async () => {
+        (prisma.payments.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+        await deliver();
+
+        expect(refundPayment).not.toHaveBeenCalled();
+      });
     });
 
     it('handles payment failure by releasing inventory reservations', async () => {
@@ -379,6 +568,140 @@ describe('PaymentService — Dynamic Payment Architecture', () => {
       await expect(
         PaymentService.resolvePaymentMethod(client, { paymentMethodId: 'meth-off' }),
       ).rejects.toMatchObject({ status: 400 });
+    });
+  });
+
+  describe('Dynamic Multi-Gateway Payments & Failover (P3-5)', () => {
+    const prevPaymongo = process.env.PAYMONGO_SECRET_KEY;
+    const prevXendit = process.env.XENDIT_SECRET_KEY;
+    const prevStripe = process.env.STRIPE_SECRET_KEY;
+
+    beforeEach(() => {
+      process.env.PAYMONGO_SECRET_KEY = 'pk_test_paymongo';
+      process.env.XENDIT_SECRET_KEY = 'xnd_test_xendit';
+      process.env.STRIPE_SECRET_KEY = 'sk_test_stripe';
+      PaymentService.clearGatewayDegraded();
+    });
+
+    afterAll(() => {
+      PaymentService.clearGatewayDegraded();
+      process.env.PAYMONGO_SECRET_KEY = prevPaymongo;
+      process.env.XENDIT_SECRET_KEY = prevXendit;
+      process.env.STRIPE_SECRET_KEY = prevStripe;
+    });
+
+    it('tracks gateway degradation and health state', () => {
+      expect(PaymentService.isGatewayHealthy('PAYMONGO')).toBe(true);
+      expect(PaymentService.isGatewayHealthy('XENDIT')).toBe(true);
+
+      PaymentService.markGatewayDegraded('PAYMONGO', 10_000);
+      expect(PaymentService.isGatewayHealthy('PAYMONGO')).toBe(false);
+      expect(PaymentService.isGatewayHealthy('XENDIT')).toBe(true);
+
+      PaymentService.clearGatewayDegraded('PAYMONGO');
+      expect(PaymentService.isGatewayHealthy('PAYMONGO')).toBe(true);
+    });
+
+    it('resolves correct fallback provider code based on payment channel', () => {
+      expect(PaymentService.getFallbackProviderCode('PAYMONGO', 'GCASH')).toBe('XENDIT');
+      expect(PaymentService.getFallbackProviderCode('XENDIT', 'GCASH')).toBe('PAYMONGO');
+      expect(PaymentService.getFallbackProviderCode('PAYMONGO', 'MAYA')).toBe('XENDIT');
+      expect(PaymentService.getFallbackProviderCode('PAYMONGO', 'CARD')).toBe('STRIPE');
+      expect(PaymentService.getFallbackProviderCode('STRIPE', 'CARD')).toBe('PAYMONGO');
+    });
+
+    it('routes to fallback adapter via getProviderAdapter when primary is degraded', () => {
+      PaymentService.markGatewayDegraded('PAYMONGO', 60_000);
+
+      const adapter = PaymentService.getProviderAdapter('PAYMONGO', {
+        allowFailover: true,
+        paymentMethodCode: 'GCASH',
+      });
+      // Should resolve XenditProvider instead of PayMongoProvider
+      expect(adapter.constructor.name).toBe('XenditProvider');
+    });
+
+    it('executes createCheckoutSessionWithFailover without failover when primary succeeds', async () => {
+      const mockPrimary = {
+        createCheckoutSession: jest.fn().mockResolvedValue({
+          checkoutSessionId: 'sess-primary-1',
+          checkoutUrl: 'https://paymongo.test/checkout',
+        }),
+      };
+      jest.spyOn(PaymentService, 'getProviderAdapter').mockReturnValue(mockPrimary as never);
+
+      const result = await PaymentService.createCheckoutSessionWithFailover('PAYMONGO', {
+        orderId: 'ord-1',
+        amountInCentavos: 50000,
+        currency: 'PHP',
+        description: 'Test Order',
+        lineItems: [],
+        paymentMethodCode: 'GCASH',
+      });
+
+      expect(result.failoverOccurred).toBe(false);
+      expect(result.usedProviderCode).toBe('PAYMONGO');
+      expect(result.checkoutResult.checkoutSessionId).toBe('sess-primary-1');
+      expect(mockPrimary.createCheckoutSession).toHaveBeenCalled();
+    });
+
+    it('dynamically switches to fallback when primary gateway throws 502/network failure', async () => {
+      const mockPrimary = {
+        createCheckoutSession: jest
+          .fn()
+          .mockRejectedValue(new Error('PayMongo upstream gateway timed out')),
+      };
+      const mockFallback = {
+        createCheckoutSession: jest.fn().mockResolvedValue({
+          checkoutSessionId: 'sess-xendit-fallback',
+          checkoutUrl: 'https://checkout.xendit.co/v2/invoice_123',
+        }),
+      };
+
+      jest.spyOn(PaymentService, 'getProviderAdapter').mockImplementation((code: string) => {
+        if (code.toUpperCase() === 'PAYMONGO') return mockPrimary as never;
+        return mockFallback as never;
+      });
+
+      const result = await PaymentService.createCheckoutSessionWithFailover('PAYMONGO', {
+        orderId: 'ord-failover-1',
+        amountInCentavos: 100000,
+        currency: 'PHP',
+        description: 'Test Failover Order',
+        lineItems: [],
+        paymentMethodCode: 'GCASH',
+      });
+
+      expect(result.failoverOccurred).toBe(true);
+      expect(result.usedProviderCode).toBe('XENDIT');
+      expect(result.checkoutResult.checkoutSessionId).toBe('sess-xendit-fallback');
+      expect(PaymentService.isGatewayHealthy('PAYMONGO')).toBe(false);
+      expect(mockFallback.createCheckoutSession).toHaveBeenCalled();
+    });
+
+    it('rethrows error if both primary and fallback gateway fail', async () => {
+      const mockPrimary = {
+        createCheckoutSession: jest.fn().mockRejectedValue(new Error('PayMongo down')),
+      };
+      const mockFallback = {
+        createCheckoutSession: jest.fn().mockRejectedValue(new Error('Xendit down')),
+      };
+
+      jest.spyOn(PaymentService, 'getProviderAdapter').mockImplementation((code: string) => {
+        if (code.toUpperCase() === 'PAYMONGO') return mockPrimary as never;
+        return mockFallback as never;
+      });
+
+      await expect(
+        PaymentService.createCheckoutSessionWithFailover('PAYMONGO', {
+          orderId: 'ord-both-fail',
+          amountInCentavos: 100000,
+          currency: 'PHP',
+          description: 'Test Fail Order',
+          lineItems: [],
+          paymentMethodCode: 'GCASH',
+        }),
+      ).rejects.toThrow('Xendit down');
     });
   });
 });

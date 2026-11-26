@@ -9,7 +9,7 @@ Architecture decisions, patterns, and standards for contributors and senior engi
 This template is built on three principles:
 
 1. **Separation of concerns is non-negotiable.** HTTP, business logic, and data access must never bleed into each other.
-2. **Async operations belong to the worker.** If it takes more than 200ms or the user doesn't need to wait for it, it goes to RabbitMQ.
+2. **Async operations belong to the worker.** If it takes more than 200ms or the user doesn't need to wait for it, it goes on the event bus.
 3. **Observability is structural, not optional.** Correlation IDs, structured logs, and health checks are built into the foundation — not added later.
 
 ---
@@ -39,7 +39,7 @@ This template is built on three principles:
 
         ┌──────────────────────────────┐
         │         Event Bus            │
-        │  RabbitMQ app.events (topic) │
+        │  SNS topic → SQS per consumer│
         └──────┬───────────────────────┘
                │ consumed by
         ┌──────▼───────────────────────┐
@@ -52,12 +52,12 @@ This template is built on three principles:
 
 ## Strict Layer Contracts
 
-| Layer      | Can call                                | Cannot call                                  |
-| ---------- | --------------------------------------- | -------------------------------------------- |
-| Controller | Service                                 | Repository, Prisma, Redis, RabbitMQ directly |
-| Service    | Repository, CacheUtil, rabbitmq.publish | Prisma directly                              |
-| Repository | Prisma                                  | Service, RabbitMQ, Redis                     |
-| Consumer   | Service, Repository                     | Controller                                   |
+| Layer      | Can call                                | Cannot call                                   |
+| ---------- | --------------------------------------- | --------------------------------------------- |
+| Controller | Service                                 | Repository, Prisma, Redis, event bus directly |
+| Service    | Repository, CacheUtil, eventBus.publish | Prisma directly                               |
+| Repository | Prisma                                  | Service, event bus, Redis                     |
+| Consumer   | Service, Repository                     | Controller                                    |
 
 Violating this contract creates hidden coupling that becomes unmaintainable at scale.
 
@@ -69,12 +69,12 @@ All external connections are managed as **singletons** in `src/infrastructure/`:
 
 ```
 src/infrastructure/
-├── rabbitmq/
-│   ├── connection.ts   ← RabbitMQConnection class + rabbitConnection instance
-│   ├── publisher.ts    ← publish() — injects event metadata
-│   ├── consumer.ts     ← consume() — resumes correlation context
-│   ├── exchanges.ts    ← exchange definitions
-│   └── index.ts        ← public API: rabbitmq.connect(), .publish(), .consume()
+├── event-bus/
+│   ├── clients.ts         ← SNS + SQS clients (LocalStack endpoint locally)
+│   ├── publisher.ts       ← publish() — injects event metadata, SNS Publish
+│   ├── consumer.ts        ← consume() — long poll, heartbeat, resumes correlation context
+│   ├── batch-consumer.ts  ← consumeBatch() — buffered, for analytics ingestion
+│   └── index.ts           ← public API: eventBus.publish(), .publishMany(), .consume(), .consumeBatch(), .ping()
 ├── redis/
 │   ├── connection.ts   ← RedisConnection class + redisConnection instance
 │   └── index.ts        ← public API: redis.connect(), .ping(), .close()
@@ -102,10 +102,10 @@ src/infrastructure/
 3. Logger reads context automatically:
    └─ Every logger.info() call includes both IDs — no manual passing
 
-4. rabbitmq.publish() reads context and injects into message headers:
+4. eventBus.publish() reads context and injects it into the event metadata:
    └─ { correlationId, requestId, eventId, eventType, timestamp, version }
 
-5. Worker consumer reads headers:
+5. Worker consumer reads the metadata:
    └─ asyncLocalStorage.run({ requestId, correlationId }) wraps the handler
    └─ All worker logs carry the same correlationId as the HTTP request
 ```
@@ -132,65 +132,72 @@ Same `correlationId` in both processes = full distributed trace.
 
 ---
 
-## RabbitMQ Design
+## Event Bus Design
 
-### Exchange Topology
+Decided in #127: SNS + SQS replaced RabbitMQ. Locally it is LocalStack, created
+by `docker/localstack/init-events.sh`; deployed, `infra/event-bus-setup.sh`.
+
+### Topology
 
 ```
-Exchange: app.events (topic, durable)
+SNS topic: <env>-mapanytime-events      (mapanytime-events locally)
+  │  every event carries a message attribute eventType = its routing key
   │
-  ├─ user.created      → email.queue    → EmailConsumer
-  │                    → audit.queue    → AuditConsumer
+  ├─ filter eventType = email.send.requested     → email-send       → EmailConsumer
   │
-  ├─ email.send.requested → email.queue
-  │
-  └─ ai.analysis.requested → ai.queue  → AiConsumer
+  └─ filter eventType = analytics.event.recorded → analytics-events → AnalyticsConsumer (batched)
 
-Exchange: app.dlx (topic, durable)
-  └─ * → *.dlq   (dead letter queues — permanent storage of failed messages)
+Each queue: a <queue>-dlq twin through a redrive policy (maxReceiveCount 4).
+Subscriptions use raw message delivery, so the queue body is the published JSON.
+An event with no matching subscription (user.created, today) goes nowhere.
 ```
 
 ### Retry Strategy
 
 ```
-Message fails
+Handler throws
    │
    ▼
-Retry count < 3?
-   ├─ YES → publish to {queue}.retry
-   │         (messageTtl: 5000ms, then re-queued automatically)
+Message is not deleted. Its visibility is set to retryDelaySeconds (30s default)
    │
-   └─ NO  → nack → moves to {queue}.dlq via app.dlx
-                    (inspect in RabbitMQ UI: http://localhost:15672)
+   ▼
+Received again. After 4 receives, SQS moves it to <queue>-dlq instead.
+
+Inspect a DLQ locally (visibility 0 leaves the messages there):
+  docker compose exec localstack awslocal sqs receive-message \
+    --queue-url http://localhost:4566/000000000000/email-send-dlq \
+    --visibility-timeout 0 --max-number-of-messages 10
 ```
+
+Unparseable messages are logged and deleted: retrying can never fix them.
+Delivery is at least once, so every handler must be safe to run twice.
 
 ### Adding a New Consumer
 
-1. Create `src/consumers/myfeature.consumer.ts`:
+Give every consumer its own queue. SQS cannot route by message type, so two
+consumers on one queue take each other's messages at random.
+
+1. Add the queue and its event type to `docker/localstack/init-events.sh` **and**
+   `infra/event-bus-setup.sh`.
+2. Add `MY_FEATURE_QUEUE_URL` to `src/config.ts`, `.env.example`, the compose
+   `app`/`worker` environment, and both deploy workflows.
+3. Create `src/consumers/myfeature.consumer.ts`:
 
 ```typescript
-import { rabbitmq } from '../infrastructure/rabbitmq';
-import { ROUTING_KEYS } from '../events/routing-keys';
+import { eventBus } from '../infrastructure/event-bus';
+import { MY_FEATURE_QUEUE_URL } from '../config';
 import logger from '../utils/logger';
 
-export const startMyFeatureConsumer = async () => {
-  await rabbitmq.consume<{ userId: string }>(
-    'myfeature.queue',
-    ROUTING_KEYS.SOME_EVENT,
-    async (payload, metadata) => {
-      logger.info(`[MyFeature] Processing event: ${metadata.eventId}`);
-      // your logic here
-    },
-  );
-};
+export const startMyFeatureConsumer = () =>
+  eventBus.consume<{ userId: string }>(MY_FEATURE_QUEUE_URL, async (payload, metadata) => {
+    logger.info(`[MyFeature] Processing event: ${metadata.eventId}`);
+    // your logic here — idempotent
+  });
 ```
 
-2. Register in `src/worker.ts`:
-
-```typescript
-import { startMyFeatureConsumer } from './consumers/myfeature.consumer';
-await startMyFeatureConsumer();
-```
+4. Add it to the `consumers` list in `src/worker.ts`, so shutdown stops it.
+5. Recreate the local queues: `docker compose restart localstack && docker compose up -d --wait localstack`.
+6. Run `infra/event-bus-setup.sh` for each environment and set the new variable there before merging.
 
 ---
 
@@ -292,7 +299,9 @@ process.exit(0)
 
 - Set `isReady = false` (health probe returns 503 immediately)
 - Stop WorkerMetrics interval
-- Close RabbitMQ connection (in-flight messages are nacked automatically)
+- Stop every consumer: no new polls, in-flight messages finish and are deleted,
+  messages received during shutdown are handed back. Can take up to 20s (an open
+  long poll) plus the longest job; a second signal exits at once
 
 ---
 
@@ -312,7 +321,7 @@ it('should clamp limit to maxLimit', () => {
 
 ### Integration Tests — `tests/integration/`
 
-Test HTTP endpoints using Supertest. Mock infrastructure (Prisma, Redis, RabbitMQ) at the module level.
+Test HTTP endpoints using Supertest. Mock infrastructure (Prisma, Redis, the event bus) at the module level.
 
 ```typescript
 jest.mock('../../src/infrastructure/redis', () => ({
@@ -393,6 +402,6 @@ Before deploying to production:
 - [ ] `NODE_ENV=production` (disables Swagger UI, enables JSON logging)
 - [ ] Health probes configured in Kubernetes/ECS (`/api/health/live`, `/api/health/ready`)
 - [ ] Worker health probe configured (`WORKER_HEALTH_PORT/health`)
-- [ ] Dead letter queues monitored (RabbitMQ management plugin or Datadog)
+- [ ] Dead letter queues monitored (CloudWatch alarm on `ApproximateNumberOfMessagesVisible` of each `-dlq`)
 - [ ] Log aggregation configured (CloudWatch, Datadog, etc.)
 - [ ] Rate limiting reviewed for your expected traffic volume

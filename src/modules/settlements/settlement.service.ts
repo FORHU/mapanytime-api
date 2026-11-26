@@ -276,4 +276,170 @@ export default class SettlementService {
       },
     });
   }
+
+  /**
+   * Platform-wide aggregated settlement metrics for administrative oversight.
+   */
+  static async getAdminSummary(options?: { startDate?: Date; endDate?: Date }) {
+    const where: Prisma.SettlementsWhereInput = {};
+    if (options?.startDate || options?.endDate) {
+      where.createdAt = {};
+      if (options.startDate) where.createdAt.gte = options.startDate;
+      if (options.endDate) where.createdAt.lte = options.endDate;
+    }
+
+    const settlements = await prisma.settlements.findMany({
+      where,
+      include: { payoutItem: { select: { id: true } } },
+    });
+
+    const sum = (rows: typeof settlements, selector: (s: (typeof settlements)[0]) => number) =>
+      Number(rows.reduce((total, s) => total + selector(s), 0).toFixed(2));
+
+    const unpaid = settlements.filter((s) => !s.payoutItem);
+
+    const cashCommissionOwed = Number(
+      Math.abs(
+        unpaid
+          .filter((s) => Number(s.sellerNetAmount) < 0)
+          .reduce((t, s) => t + Number(s.sellerNetAmount), 0),
+      ).toFixed(2),
+    );
+
+    return {
+      totalSettlements: settlements.length,
+      totalSales: sum(settlements, (s) => Number(s.subtotalAmount)),
+      totalCommission: sum(settlements, (s) => Number(s.commissionAmount)),
+      totalPaymentFee: sum(settlements, (s) => Number(s.paymentFeeAmount)),
+      pendingAmount: sum(
+        unpaid.filter((s) => s.status === 'PENDING'),
+        (s) => Number(s.sellerNetAmount),
+      ),
+      heldAmount: sum(
+        unpaid.filter((s) => s.status === 'HELD'),
+        (s) => Number(s.sellerNetAmount),
+      ),
+      availableAmount: sum(
+        unpaid.filter((s) => s.status === 'RELEASED'),
+        (s) => Number(s.sellerNetAmount),
+      ),
+      paidOutAmount: sum(
+        settlements.filter((s) => s.payoutItem),
+        (s) => Number(s.sellerNetAmount),
+      ),
+      refundedAmount: sum(
+        settlements.filter((s) => s.status === 'REFUNDED'),
+        (s) => Number(s.sellerNetAmount),
+      ),
+      cashCommissionOwed,
+      holdDays: SETTLEMENT_HOLD_DAYS,
+    };
+  }
+
+  /**
+   * Paginated per-seller settlement balances and next payout release dates.
+   */
+  static async getAdminSellerSummaries(options?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+  }) {
+    const page = Math.max(1, Number(options?.page ?? 1));
+    const limit = Math.max(1, Math.min(100, Number(options?.limit ?? 10)));
+    const skip = (page - 1) * limit;
+
+    const sellerWhere: Prisma.SellersWhereInput = {
+      deletedAt: null,
+    };
+
+    if (options?.search) {
+      const term = options.search.trim();
+      sellerWhere.OR = [
+        { organizationName: { contains: term, mode: 'insensitive' } },
+        { stores: { some: { storeName: { contains: term, mode: 'insensitive' } } } },
+        { users: { email: { contains: term, mode: 'insensitive' } } },
+        { users: { firstName: { contains: term, mode: 'insensitive' } } },
+        { users: { lastName: { contains: term, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [total, sellers] = await Promise.all([
+      prisma.sellers.count({ where: sellerWhere }),
+      prisma.sellers.findMany({
+        where: sellerWhere,
+        skip,
+        take: limit,
+        include: {
+          stores: { select: { id: true, storeName: true }, take: 1 },
+          users: { select: { id: true, email: true, firstName: true, lastName: true } },
+          settlements: {
+            include: { payoutItem: { select: { id: true } } },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    const sellerSummaries = sellers.map((seller) => {
+      const settlements = seller.settlements;
+      const unpaid = settlements.filter((s) => !s.payoutItem);
+
+      const sum = (rows: typeof settlements) =>
+        Number(rows.reduce((total, s) => total + Number(s.sellerNetAmount), 0).toFixed(2));
+
+      const totalSales = Number(
+        settlements.reduce((t, s) => t + Number(s.subtotalAmount), 0).toFixed(2),
+      );
+      const totalCommission = Number(
+        settlements.reduce((t, s) => t + Number(s.commissionAmount), 0).toFixed(2),
+      );
+
+      const pendingRows = unpaid.filter((s) => s.status === 'PENDING');
+      const futurePendingDates = pendingRows
+        .map((s) => s.releaseEligibleAt)
+        .filter((d) => d > new Date());
+      const nextReleaseEligibleAt =
+        futurePendingDates.length > 0
+          ? new Date(Math.min(...futurePendingDates.map((d) => d.getTime())))
+          : null;
+
+      const cashCommissionOwed = Number(
+        Math.abs(
+          unpaid
+            .filter((s) => Number(s.sellerNetAmount) < 0)
+            .reduce((t, s) => t + Number(s.sellerNetAmount), 0),
+        ).toFixed(2),
+      );
+
+      return {
+        sellerId: seller.id,
+        organizationName: seller.organizationName,
+        storeName: seller.stores[0]?.storeName ?? null,
+        storeId: seller.stores[0]?.id ?? null,
+        user: {
+          id: seller.users.id,
+          email: seller.users.email,
+          name: [seller.users.firstName, seller.users.lastName].filter(Boolean).join(' ') || null,
+        },
+        totalSales,
+        totalCommission,
+        pendingAmount: sum(pendingRows),
+        heldAmount: sum(unpaid.filter((s) => s.status === 'HELD')),
+        availableAmount: sum(unpaid.filter((s) => s.status === 'RELEASED')),
+        paidOutAmount: sum(settlements.filter((s) => s.payoutItem)),
+        refundedAmount: sum(settlements.filter((s) => s.status === 'REFUNDED')),
+        cashCommissionOwed,
+        settlementCount: settlements.length,
+        nextReleaseEligibleAt,
+      };
+    });
+
+    return {
+      sellers: sellerSummaries,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
+  }
 }

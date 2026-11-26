@@ -1,4 +1,4 @@
-﻿import { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 
 export const PRODUCT_OPTIONS_INCLUDE = {
@@ -16,6 +16,8 @@ export const PRODUCT_OPTIONS_INCLUDE = {
 import { S3_CDN_URL } from '../../config';
 import S3Util from '../../utils/s3.util';
 import { liveWindowFilter } from '../merchantAds/adWindow';
+import { haversineKm, roundKm } from '../../utils/geo.util';
+import AnalyticsRepository from '../analytics/analytics.repository';
 
 async function resolveImageUrl(file: { path: string; bucket?: string | null }): Promise<string> {
   if (S3_CDN_URL) return `${S3_CDN_URL}/${file.path}`;
@@ -192,10 +194,24 @@ export default class ProductRepository {
     search?: string;
     minPrice?: number;
     maxPrice?: number;
+    sortBy?: 'createdAt' | 'price_asc' | 'price_desc' | 'most_viewed' | 'trending' | 'proximity';
+    centerLat?: number;
+    centerLng?: number;
     skip: number;
     take: number;
   }) {
-    const { storeId, categoryIds, search, minPrice, maxPrice, skip, take } = filters;
+    const {
+      storeId,
+      categoryIds,
+      search,
+      minPrice,
+      maxPrice,
+      sortBy,
+      centerLat,
+      centerLng,
+      skip,
+      take,
+    } = filters;
 
     const hasPriceFilter = minPrice !== undefined || maxPrice !== undefined;
     const term = search?.trim();
@@ -225,6 +241,13 @@ export default class ProductRepository {
         : {}),
     };
 
+    let orderBy: Prisma.ProductsOrderByWithRelationInput = { createdAt: 'desc' };
+    if (sortBy === 'price_asc') {
+      orderBy = { price: 'asc' };
+    } else if (sortBy === 'price_desc') {
+      orderBy = { price: 'desc' };
+    }
+
     const [items, total] = await prisma.$transaction([
       prisma.products.findMany({
         where,
@@ -232,7 +255,13 @@ export default class ProductRepository {
           category: true,
           tags: { include: { tag: true } },
           options: PRODUCT_OPTIONS_INCLUDE,
-          store: { select: { id: true, storeName: true } },
+          store: {
+            select: {
+              id: true,
+              storeName: true,
+              storeLocations: { select: { latitude: true, longitude: true } },
+            },
+          },
           productImages: {
             where: { isPrimary: true },
             include: { file: { select: { path: true, bucket: true } } },
@@ -243,7 +272,7 @@ export default class ProductRepository {
               ad: {
                 discountType: { not: null },
                 // A scheduled promotion must not badge a product as discounted
-                // before it starts â€” same window test as checkout pricing.
+                // before it starts — same window test as checkout pricing.
                 ...liveWindowFilter(),
               },
             },
@@ -251,7 +280,7 @@ export default class ProductRepository {
             take: 1,
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take,
       }),
@@ -260,9 +289,22 @@ export default class ProductRepository {
 
     const resolved = await Promise.all(
       items.map(async (product) => {
-        const { merchantAdLinks, ...rest } = product;
+        const { merchantAdLinks, store, ...rest } = product;
+        let distanceKm: number | null = null;
+        if (centerLat != null && centerLng != null && store.storeLocations) {
+          distanceKm = roundKm(
+            haversineKm(
+              centerLat,
+              centerLng,
+              store.storeLocations.latitude,
+              store.storeLocations.longitude,
+            ),
+          );
+        }
         return {
           ...rest,
+          store: { id: store.id, storeName: store.storeName },
+          distanceKm,
           activeAd: merchantAdLinks[0]?.ad ?? null,
           productImages: await Promise.all(
             product.productImages.map(async (pi) => ({
@@ -276,6 +318,19 @@ export default class ProductRepository {
         };
       }),
     );
+
+    if (sortBy === 'proximity' && centerLat != null && centerLng != null) {
+      resolved.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+    } else if (sortBy === 'most_viewed' || sortBy === 'trending') {
+      const ranked =
+        sortBy === 'trending'
+          ? await AnalyticsRepository.getTrending('PRODUCT', 48, 100)
+          : await AnalyticsRepository.getMostViewed('PRODUCT', 30, 100);
+      if (ranked.length > 0) {
+        const rankMap = new Map<string, number>(ranked.map((item, index) => [item.id, index]));
+        resolved.sort((a, b) => (rankMap.get(a.id) ?? Infinity) - (rankMap.get(b.id) ?? Infinity));
+      }
+    }
 
     return { items: resolved, total };
   }

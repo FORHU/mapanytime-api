@@ -14,6 +14,7 @@ function fakeRedis() {
   const ttls = new Map<string, number>();
   const geo = new Map<string, { lat: number; lng: number }>();
   const seen = new Map<string, number>();
+  const trails = new Map<string, { score: number; value: string }[]>();
 
   const cmd = {
     isOpen: true,
@@ -24,7 +25,14 @@ function fakeRedis() {
       return 'OK';
     },
     del: async (keys: string | string[]) => {
-      for (const k of [keys].flat()) strings.delete(k);
+      for (const k of [keys].flat()) {
+        strings.delete(k);
+        trails.delete(k);
+      }
+    },
+    expire: async (k: string, seconds: number) => {
+      ttls.set(k, seconds);
+      return 1;
     },
     mGet: async (keys: string[]) => keys.map((k) => strings.get(k) ?? null),
     geoAdd: async (_k: string, m: { longitude: number; latitude: number; member: string }) =>
@@ -47,12 +55,54 @@ function fakeRedis() {
         )
         .map(([id]) => id);
     },
-    zAdd: async (k: string, m: { score: number; value: string }) =>
-      void (k === 'mobility:seen' && seen.set(m.value, m.score)),
+    zAdd: async (k: string, m: { score: number; value: string }) => {
+      if (k === 'mobility:seen') {
+        seen.set(m.value, m.score);
+      } else if (k.startsWith('mobility:trail:')) {
+        let list = trails.get(k);
+        if (!list) {
+          list = [];
+          trails.set(k, list);
+        }
+        list.push({ score: m.score, value: m.value });
+        list.sort((a, b) => a.score - b.score);
+      }
+    },
     zRem: async (k: string, m: string) =>
       Number(k === 'mobility:seen' ? seen.delete(m) : geo.delete(m)),
-    zRangeByScore: async (_k: string, _min: string, max: number) =>
-      [...seen].filter(([, s]) => s <= max).map(([id]) => id),
+    zRemRangeByRank: async (k: string, start: number, stop: number) => {
+      const list = trails.get(k);
+      if (!list) return 0;
+      const normalizedStop = stop < 0 ? list.length + stop : stop;
+      if (start <= normalizedStop && normalizedStop >= 0) {
+        return list.splice(start, normalizedStop - start + 1).length;
+      }
+      return 0;
+    },
+    zRangeByScore: async (
+      k: string,
+      min: string | number,
+      max: string | number,
+      options?: { LIMIT?: { offset: number; count: number } },
+    ) => {
+      if (k === 'mobility:seen') {
+        const numMax = typeof max === 'number' ? max : Number(max);
+        return [...seen].filter(([, s]) => s <= numMax).map(([id]) => id);
+      }
+      if (k.startsWith('mobility:trail:')) {
+        const list = trails.get(k) ?? [];
+        const numMin = min === '-inf' ? -Infinity : Number(min);
+        const numMax = max === '+inf' ? Infinity : Number(max);
+        let res = list
+          .filter((item) => item.score >= numMin && item.score <= numMax)
+          .map((i) => i.value);
+        if (options?.LIMIT) {
+          res = res.slice(options.LIMIT.offset, options.LIMIT.offset + options.LIMIT.count);
+        }
+        return res;
+      }
+      return [];
+    },
     // The store's only script: claim-if-still-expired.
     eval: async (_s: string, o: { arguments: string[] }) => {
       const [id, cutoff] = o.arguments;
@@ -76,7 +126,7 @@ function fakeRedis() {
     });
     return chain;
   };
-  return { client: { ...cmd, multi }, strings, ttls, geo, seen };
+  return { client: { ...cmd, multi }, strings, ttls, geo, seen, trails };
 }
 
 let redis: ReturnType<typeof fakeRedis>;
@@ -188,5 +238,52 @@ describe('mobility live store', () => {
   it('answers 503 when Redis is down instead of crashing', async () => {
     redis.client.isOpen = false;
     await expect(live.getLive('v1')).rejects.toMatchObject({ status: 503 });
+  });
+
+  describe('trail storage', () => {
+    it('records trail breadcrumbs with 24h TTL on putLive', async () => {
+      const p1 = point('v1', 16.4, 120.6);
+      p1.ts = 1000;
+      await live.putLive(p1);
+
+      expect(redis.ttls.get('mobility:trail:v1')).toBe(86400);
+      const trail = await live.getTrail('v1');
+      expect(trail).toHaveLength(1);
+      expect(trail[0]).toMatchObject({
+        lat: 16.4,
+        lng: 120.6,
+        status: 'moving',
+        ts: 1000,
+      });
+    });
+
+    it('filters trail breadcrumbs by time range and limits count', async () => {
+      const p1 = point('v1', 16.4, 120.6);
+      p1.ts = 1000;
+      const p2 = point('v1', 16.41, 120.61);
+      p2.ts = 2000;
+      const p3 = point('v1', 16.42, 120.62);
+      p3.ts = 3000;
+
+      await live.putLive(p1);
+      await live.putLive(p2);
+      await live.putLive(p3);
+
+      const bounded = await live.getTrail('v1', { since: 1500, until: 2500 });
+      expect(bounded).toHaveLength(1);
+      expect(bounded[0].ts).toBe(2000);
+
+      const limited = await live.getTrail('v1', { limit: 2 });
+      expect(limited).toHaveLength(2);
+    });
+
+    it('clearTrail deletes the trail key', async () => {
+      const p1 = point('v1', 16.4, 120.6);
+      await live.putLive(p1);
+      expect((await live.getTrail('v1')).length).toBeGreaterThan(0);
+
+      await live.clearTrail('v1');
+      expect(await live.getTrail('v1')).toEqual([]);
+    });
   });
 });

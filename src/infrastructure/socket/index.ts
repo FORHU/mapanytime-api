@@ -4,6 +4,7 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import type { RedisClientType } from 'redis';
 import logger from '../../utils/logger';
 import { allowedOrigins, isOriginAllowed, rejectOrigin } from '../../middleware/cors.middleware';
+import { resolveActiveUser } from '../../middleware/auth.middleware';
 
 /**
  * Realtime store updates over Socket.IO.
@@ -13,9 +14,9 @@ import { allowedOrigins, isOriginAllowed, rejectOrigin } from '../../middleware/
  * store falls in, so a phone only receives updates relevant to what it's
  * looking at — no global broadcast storm.
  *
- * This module also includes a lightweight foundation for future message and
- * notification events. New features can be added as separate event
- * handlers without changing the viewport subscription model.
+ * Signed-in clients also join their own notification channel, authenticated by
+ * access token. Viewport subscriptions stay anonymous: store and vehicle
+ * positions are public map data.
  */
 
 // ~0.1° ≈ 11 km grid cells. Rooms are keyed by cell index.
@@ -40,15 +41,6 @@ export interface NotificationEventPayload {
   sentAt: string;
 }
 
-export interface ChatMessagePayload {
-  roomId: string;
-  senderId: string;
-  senderName: string;
-  body: string;
-  sentAt: string;
-  metadata?: Record<string, unknown>;
-}
-
 interface Viewport {
   north: number;
   south: number;
@@ -66,10 +58,6 @@ function cellKey(lat: number, lng: number): string {
 
 function notificationChannel(userId: string): string {
   return `notifications:user:${userId}`;
-}
-
-function chatRoomKey(roomId: string): string {
-  return `chat:room:${roomId}`;
 }
 
 function cellsForViewport(vp: Viewport): string[] {
@@ -124,7 +112,6 @@ export function initSocket(server: HttpServer): Server {
     logger.info(`[Socket] Client connected: ${socket.id}`);
     let joinedViewportCells: string[] = [];
     let joinedNotificationChannels: string[] = [];
-    let joinedChatRooms: string[] = [];
 
     socket.on('subscribe', (vp: unknown) => {
       if (!isViewport(vp)) return;
@@ -136,51 +123,40 @@ export function initSocket(server: HttpServer): Server {
       logger.info(`[Socket] ${socket.id} subscribed to ${joinedViewportCells.length} cells`);
     });
 
-    socket.on('subscribe_notifications', (payload: unknown) => {
-      if (typeof payload !== 'object' || payload === null) return;
-      const channel = (payload as { userId?: string }).userId;
-      if (!channel || typeof channel !== 'string') return;
+    /**
+     * Joins the channel of the user the access token belongs to — never one named by the
+     * client. The payload used to be `{ userId }` and was trusted as-is, so anyone could
+     * read anyone's order notifications by sending their id. A `userId` in the payload is
+     * now ignored; the token is checked under `authenticate`'s rules (resolveActiveUser).
+     *
+     * Rejection emits `notifications:unauthorized` and leaves any channel already joined,
+     * so a socket that was subscribed and then presents a bad token is not left listening.
+     */
+    socket.on('subscribe_notifications', async (payload: unknown) => {
+      const token =
+        typeof payload === 'object' && payload !== null
+          ? (payload as { token?: unknown }).token
+          : undefined;
+      const user = typeof token === 'string' && token ? await resolveActiveUser(token) : null;
 
       for (const c of joinedNotificationChannels) void socket.leave(c);
-      joinedNotificationChannels = [notificationChannel(channel)];
+      joinedNotificationChannels = [];
+
+      if (!user) {
+        logger.warn(`[Socket] ${socket.id} notification subscribe rejected — no valid token`);
+        socket.emit('notifications:unauthorized');
+        return;
+      }
+
+      joinedNotificationChannels = [notificationChannel(user.id)];
       for (const c of joinedNotificationChannels) void socket.join(c);
 
-      logger.info(`[Socket] ${socket.id} subscribed to notifications for ${channel}`);
+      logger.info(`[Socket] ${socket.id} subscribed to notifications for ${user.id}`);
     });
 
-    socket.on('join_chat_room', (roomId: unknown) => {
-      if (typeof roomId !== 'string' || roomId.trim() === '') return;
-      const key = chatRoomKey(roomId);
-      if (!joinedChatRooms.includes(key)) {
-        joinedChatRooms.push(key);
-        void socket.join(key);
-      }
-      logger.info(`[Socket] ${socket.id} joined chat room ${roomId}`);
-    });
-
-    socket.on('leave_chat_room', (roomId: unknown) => {
-      if (typeof roomId !== 'string' || roomId.trim() === '') return;
-      const key = chatRoomKey(roomId);
-      joinedChatRooms = joinedChatRooms.filter((room) => room !== key);
-      void socket.leave(key);
-      logger.info(`[Socket] ${socket.id} left chat room ${roomId}`);
-    });
-
-    socket.on('send_chat_message', (message: unknown) => {
-      const payload = message as ChatMessagePayload;
-      if (!payload || !payload.roomId || !payload.senderId || !payload.body) return;
-      const room = chatRoomKey(payload.roomId);
-      io?.to(room).emit('chat:message', payload);
-      logger.info(`[Socket] chat:message → ${room} (${payload.senderId})`);
-    });
-
-    socket.on('send_notification', (notification: unknown) => {
-      const payload = notification as NotificationEventPayload & { userId?: string };
-      if (!payload || !payload.userId) return;
-      const room = notificationChannel(payload.userId);
-      io?.to(room).emit('notification:new', payload);
-      logger.info(`[Socket] notification:new → ${room} (${payload.id})`);
-    });
+    // Notifications are emitted by the server only (emitNotificationToUser). There used to be
+    // a client-callable `send_notification`, and unauthenticated chat-room events; nothing used
+    // them, and they let any client push to any user or speak as anyone in any room.
 
     socket.on('disconnect', () => {
       logger.info(`[Socket] Client disconnected: ${socket.id}`);
@@ -280,11 +256,4 @@ export function emitNotificationToUser(
   const room = notificationChannel(userId);
   io.to(room).emit('notification:new', notification);
   logger.info(`[Socket] notification:new → ${room} (${notification.id})`);
-}
-
-export function emitChatMessage(message: ChatMessagePayload): void {
-  if (!io) return;
-  const room = chatRoomKey(message.roomId);
-  io.to(room).emit('chat:message', message);
-  logger.info(`[Socket] chat:message → ${room} (${message.senderId})`);
 }

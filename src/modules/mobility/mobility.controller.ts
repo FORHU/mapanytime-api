@@ -44,6 +44,12 @@ const boundsSchema = Joi.object({
   west: Joi.number().min(-180).max(180).required(),
 });
 
+const trailQuerySchema = Joi.object({
+  since: Joi.number().integer().min(0),
+  until: Joi.number().integer().min(0),
+  limit: Joi.number().integer().min(1).max(1000).default(100),
+});
+
 // Built per request: the accepted timestamp window moves with the clock.
 const locationSchema = () =>
   Joi.object({
@@ -186,4 +192,20 @@ export default class MobilityController {
         responseSuccess(res, 200, await MobilityService.liveInBounds(v)),
     ),
   );
+
+  static getVehicleTrail = handle(async (req, res) => {
+    const { id } = req.params;
+    const { error, value } = trailQuerySchema.validate(req.query, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
+    if (error) return responseError(res, 422, error.message);
+
+    const trail = await MobilityService.getVehicleTrail(
+      id,
+      req.user as { id: string; roles?: { roleName: string }[] },
+      value,
+    );
+    return responseSuccess(res, 200, trail);
+  });
 }

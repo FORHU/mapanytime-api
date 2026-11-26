@@ -1,13 +1,51 @@
 # MapAnytime — Immediate Execution Checklist (Next Session)
 
-**Updated:** 2026-09-10 (pricing engine + payout verification).
+**Updated:** 2026-10-27 (Checkpoint / Turning Point).
 
 **Primary Reference:** [`MASTER_EXECUTION_PLAN.md`](./MASTER_EXECUTION_PLAN.md)  
 **Historical Context:** [`FLAGS.md`](./FLAGS.md) · [`OPEN-FLAGS.md`](./OPEN-FLAGS.md)
 
 ---
 
-## 0. RESUME HERE — last session 2026-10-06
+## ▶ RESUME HERE — Checkpoint 2026-10-27 (Turning Point)
+
+**Current Staging State:**
+
+- All repositories (`mapanytime-api`, `mapanytime-market-web`, `mapanytime-market-app`) are cleanly synchronized on `staging` with 0 uncommitted changes.
+- **Phase 1 (P0), Phase 2 (P1), Phase 3 (P2), and Phase 4 (P3)** are **100% completed** on `staging`.
+- **API PR #177** merged: Dynamic Multi-Gateway Payments (`XenditProvider`) & Failover routing (`PaymentService`). Issue #176 closed.
+- **API PR #179** merged: Admin Invitation Endpoint & Activation Flow (`/v1/admin/invites`, token validation, activation). Issue #178 closed.
+- **API PR #181** merged: Analytics Session ID & View Deduplication (`x-session-id`, 1-hour window rollup deduplication). Issue #180 closed.
+- **API PR #183** merged: Scheduled Cron Hygiene & Database Maintenance Sweeper (`SystemMaintenanceService`, graceful shutdown). Issue #182 closed.
+- **API PR #185** merged: Environment & Staging Isolation (Production containers `mapanytime-prod-*` on `mapanytime-prod` vs dev `mapanytime-dev-*` on `forhu-dev`) + deactivated unused payment methods (`QRPH`, `GRAB_PAY`). Issue #184 closed.
+- **App PR #83** merged: Map Pin $\rightarrow$ Storefront Experience (distance display, direct storefront tap navigation on `StoreFloatingCard`, 227 tests passing). Issue #82 closed.
+- **Branch Preservation Rule:** All feature branches are preserved on GitHub and locally (no `--delete-branch` on merge).
+
+**Strict Directive:**
+
+- **No Over-Engineering** (codified in `AGENTS.md` and `.agents/rules/no-overengineering.md`). Minimal, direct solutions only.
+
+**Immediate Next Tasks When Resuming Tomorrow:**
+
+1. **Physical Phone Verification ([App #71](https://github.com/FORHU/mapanytime-market-app/issues/71))**:
+   - Log in on physical Realme phone (RMX3231) with `dual@example.com` / `Password123!`.
+   - Test Map discovery: tap a store pin, check distance label (`X.X km away`), tap store card to open storefront, select product, add to cart.
+   - Close Issue #71 on Board #24 once verified.
+2. **Production Pre-Deploy Verification ([API #115](https://github.com/FORHU/mapanytime-api/issues/115) / [#116](https://github.com/FORHU/mapanytime-api/issues/116))**:
+   - Confirm AWS SSM role and Parameter Store `/mapanytime/production/env` on the production box.
+   - Verify S3 bucket configuration and run pre-deploy checks per `infra/README.md`.
+3. **Advanced Growth & Post-Launch Gaps (P4)**:
+   - Product reviews (`CAT-6`), buyer wishlist (`CAT-7`), push notification dispatchers.
+
+---
+
+The production deploy order, for when production starts, is on API #115
+(pre-deploy checks) and #116 (the deploy itself).
+
+The 2026-10-06 notes below are older; their unticked items are still open
+unless marked superseded.
+
+## 0. Previous session — 2026-10-06
 
 ### ✅ Completed This Session
 
@@ -31,17 +69,17 @@
 > **Run `git fetch` first.** GitHub was unreachable at the end of the session, so
 > the last confirmed state is `origin/staging` at `7203309`.
 
-- [ ] **A. Check the `ACCESS_TOKEN_EXPIRY` repository secret.** _Two minutes, do
-      it first._ Both deploy workflows read `secrets.ACCESS_TOKEN_EXPIRY` and only
-      fall back to the `15m` literal. If that secret still says `7d`, production
-      access tokens are still seven days and the whole of F98 is not actually in
-      effect — while the merged PR makes it look done. Clear it or set `15m`.
+- [x] ~~**A. Check the `ACCESS_TOKEN_EXPIRY` repository secret.**~~ **Superseded
+      2026-10-14:** JWT was removed (#122/#123); access-token expiry no longer
+      exists, and the deploy workflows no longer read that secret. The secret
+      can be deleted from the repository.
 
-- [ ] **B. Do the AWS setup for SSM, before the next merge to `staging`.**
-      The staging deploy now triggers on merges to `staging` (it used to watch the
-      abandoned `main`), so **the next merge auto-deploys and will fail** at
-      `configure-aws-credentials` until this exists. It fails safely — nothing
-      reaches ECR, Parameter Store or the box — but it is red every time.
+- [ ] **B. Do the AWS setup for SSM, before the first production deploy.**
+      _Corrected 2026-10-14:_ merges do **not** deploy. The workflows are
+      `ci.yml` (push/PR) and two `workflow_dispatch`-only deploys
+      (`deploy-production.yml`, `deploy-dev.yml` for the shared dev host). A deploy
+      without this setup fails at `configure-aws-credentials` — safely, before
+      anything reaches ECR, Parameter Store or the box.
       Full checklist with the reasoning: [`../../infra/README.md`](../../infra/README.md) §4.
   - [ ] Create the OIDC role — trust `infra/aws-oidc-trust-policy.json`,
         permissions `infra/cicd-deploy-policy.json`. ARN → `AWS_DEPLOY_ROLE_ARN`.
@@ -55,10 +93,10 @@
         by hand or `docker pull` is denied on the box.
   - [ ] Confirm each box is a managed node: `aws ssm describe-instance-information`.
 
-- [ ] **C. Prove staging, then production.** No deploy has ever run through the
-      SSM path — static checks pass, but the first live run is what finds anything
-      wrong. Production is `workflow_dispatch` only so it cannot fire by accident;
-      do not press it until staging is green.
+- [ ] **C. Prove the SSM path on the first production deploy.** _Corrected
+      2026-10-14:_ there is no staging server — production is the only box — so
+      there is no staging deploy to prove first. No deploy has run through the SSM
+      path yet; static checks pass, but watch the first live run closely.
 
 - [ ] **D. After the first green staging deploy:** delete the stale scp'd env
       files at `/home/ec2-user/mapanytime-api.env` and
@@ -145,20 +183,20 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
 - [x] **P1-1. HTTP CORS Hardening**
   - Remove wildcard origin reflection on credentialed HTTP endpoints.
   - Restrict `Access-Control-Allow-Origin` to explicit allowlisted origins (matching the WebSocket gateway).
-- [ ] **P1-2. Environment & Staging Isolation**
+- [x] **P1-2. Environment & Staging Isolation**
   - Separate staging and production container names, ports, env files, and databases.
-- [ ] **P1-3. Admin Invitation Endpoint (ID-5)**
+- [x] **P1-3. Admin Invitation Endpoint (ID-5)**
   - Implement `POST /v1/admin/invites` (token generation, expiration, email dispatch, and activation flow).
-- [ ] **P1-4. Analytics Session ID & View Deduplication**
+- [x] **P1-4. Analytics Session ID & View Deduplication**
   - Generate client `sessionId` on web and mobile.
   - Deduplicate repeat views by `sessionId + productId + time window` before rollups.
-- [ ] **P1-5. In-App Notification Feed Routes (NTF-1 to NTF-3)**
+- [x] **P1-5. In-App Notification Feed Routes (NTF-1 to NTF-3)**
   - Wire `GET /v1/notifications`, `PATCH /v1/notifications/:id/read`, `POST /v1/notifications/read-all`, and unread badge count.
-- [ ] **P1-6. Map Pin $\rightarrow$ Storefront Experience**
+- [x] **P1-6. Map Pin $\rightarrow$ Storefront Experience**
   - Complete the client flow: Pin tap $\rightarrow$ store summary preview $\rightarrow$ storefront $\rightarrow$ products $\rightarrow$ cart.
-- [ ] **P1-7. Scheduled Cron Hygiene**
+- [x] **P1-7. Scheduled Cron Hygiene**
   - Verify reservation expiration job; remove or implement empty cron shells.
-- [ ] **P1-8. Add `.gitattributes` to `-web`**
+- [x] **P1-8. Add `.gitattributes` to `-web`**
   - Ensure consistent line endings across environments.
 - [x] **P1-9. Admin Pricing Engine UI**
   - Build frontend screens in `mapanytime-market-admin` to manage Pricing Configurations and Components via existing API routes.
@@ -167,9 +205,9 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
 
 ## 3. PHASE 3 (P2): GROWTH ANALYTICS & ADVERTISING
 
-- [ ] **P2-1. Analytics Daily Rollups & Rule-Based Ranking**
+- [x] **P2-1. Analytics Daily Rollups & Rule-Based Ranking**
   - Implement daily aggregation cron, most-viewed, trending, and proximity-based sorting.
-- [ ] **P2-2. Merchant Advertising Marketing Wallet**
+- [x] **P2-2. Merchant Advertising Marketing Wallet**
   - Build merchant marketing deposit wallet to fund sponsored map pin ad spend.
 
 ---
@@ -178,16 +216,16 @@ _The platform must prove that a single ₱1,000 transaction reconciles end-to-en
 
 _Spec: [`ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md`](./ECONOMIC_AND_PAYMENT_SYSTEM_IMPLEMENTATION_SPEC.md) and [`MAP_POINTS_FEATURE_SPEC.md`](./MAP_POINTS_FEATURE_SPEC.md)_
 
-- [ ] **P3-1. Buyer Loyalty Rewards (`RewardWallet` + `RewardTransactions` + `RewardConfigurations`)**
+- [x] **P3-1. Buyer Loyalty Rewards (`RewardWallet` + `RewardTransactions` + `RewardConfigurations`)**
   - ₱100 eligible subtotal = 1 Reward Point (~1%).
   - 100 Reward Points = ₱10 discount (max 20% order subtotal cap).
   - 12-month rolling expiration with explicit `-EXPIRATION` ledger entries.
-- [ ] **P3-2. Seller Incentives (`SellerCampaigns` + `SellerCampaignTransactions`)**
-  - Merchant-funded buyer point campaigns with budget tracking and ROI metrics.
-- [ ] **P3-3. Agent Recruiter Commissions (`AgentCommissionAccount` + `AgentCommissionTransactions` + `AgentPayouts`)**
+- [x] **P3-2. Seller Incentives (`SellerCampaigns` + `SellerCampaignTransactions`)** (PR #171)
+  - Merchant-funded buyer point campaigns with budget tracking, in-transaction order completion hook, and ROI metrics.
+- [x] **P3-3. Agent Recruiter Commissions (`AgentCommissionAccount` + `AgentCommissionTransactions` + `AgentPayouts`)** (PR #173)
   - Real PHP commissions (0.05% GMV configurable).
   - 7-day holding window (`PENDING` $\rightarrow$ `MATURED`) and payout requests (Min ₱500).
-- [ ] **P3-4. Atomic Multi-Ledger Hook in `OrderService.completeOrder`**
-  - Atomically commit order completion + seller settlement + buyer reward + agent commission.
-- [ ] **P3-5. Dynamic Multi-Gateway Payments (`XenditProvider`)**
+- [x] **P3-4. Atomic Multi-Ledger Hook in `OrderService.completeOrder`** (PR #171, PR #173)
+  - Atomically commit order completion + seller settlement + buyer reward + seller campaign incentive + agent commission.
+- [x] **P3-5. Dynamic Multi-Gateway Payments (`XenditProvider`)**
   - Add `XenditProvider` and dynamic gateway switching/failover in `PaymentService.getProviderAdapter`.

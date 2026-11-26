@@ -112,7 +112,7 @@ export default class PricingController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const data = await PricingService.createPricingConfiguration(value);
+      const data = await PricingService.createPricingConfiguration(value, req.user?.id);
       return responseSuccess(res, 201, data, 'Pricing configuration created as a draft');
     } catch (error) {
       next(error);
@@ -136,7 +136,11 @@ export default class PricingController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const data = await PricingService.updatePricingConfiguration(req.params.id, value);
+      const data = await PricingService.updatePricingConfiguration(
+        req.params.id,
+        value,
+        req.user?.id,
+      );
       return responseSuccess(res, 200, data, 'Pricing configuration updated');
     } catch (error) {
       next(error);
@@ -148,7 +152,7 @@ export default class PricingController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const data = await PricingService.addComponent(req.params.id, value);
+      const data = await PricingService.addComponent(req.params.id, value, req.user?.id);
       return responseSuccess(res, 201, data, 'Pricing component added');
     } catch (error) {
       next(error);
@@ -160,7 +164,11 @@ export default class PricingController {
     if (error) return responseError(res, 400, error.message);
 
     try {
-      const data = await PricingService.updateComponent(req.params.componentId, value);
+      const data = await PricingService.updateComponent(
+        req.params.componentId,
+        value,
+        req.user?.id,
+      );
       return responseSuccess(res, 200, data, 'Pricing component updated');
     } catch (error) {
       next(error);
@@ -169,7 +177,7 @@ export default class PricingController {
 
   static async deleteComponent(req: Request, res: Response, next: NextFunction) {
     try {
-      await PricingService.deleteComponent(req.params.componentId);
+      await PricingService.deleteComponent(req.params.componentId, req.user?.id);
       return responseSuccess(res, 200, null, 'Pricing component removed');
     } catch (error) {
       next(error);
@@ -188,7 +196,7 @@ export default class PricingController {
 
   static async activate(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await PricingService.activateConfiguration(req.params.id);
+      const data = await PricingService.activateConfiguration(req.params.id, req.user?.id);
       return responseSuccess(res, 200, data, 'Pricing configuration is now live');
     } catch (error) {
       next(error);
@@ -197,7 +205,7 @@ export default class PricingController {
 
   static async archive(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await PricingService.archiveConfiguration(req.params.id);
+      const data = await PricingService.archiveConfiguration(req.params.id, req.user?.id);
       return responseSuccess(res, 200, data, 'Pricing configuration archived');
     } catch (error) {
       next(error);

@@ -1,4 +1,4 @@
-import cron from 'node-cron';
+import cron, { ScheduledTask } from 'node-cron';
 import logger from '../../utils/logger';
 import InventoryReservationService from '../../modules/inventory/inventoryReservation.service';
 import SettlementService from '../../modules/settlements/settlement.service';
@@ -6,7 +6,16 @@ import MerchantAdsService from '../../modules/merchantAds/merchantAds.service';
 import RewardService from '../../modules/rewards/reward.service';
 import StoreService from '../../modules/stores/store.service';
 import OrderService from '../../modules/orders/order.service';
-import RedisUtil from '../../utils/redis.util';
+import AnalyticsService from '../../modules/analytics/analytics.service';
+import { PaymentReconciliationJob } from '../../modules/payments/jobs/payment-reconciliation.job';
+import AgentCommissionService from '../../modules/agent/agent-commission.service';
+import WalletLedgerAuditService from '../../modules/audit/wallet-ledger-audit.service';
+import { redis } from '../redis';
+import { PENDING_ORDER_TTL_MINUTES } from '../../modules/orders/order.ttl';
+import SystemMaintenanceService from './maintenance.service';
+
+/** Active scheduled cron tasks for lifecycle management. */
+const registeredTasks: ScheduledTask[] = [];
 
 /**
  * node-cron fires per process. There is one worker today, so nothing here is
@@ -16,16 +25,31 @@ import RedisUtil from '../../utils/redis.util';
  *
  * The TTL is deliberately shorter than the interval it guards so a worker that
  * dies mid-job cannot wedge the lock permanently.
+ *
+ * The lock lives on the client the worker connects (`redis.connect()` in
+ * worker.ts). It used to be `RedisUtil.client`, which only the API server
+ * initialises, so in the worker every locked job threw and never ran (#143).
+ * Without Redis the job runs unlocked: with one worker there is nothing to
+ * duplicate, and skipping it would silently stop the job.
  */
 async function withJobLock(name: string, ttlSeconds: number, run: () => Promise<void>) {
-  const acquired = await RedisUtil.client.set(`scheduler:lock:${name}`, '1', {
-    NX: true,
-    expiration: { type: 'EX', value: ttlSeconds },
-  });
+  const client = redis.getClient();
 
-  if (!acquired) {
-    logger.debug(`[Scheduler] ${name} skipped — another worker holds the lock.`);
-    return;
+  if (!client) {
+    logger.warn(`[Scheduler] Redis unavailable; running ${name} without its lock.`);
+  } else {
+    try {
+      const acquired = await client.set(`scheduler:lock:${name}`, '1', {
+        NX: true,
+        expiration: { type: 'EX', value: ttlSeconds },
+      });
+      if (!acquired) {
+        logger.debug(`[Scheduler] ${name} skipped — another worker holds the lock.`);
+        return;
+      }
+    } catch (err) {
+      logger.warn(`[Scheduler] Could not take the ${name} lock; running without it.`, err);
+    }
   }
 
   await run();
@@ -43,8 +67,14 @@ async function withJobLock(name: string, ttlSeconds: number, run: () => Promise<
 export const startScheduler = () => {
   logger.info('[Scheduler] Registering scheduled jobs...');
 
+  const scheduleJob = (expression: string, job: () => Promise<void>) => {
+    const task = cron.schedule(expression, job);
+    registeredTasks.push(task);
+    return task;
+  };
+
   // ── Inventory TTL Expiration Cleanup — runs every 1 minute ──────────────────
-  cron.schedule('* * * * *', async () => {
+  scheduleJob('* * * * *', async () => {
     try {
       const expiredCount = await InventoryReservationService.processExpiredReservations();
       if (expiredCount > 0) {
@@ -56,9 +86,9 @@ export const startScheduler = () => {
   });
 
   // ── Stale Pending Orders Expiry (F44) — runs every 2 minutes ────────────────
-  cron.schedule('*/2 * * * *', async () => {
+  scheduleJob('*/2 * * * *', async () => {
     try {
-      const expiredCount = await OrderService.expireStalePendingOrders(15);
+      const expiredCount = await OrderService.expireStalePendingOrders(PENDING_ORDER_TTL_MINUTES);
       if (expiredCount > 0) {
         logger.info(
           `[Scheduler] Expired ${expiredCount} stale pending order(s) and released holds.`,
@@ -69,11 +99,27 @@ export const startScheduler = () => {
     }
   });
 
+  // ── Unaccepted Cash Orders Expiry (F108) — runs every 2 minutes ─────────────
+  scheduleJob('*/2 * * * *', async () => {
+    try {
+      await withJobLock('unaccepted-cash-orders', 110, async () => {
+        const expiredCount = await OrderService.expireUnacceptedCashOrders();
+        if (expiredCount > 0) {
+          logger.info(
+            `[Scheduler] Expired ${expiredCount} unaccepted cash order(s) past pickup window.`,
+          );
+        }
+      });
+    } catch (err) {
+      logger.error('[Scheduler] Failed to process unaccepted cash orders:', err);
+    }
+  });
+
   // ── Ad schedule window transitions — runs every 1 minute ────────────────
   // Side effects only. Whether an ad is live is derived at read time and is
   // exact to the millisecond; this job never gates that. It notifies sellers
   // and nudges open buyer maps when a window opens or closes.
-  cron.schedule('* * * * *', async () => {
+  scheduleJob('* * * * *', async () => {
     try {
       await withJobLock('ad-window-transitions', 50, async () => {
         const processed = await MerchantAdsService.processWindowTransitions();
@@ -90,7 +136,7 @@ export const startScheduler = () => {
   // Flips settlements past their hold to RELEASED, which is the only state a
   // payout can sweep. Nothing did this before, so every settlement would have
   // sat at PENDING forever. See FLAGS.md LED-4.
-  cron.schedule('0 * * * *', async () => {
+  scheduleJob('0 * * * *', async () => {
     try {
       const released = await SettlementService.releaseMaturedSettlements();
       if (released > 0) {
@@ -105,7 +151,7 @@ export const startScheduler = () => {
   // Expires EARN lots past their rolling expiry and stale claimed vouchers
   // past their own expiresAt. One job for both — see OPEN-FLAGS.md F44+F52
   // ("one scheduler, two problems").
-  cron.schedule('30 * * * *', async () => {
+  scheduleJob('30 * * * *', async () => {
     try {
       await withJobLock('mappoints-expiry', 300, async () => {
         const [pointsExpired, vouchersExpired] = await Promise.all([
@@ -131,10 +177,8 @@ export const startScheduler = () => {
   // Deliberately not under `withJobLock`. The sweep is idempotent (`deletedAt:
   // null` is in the WHERE, so a second run in the same hour matches nothing) and
   // has no outward-facing side effects to duplicate, so the lock would buy
-  // nothing — and see the note on `withJobLock` above about RedisUtil in the
-  // worker process.
-  cron.schedule('* * * * *', async () => {
-    // TEMP: was '15 * * * *'
+  // nothing.
+  scheduleJob('15 * * * *', async () => {
     try {
       const purged = await StoreService.purgeExpiredRejectedStores();
       if (purged > 0) {
@@ -145,25 +189,109 @@ export const startScheduler = () => {
     }
   });
 
-  // ── Database cleanup — runs daily at 2:00 AM ────────────────────────────
-  cron.schedule('0 2 * * *', async () => {
-    logger.info('[Scheduler] Running daily database cleanup...');
+  // ── Analytics Daily Rollup — runs daily at 00:05 UTC ────────────────────
+  // Aggregates previous day's events into daily rollups for ranking and trending.
+  scheduleJob('5 0 * * *', async () => {
     try {
-      logger.info('[Scheduler] Daily cleanup completed.');
+      await withJobLock('analytics-daily-rollup', 1800, async () => {
+        const count = await AnalyticsService.generateDailyRollups();
+        if (count > 0) {
+          logger.info(`[Scheduler] Generated ${count} analytics daily rollup record(s).`);
+        }
+      });
     } catch (err) {
-      logger.error('[Scheduler] Daily cleanup failed:', err);
+      logger.error('[Scheduler] Failed to generate analytics daily rollups:', err);
     }
   });
 
-  // ── Worker metrics flush — every 5 minutes ──────────────────────────────
-  cron.schedule('*/5 * * * *', async () => {
-    logger.info('[Scheduler] Flushing stale cache keys...');
+  // ── Stripe Payment Reconciliation Sweeper — runs every 5 minutes ─────────
+  // Sweeps pending payments older than 10 minutes to verify status with Stripe.
+  scheduleJob('*/5 * * * *', async () => {
     try {
-      logger.info('[Scheduler] Cache flush completed.');
+      await withJobLock('stripe-payment-reconciliation', 250, async () => {
+        const job = new PaymentReconciliationJob();
+        const result = await job.runReconciliation(10);
+        if (result.inspected > 0) {
+          logger.info(
+            `[Scheduler] Stripe payment reconciliation completed: inspected=${result.inspected}, completed=${result.completed}, failed=${result.failed}, skipped=${result.skipped}`,
+          );
+        }
+      });
     } catch (err) {
-      logger.error('[Scheduler] Cache flush failed:', err);
+      logger.error('[Scheduler] Stripe payment reconciliation failed:', err);
+    }
+  });
+
+  // ── Agent Commission Maturation — runs daily at 03:00 UTC ────────────────
+  // Transitions PENDING commissions past their eligibility hold days into MATURED
+  // and moves pendingBalance to availableBalance.
+  scheduleJob('0 3 * * *', async () => {
+    try {
+      await withJobLock('agent-commission-maturation', 600, async () => {
+        const matured = await AgentCommissionService.maturePendingCommissions();
+        if (matured > 0) {
+          logger.info(`[Scheduler] Matured ${matured} agent commission transaction(s).`);
+        }
+      });
+    } catch (err) {
+      logger.error('[Scheduler] Agent commission maturation sweep failed:', err);
+    }
+  });
+
+  // ── Daily Database Cleanup (F103, F110) — runs daily at 02:00 UTC ────────────
+  // Purges expired auth sessions, consumed/expired password reset tokens,
+  // and marks expired pending admin invites.
+  scheduleJob('0 2 * * *', async () => {
+    try {
+      await withJobLock('daily-database-cleanup', 600, async () => {
+        const result = await SystemMaintenanceService.pruneExpiredRecords();
+        if (
+          result.sessionsPurged > 0 ||
+          result.resetTokensPurged > 0 ||
+          result.invitesExpired > 0
+        ) {
+          logger.info(
+            `[Scheduler] Daily database cleanup completed: sessionsPurged=${result.sessionsPurged}, resetTokensPurged=${result.resetTokensPurged}, invitesExpired=${result.invitesExpired}`,
+          );
+        }
+      });
+    } catch (err) {
+      logger.error('[Scheduler] Daily database cleanup failed:', err);
+    }
+  });
+
+  // ── Wallet-vs-Ledger Invariant Audit (ECO-11) — runs daily at 03:30 UTC ───
+  // Audits RewardWallet and AgentCommissionAccount balances against immutable transaction ledgers.
+  scheduleJob('30 3 * * *', async () => {
+    try {
+      await withJobLock('wallet-ledger-audit', 1800, async () => {
+        const report = await WalletLedgerAuditService.runFullAudit();
+        if (report.totalDiscrepancies > 0) {
+          logger.error(
+            `[Scheduler] Wallet-vs-ledger audit detected ${report.totalDiscrepancies} financial discrepancy/discrepancies!`,
+          );
+        } else {
+          logger.info(
+            `[Scheduler] Wallet-vs-ledger audit passed cleanly: ${report.rewardWallets.auditedCount} reward wallets, ${report.agentCommissionAccounts.auditedCount} commission accounts verified.`,
+          );
+        }
+      });
+    } catch (err) {
+      logger.error('[Scheduler] Wallet-vs-ledger audit failed:', err);
     }
   });
 
   logger.info('[Scheduler] All jobs registered.');
+};
+
+/**
+ * Stops all registered scheduled jobs and cleans up timers.
+ */
+export const stopScheduler = () => {
+  logger.info(`[Scheduler] Stopping ${registeredTasks.length} scheduled job(s)...`);
+  for (const task of registeredTasks) {
+    task.stop();
+  }
+  registeredTasks.length = 0;
+  logger.info('[Scheduler] All scheduled jobs stopped.');
 };

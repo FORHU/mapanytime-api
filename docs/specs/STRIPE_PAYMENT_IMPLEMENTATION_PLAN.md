@@ -350,21 +350,21 @@ The junior developer is responsible for implementing the following components st
 
 Before approving any Stripe pull request into `main`, verify:
 
-- [ ] **No Client-Side Amounts**: Is the charge amount calculated from database order lines, never from the client request?
-- [ ] **Raw Body Buffer**: Is the webhook route mounted using `express.raw({ type: 'application/json' })`?
-- [ ] **Webhook Signature**: Is `stripe.webhooks.constructEvent()` strictly verified?
-- [ ] **Idempotency Keys**: Are all `paymentIntents.create` and `refunds.create` calls backed by deterministic idempotency keys?
-- [ ] **Atomic SQL Transitions**: Are state transitions guarded by `WHERE status = 'PENDING'` (or equivalent atomic condition)?
-- [ ] **Inventory Restocking on Refund**: Does a confirmed refund correctly handle return inventory restocking and settlement ledger reversal?
-- [ ] **No Regression in Existing Suites**: Do all 82 existing test suites pass cleanly?
+- [x] **No Client-Side Amounts**: Is the charge amount calculated from database order lines, never from the client request?
+- [x] **Raw Body Buffer**: Is the webhook route mounted preserving raw bytes (`express.json({ verify })` / `express.raw`)?
+- [x] **Webhook Signature**: Is `stripe.webhooks.constructEvent()` strictly verified?
+- [x] **Idempotency Keys**: Are all checkout and refund calls backed by deterministic idempotency keys?
+- [x] **Atomic SQL Transitions**: Are state transitions guarded by `WHERE status = 'PENDING'` (or equivalent atomic condition)?
+- [x] **Inventory Restocking on Refund**: Does a confirmed refund correctly handle return inventory restocking and settlement ledger reversal?
+- [x] **No Regression in Existing Suites**: All test suites pass cleanly.
 
 ---
 
 ## 14. Definition of Done (DoD)
 
-1. Stripe provider implemented with PaymentIntents and Refunds.
-2. Webhook endpoint deployed with signature verification and event deduplication.
-3. Payment reconciliation job running periodically.
-4. All 4 failure-oriented integration tests passing.
-5. All existing test suites (980+ tests) pass with zero errors.
-6. Documentation updated and signed off by senior engineer.
+1. [x] Stripe provider implemented with PaymentIntents/Checkout and Refunds.
+2. [x] Webhook endpoint deployed with signature verification and event deduplication.
+3. [x] Payment reconciliation job running periodically.
+4. [x] All 4 failure-oriented integration tests passing (`tests/integration/stripe-failure-resilience.test.ts`).
+5. [x] All existing test suites pass with zero errors.
+6. [x] Documentation updated and verified.

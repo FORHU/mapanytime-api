@@ -59,6 +59,7 @@ describe('ReturnService — refund execution', () => {
     inventory: { findFirst: jest.Mock; update: jest.Mock };
     products: { findUnique: jest.Mock; update: jest.Mock };
     inventoryMovements: { create: jest.Mock };
+    orderCharges: { findMany: jest.Mock; create: jest.Mock };
   };
 
   beforeEach(() => {
@@ -85,6 +86,13 @@ describe('ReturnService — refund execution', () => {
       inventory: { findFirst: jest.fn(), update: jest.fn() },
       products: { findUnique: jest.fn(), update: jest.fn() },
       inventoryMovements: { create: jest.fn() },
+      // The order's gateway fee, and no gateway-fee refund rows yet.
+      orderCharges: {
+        findMany: jest.fn(({ where }: { where: { type: string } }) =>
+          Promise.resolve(where.type === 'PAYMENT_PROCESSING_FEE' ? [{ amount: 22.3 }] : []),
+        ),
+        create: jest.fn(),
+      },
     };
     mockPrisma.$transaction.mockImplementation(async (fn: (t: unknown) => unknown) => fn(tx));
     mockPrisma.orders.findUnique.mockResolvedValue(null);
@@ -136,6 +144,24 @@ describe('ReturnService — refund execution', () => {
   });
 
   // A refund we recorded but never sent silently keeps the buyer's money.
+  // F86 (#118): the gateway keeps its fee, so the platform absorbs it, on the ledger.
+  it('records the gateway fee the platform absorbs on the refund', async () => {
+    givenReturn();
+    givenPayment();
+
+    await ReturnService.updateReturnStatus('ret-1', 'REFUNDED', SELLER_USER);
+
+    expect(tx.orderCharges.create).toHaveBeenCalledTimes(1);
+    const { data } = tx.orderCharges.create.mock.calls[0][0];
+    expect(data).toMatchObject({
+      orderId: 'order-1',
+      type: 'REFUND',
+      payer: 'PLATFORM',
+      beneficiary: 'PAYMENT_PROVIDER',
+    });
+    expect(String(data.amount)).toBe('22.3');
+  });
+
   it('records nothing when the provider rejects the refund', async () => {
     givenReturn();
     givenPayment();
@@ -169,6 +195,8 @@ describe('ReturnService — refund execution', () => {
 
     expect(refundPayment).not.toHaveBeenCalled();
     expect(SettlementService.markRefundedForOrder).toHaveBeenCalled();
+    // No gateway, so no gateway fee for the platform to absorb.
+    expect(tx.orderCharges.create).not.toHaveBeenCalled();
   });
 
   it('refuses to refund a payment that was never completed', async () => {

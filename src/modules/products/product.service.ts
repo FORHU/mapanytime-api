@@ -1,4 +1,4 @@
-﻿import { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import ProductRepository from './product.repository';
 import InventoryRepository from '../inventory/inventory.repository';
 import CategoryService from '../categories/category.service';
@@ -254,6 +254,9 @@ export default class ProductService {
     search?: string;
     minPrice?: number;
     maxPrice?: number;
+    sortBy?: 'createdAt' | 'price_asc' | 'price_desc' | 'most_viewed' | 'trending' | 'proximity';
+    centerLat?: number;
+    centerLng?: number;
     page: number;
     limit: number;
     skip: number;
@@ -269,6 +272,9 @@ export default class ProductService {
       search: filters.search,
       minPrice: filters.minPrice,
       maxPrice: filters.maxPrice,
+      sortBy: filters.sortBy,
+      centerLat: filters.centerLat,
+      centerLng: filters.centerLng,
       skip: filters.skip,
       take: filters.limit,
     });

@@ -211,7 +211,13 @@ export default class MerchantAdsRepository {
 
   static async incrementAdMetrics(
     adId: string,
-    delta: { impressions?: number; clicks?: number; conversions?: number; revenue?: number },
+    delta: {
+      impressions?: number;
+      clicks?: number;
+      conversions?: number;
+      revenue?: number;
+      spend?: number;
+    },
   ) {
     return prisma.merchantAds.update({
       where: { id: adId },
@@ -220,6 +226,7 @@ export default class MerchantAdsRepository {
         ...(delta.clicks ? { clicksCount: { increment: delta.clicks } } : {}),
         ...(delta.conversions ? { conversionsCount: { increment: delta.conversions } } : {}),
         ...(delta.revenue ? { attributedRevenue: { increment: delta.revenue } } : {}),
+        ...(delta.spend ? { spentAmount: { increment: delta.spend } } : {}),
       },
     });
   }

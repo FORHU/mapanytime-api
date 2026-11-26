@@ -1,5 +1,6 @@
 import crypto from 'crypto';
-import { ACCESS_TOKEN_SECRET, MAPANYTIME_WEB_APP_EMAIL_URL } from '../../config';
+import { MAPANYTIME_WEB_APP_EMAIL_URL } from '../../config';
+import { AUTH_SECRET } from '../auth/auth-secret';
 
 /**
  * The page the buyer's browser lands on after paying, and the token that makes
@@ -33,13 +34,13 @@ export function isSafeOrderId(value: unknown): value is string {
 
 /**
  * Domain-separated so a signature minted here can never be replayed against
- * anything else signing with the same key.
+ * anything else signing with the same key — the auth secret also signs bearer
+ * session tokens, over the bare session token with no `payment-return:` prefix.
+ * (It used the JWT access-token secret until JWT was removed, #122; return links
+ * issued before that deploy no longer verify.)
  */
 export function signOrderReturnToken(orderId: string): string {
-  return crypto
-    .createHmac('sha256', ACCESS_TOKEN_SECRET)
-    .update(`payment-return:${orderId}`)
-    .digest('hex');
+  return crypto.createHmac('sha256', AUTH_SECRET).update(`payment-return:${orderId}`).digest('hex');
 }
 
 export function verifyOrderReturnToken(orderId: string, token: unknown): boolean {

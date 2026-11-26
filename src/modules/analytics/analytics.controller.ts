@@ -47,11 +47,44 @@ export default class AnalyticsController {
         // Authentication is optional on this route; anonymous events are the
         // normal case and are tied together by the client's sessionId instead.
         userId: (req.user as { id: string } | undefined)?.id ?? null,
+        sessionId: (req.get('x-session-id') || req.get('x-device-session-id'))?.trim() ?? null,
         ipAddress: clientIp(req) ?? null,
         userAgent: req.get('user-agent') ?? null,
       });
 
       return responseSuccess(res, 202, result, 'Events accepted');
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * GET /v1/analytics/rankings/trending
+   */
+  static async getTrending(req: Request, res: Response, next: NextFunction) {
+    try {
+      const type = (req.query.type as string)?.toUpperCase() === 'STORE' ? 'STORE' : 'PRODUCT';
+      const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+      const hours = Math.min(Math.max(Number(req.query.hours) || 24, 1), 168);
+
+      const items = await AnalyticsService.getTrending(type, hours, limit);
+      return responseSuccess(res, 200, items, 'Trending items retrieved');
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * GET /v1/analytics/rankings/most-viewed
+   */
+  static async getMostViewed(req: Request, res: Response, next: NextFunction) {
+    try {
+      const type = (req.query.type as string)?.toUpperCase() === 'STORE' ? 'STORE' : 'PRODUCT';
+      const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+      const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 90);
+
+      const items = await AnalyticsService.getMostViewed(type, days, limit);
+      return responseSuccess(res, 200, items, 'Most viewed items retrieved');
     } catch (err) {
       next(err);
     }

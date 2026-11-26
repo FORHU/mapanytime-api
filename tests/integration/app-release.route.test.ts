@@ -45,13 +45,13 @@ jest.mock('../../src/infrastructure/redis', () => ({
   },
 }));
 
-jest.mock('../../src/infrastructure/rabbitmq', () => ({
-  rabbitmq: {
-    connect: jest.fn().mockResolvedValue(undefined),
-    close: jest.fn().mockResolvedValue(undefined),
-    isReady: jest.fn().mockReturnValue(true),
+jest.mock('../../src/infrastructure/event-bus', () => ({
+  eventBus: {
+    ping: jest.fn().mockResolvedValue(true),
     publish: jest.fn().mockResolvedValue(true),
-    consume: jest.fn().mockResolvedValue(undefined),
+    publishMany: jest.fn().mockResolvedValue([]),
+    consume: jest.fn(),
+    consumeBatch: jest.fn(),
   },
 }));
 

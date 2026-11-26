@@ -64,6 +64,21 @@ describe('XenditProvider.parseWebhookEvent', () => {
     expect(result.failureReason).toBeNull();
   });
 
+  // #139: the payment request is what Xendit's Refunds API takes.
+  it('stores the payment request id as the reference when the webhook carries one', () => {
+    const result = provider.parseWebhookEvent({
+      event: 'payment_session.completed',
+      data: {
+        payment_session_id: 'ps-abc',
+        payment_request_id: 'pr-abc',
+        reference_id: 'order_1',
+        status: 'COMPLETED',
+      },
+    });
+
+    expect(result.providerReference).toBe('pr-abc');
+  });
+
   it('parses an expired payment session as a failure', () => {
     const payload = {
       event: 'payment_session.expired',
@@ -111,7 +126,8 @@ describe('XenditProvider.refundPayment', () => {
       expect.objectContaining({
         payment_request_id: 'pr-session-999',
         amount: 50,
-        reason: 'requested_by_customer',
+        // Xendit's reasons are upper case (#139).
+        reason: 'REQUESTED_BY_CUSTOMER',
         currency: 'PHP',
       }),
       expect.any(Object),
@@ -122,29 +138,93 @@ describe('XenditProvider.refundPayment', () => {
     expect(result.status).toBe('SUCCEEDED');
   });
 
-  it('uses payment_id when reference is not a payment_request_id (no pr- prefix)', async () => {
+  it('uses payment_id for a Xendit payment id (py-)', async () => {
     const axios = require('axios');
     jest.spyOn(axios, 'post').mockResolvedValueOnce({
-      data: {
-        id: 'ref-67890',
-        amount: 25.5,
-        status: 'PENDING',
-      },
+      data: { id: 'ref-67890', amount: 25.5, status: 'PENDING' },
     });
 
-    const result = await provider.refundPayment('ps-session-123', 2550);
+    const result = await provider.refundPayment('py-payment-123', 2550);
 
     expect(axios.post).toHaveBeenCalledWith(
       expect.stringContaining('/refunds'),
       expect.objectContaining({
-        payment_id: 'ps-session-123',
+        payment_id: 'py-payment-123',
         amount: 25.5,
         reason: 'REQUESTED_BY_CUSTOMER',
       }),
       expect.any(Object),
     );
-
     expect(result.refundId).toBe('ref-67890');
     expect(result.amount).toBe(2550);
+  });
+
+  /**
+   * Payments stored before #139 hold the session id, which the Refunds API does
+   * not accept. The adapter looks up the payment request the session produced.
+   */
+  it('refunds the payment request behind a session id stored before #139', async () => {
+    const axios = require('axios');
+    const get = jest
+      .spyOn(axios, 'get')
+      .mockResolvedValueOnce({ data: { payment_request_id: 'pr-from-session' } });
+    const post = jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      data: { id: 'ref-legacy', amount: 25.5, status: 'SUCCEEDED' },
+    });
+
+    await provider.refundPayment('ps-session-123', 2550);
+
+    expect(get).toHaveBeenCalledWith(
+      expect.stringContaining('/sessions/ps-session-123'),
+      expect.any(Object),
+    );
+    const body = post.mock.lastCall?.[1] as Record<string, unknown>;
+    expect(body.payment_request_id).toBe('pr-from-session');
+    expect(body.payment_id).toBeUndefined();
+  });
+
+  it('refuses to refund a session that produced no payment request', async () => {
+    const axios = require('axios');
+    jest.spyOn(axios, 'get').mockResolvedValueOnce({ data: { payment_request_id: null } });
+    const post = jest.spyOn(axios, 'post');
+    post.mockClear();
+
+    await expect(provider.refundPayment('ps-never-paid', 2550)).rejects.toThrow(
+      'no payment request',
+    );
+    expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe('XenditProvider.createCheckoutSession', () => {
+  const previousBase = process.env.MAPANYTIME_API_PUBLIC_URL;
+  beforeAll(() => {
+    process.env.MAPANYTIME_API_PUBLIC_URL = 'https://api.example.com';
+  });
+  afterAll(() => {
+    process.env.MAPANYTIME_API_PUBLIC_URL = previousBase;
+  });
+
+  /**
+   * F109: the sweeper cancels an unpaid order after 15 minutes, and Xendit's
+   * default session lasts 30, so a buyer could pay for an order that was gone.
+   * The session now closes first. Xendit refuses less than 10 minutes.
+   */
+  it('closes the session before the stale-order sweeper cancels the order', async () => {
+    const axios = require('axios');
+    const post = jest.spyOn(axios, 'post').mockResolvedValueOnce({
+      data: { payment_session_id: 'ps-new', payment_link_url: 'https://pay.example/ps-new' },
+    });
+    const before = Date.now();
+
+    await new XenditProvider().createCheckoutSession({
+      orderId: 'order-1',
+      amountInCentavos: 102230,
+    } as never);
+
+    const body = post.mock.lastCall?.[1] as { expires_at?: string };
+    const minutes = (Date.parse(body.expires_at ?? '') - before) / 60_000;
+    expect(minutes).toBeGreaterThanOrEqual(10);
+    expect(minutes).toBeLessThan(15);
   });
 });

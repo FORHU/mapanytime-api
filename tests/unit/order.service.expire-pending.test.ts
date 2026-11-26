@@ -58,6 +58,23 @@ describe('OrderService.expireStalePendingOrders (F44)', () => {
     );
   });
 
+  /**
+   * F108. A cash order's payment stays PENDING until the seller hands the goods over, so
+   * "PENDING and unpaid after 15 minutes" is its normal state. The query must leave it out,
+   * or every cash order the seller has not accepted yet is cancelled and its stock released.
+   */
+  it('never selects cash-on-pickup orders', async () => {
+    (prisma.orders.findMany as jest.Mock).mockResolvedValue([]);
+
+    await OrderService.expireStalePendingOrders(15);
+
+    const { where } = (prisma.orders.findMany as jest.Mock).mock.calls[0][0];
+    expect(where.status).toBe('PENDING');
+    expect(where.AND).toContainEqual({
+      payment: { none: { paymentMethod: { type: 'CASH' } } },
+    });
+  });
+
   it('returns 0 when no stale orders exist', async () => {
     (prisma.orders.findMany as jest.Mock).mockResolvedValue([]);
 

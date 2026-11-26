@@ -76,7 +76,7 @@ paths:
                             enum: [queued, direct]
                             description: >
                               `queued` is the normal path. `direct` means
-                              RabbitMQ was unreachable and the events were
+                              the event bus was unreachable and the events were
                               written straight to the database instead.
                             example: queued
         '400':

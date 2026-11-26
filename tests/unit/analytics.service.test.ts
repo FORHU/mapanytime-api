@@ -1,11 +1,11 @@
 import AnalyticsService from '../../src/modules/analytics/analytics.service';
 import AnalyticsRepository from '../../src/modules/analytics/analytics.repository';
-import { rabbitmq } from '../../src/infrastructure/rabbitmq';
+import { eventBus } from '../../src/infrastructure/event-bus';
 import { ROUTING_KEYS } from '../../src/events/routing-keys';
 import { AnalyticsEventPayload } from '../../src/modules/analytics/analytics.types';
 
-jest.mock('../../src/infrastructure/rabbitmq', () => ({
-  rabbitmq: { publish: jest.fn() },
+jest.mock('../../src/infrastructure/event-bus', () => ({
+  eventBus: { publishMany: jest.fn() },
 }));
 
 jest.mock('../../src/modules/analytics/analytics.repository', () => ({
@@ -13,7 +13,11 @@ jest.mock('../../src/modules/analytics/analytics.repository', () => ({
   default: { createMany: jest.fn(), create: jest.fn() },
 }));
 
-const mockPublish = rabbitmq.publish as jest.MockedFunction<typeof rabbitmq.publish>;
+const mockPublishMany = eventBus.publishMany as jest.MockedFunction<typeof eventBus.publishMany>;
+
+/** Make every publish report `ok`, one result per payload. */
+const publishAll = (ok: boolean) =>
+  mockPublishMany.mockImplementation(async (_key, payloads) => payloads.map(() => ok));
 const mockCreateMany = AnalyticsRepository.createMany as jest.MockedFunction<
   typeof AnalyticsRepository.createMany
 >;
@@ -24,25 +28,26 @@ const context = {
   userAgent: 'jest-agent',
 };
 
-/** The payload handed to rabbitmq.publish on the nth call. */
-const publishedPayload = (call = 0): AnalyticsEventPayload =>
-  mockPublish.mock.calls[call][1] as AnalyticsEventPayload;
+/** The nth payload handed to eventBus.publishMany. */
+const publishedPayload = (index = 0): AnalyticsEventPayload =>
+  (mockPublishMany.mock.calls[0][1] as AnalyticsEventPayload[])[index];
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockPublish.mockResolvedValue(true);
+  publishAll(true);
   mockCreateMany.mockResolvedValue(1);
 });
 
 describe('AnalyticsService.record', () => {
-  it('publishes one message per event on the analytics routing key', async () => {
+  it('publishes every event in one batched call on the analytics routing key', async () => {
     const result = await AnalyticsService.record(
       [{ eventType: 'PRODUCT_VIEW' }, { eventType: 'SEARCH' }],
       context,
     );
 
-    expect(mockPublish).toHaveBeenCalledTimes(2);
-    expect(mockPublish.mock.calls[0][0]).toBe(ROUTING_KEYS.ANALYTICS_EVENT_RECORDED);
+    expect(mockPublishMany).toHaveBeenCalledTimes(1);
+    expect(mockPublishMany.mock.calls[0][0]).toBe(ROUTING_KEYS.ANALYTICS_EVENT_RECORDED);
+    expect(mockPublishMany.mock.calls[0][1]).toHaveLength(2);
     expect(result).toEqual({ accepted: 2, transport: 'queued' });
     // The happy path must never touch the database — that is the entire point.
     expect(mockCreateMany).not.toHaveBeenCalled();
@@ -77,6 +82,27 @@ describe('AnalyticsService.record', () => {
       const payload = publishedPayload();
       expect(payload.userId).toBeNull();
       expect(payload.sessionId).toBe('sess-9');
+    });
+
+    it('adopts request context sessionId when event body omits it', async () => {
+      await AnalyticsService.record([{ eventType: 'PRODUCT_VIEW' }], {
+        ...context,
+        sessionId: 'sess-header-xyz',
+      });
+
+      const payload = publishedPayload();
+      expect(payload.sessionId).toBe('sess-header-xyz');
+    });
+
+    it('derives a deterministic fallback sessionId when both body and context omit it', async () => {
+      await AnalyticsService.record([{ eventType: 'PRODUCT_VIEW' }], {
+        userId: null,
+        ipAddress: '198.51.100.1',
+        userAgent: 'mobile-client/1.0',
+      });
+
+      const payload = publishedPayload();
+      expect(payload.sessionId).toMatch(/^sess_[a-f0-9]{24}$/);
     });
   });
 
@@ -115,9 +141,9 @@ describe('AnalyticsService.record', () => {
     });
   });
 
-  describe('when RabbitMQ is unreachable', () => {
+  describe('when the event bus is unreachable', () => {
     it('writes the events straight to the database instead of dropping them', async () => {
-      mockPublish.mockResolvedValue(false);
+      publishAll(false);
 
       const result = await AnalyticsService.record(
         [{ eventType: 'PRODUCT_VIEW' }, { eventType: 'ADD_TO_CART' }],
@@ -130,7 +156,7 @@ describe('AnalyticsService.record', () => {
     });
 
     it('falls back for only the events that failed to publish', async () => {
-      mockPublish.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      mockPublishMany.mockResolvedValueOnce([true, false]);
 
       const result = await AnalyticsService.record(
         [{ eventType: 'PRODUCT_VIEW' }, { eventType: 'ADD_TO_CART' }],
@@ -144,7 +170,7 @@ describe('AnalyticsService.record', () => {
     });
 
     it('propagates the error when the fallback write also fails', async () => {
-      mockPublish.mockResolvedValue(false);
+      publishAll(false);
       mockCreateMany.mockRejectedValue(new Error('db down'));
 
       // Both transports gone is a real failure and the caller must hear about

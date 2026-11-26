@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../utils/prisma';
 import { haversineKm } from '../../utils/geo.util';
 import logger from '../../utils/logger';
+import { ADMIN_ROLES, SystemRole } from '../../constants/roles.constant';
 import {
   emitVehicleMoved,
   emitVehicleRemoved,
@@ -244,6 +245,61 @@ export default class MobilityService {
   /** Snapshot for a map that just opened, so it needn't wait for the next ping. */
   static liveInBounds(bounds: Bounds) {
     return live.searchBox(bounds);
+  }
+
+  /**
+   * Retrieves historical location trail breadcrumbs for a vehicle.
+   * Access restricted to platform admins, the assigned driver, or vehicle operator members.
+   */
+  static async getVehicleTrail(
+    vehicleId: string,
+    caller: { id: string; roles?: { roleName: string }[] },
+    options: live.TrailQueryOptions,
+  ) {
+    const vehicle = await prisma.vehicles.findUnique({
+      where: { id: vehicleId },
+      include: {
+        vehicleType: { select: { code: true, name: true } },
+        operator: {
+          select: {
+            id: true,
+            name: true,
+            members: { select: { userId: true, role: true } },
+          },
+        },
+        driver: {
+          select: { id: true, firstName: true, lastName: true },
+        },
+      },
+    });
+
+    if (!vehicle) {
+      throw { status: 404, message: 'Vehicle not found' };
+    }
+
+    const isAdmin = caller.roles?.some((r) => ADMIN_ROLES.includes(r.roleName as SystemRole));
+    const isAssignedDriver = vehicle.driverUserId === caller.id;
+    const isOperatorMember = vehicle.operator.members.some((m) => m.userId === caller.id);
+
+    if (!isAdmin && !isAssignedDriver && !isOperatorMember) {
+      throw { status: 403, message: 'Forbidden: Insufficient permissions to view vehicle trail' };
+    }
+
+    const points = await live.getTrail(vehicleId, options);
+
+    return {
+      vehicleId: vehicle.id,
+      plateNumber: vehicle.plateNumber,
+      typeCode: vehicle.vehicleType.code,
+      typeName: vehicle.vehicleType.name,
+      operator: {
+        id: vehicle.operator.id,
+        name: vehicle.operator.name,
+      },
+      driver: vehicle.driver,
+      totalPoints: points.length,
+      points,
+    };
   }
 
   /** Takes vehicles silent for 60s off the map and tells their cell. Safe on every replica. */

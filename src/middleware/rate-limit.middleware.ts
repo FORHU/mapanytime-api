@@ -1,15 +1,13 @@
+import crypto from 'crypto';
 import type { Express, Request } from 'express';
-import jwt from 'jsonwebtoken';
 import rateLimit, {
   ipKeyGenerator,
   RateLimitExceededEventHandler,
   RateLimitRequestHandler,
   Store,
 } from 'express-rate-limit';
-import { RedisStore } from 'rate-limit-redis';
-import RedisUtil from '../utils/redis.util';
+import { FailoverStore, redisHealthy } from './rate-limit-store';
 import {
-  ACCESS_TOKEN_SECRET,
   CREDENTIAL_FAILURE_LIMIT_MAX,
   CREDENTIAL_RATE_LIMIT_MAX,
   GLOBAL_RATE_LIMIT_MAX,
@@ -24,6 +22,7 @@ import {
   resetEmailKey,
 } from '../utils/credential-paths.util';
 import logger from '../utils/logger';
+import { bearerFrom, verifySessionToken } from '../modules/auth/session-token';
 
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
@@ -47,60 +46,81 @@ const configuredLimits: RateLimits = {
 // ipKeyGenerator groups IPv6 addresses by subnet so one host can't rotate through its /64.
 const ipKey = (req: Request) => ipKeyGenerator(clientIp(req) ?? '');
 
-/** The user a bearer token was signed for, or undefined if it doesn't verify. */
-function bearerUserId(req: Request): string | undefined {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return undefined;
-  try {
-    const { userId } = jwt.verify(token, ACCESS_TOKEN_SECRET, { ignoreExpiration: true }) as {
-      userId?: unknown;
-    };
-    return typeof userId === 'string' && userId ? userId : undefined;
-  } catch {
-    return undefined;
-  }
+/**
+ * A short, stable id for the session a bearer token belongs to, or undefined if
+ * the token's signature does not verify (#122). Offline — an HMAC check, no
+ * session or account lookup — and a hash, so the token itself never lands in a
+ * Redis key or a log line.
+ */
+function bearerSessionId(req: Request): string | undefined {
+  const token = bearerFrom(req.headers.authorization);
+  const sessionToken = token ? verifySessionToken(token) : null;
+  if (!sessionToken) return undefined;
+  return crypto.createHash('sha256').update(sessionToken).digest('hex').slice(0, 24);
 }
 
 /**
  * Signed-in callers get a bucket of their own; everyone else shares one per address.
  *
- * The token is only signature-checked — no session or account lookup. A token from a
- * logged-out session still names a real user and `authenticate` 401s it afterwards,
- * while a forged one fails here and falls back to the address, so nobody can claim
- * another user's bucket or mint new ones. Expiry is ignored on purpose: access tokens
- * last 15 minutes, and keying an expired one on a full address bucket would answer 429
- * instead of the 401 that makes clients refresh — the lockout this key exists to end.
+ * The token is only signature-checked. A token from a signed-out or expired session
+ * still carries a genuine signature and keeps its bucket — `authenticate` 401s it
+ * afterwards, which is the answer that sends clients to login rather than a 429 from a
+ * full address bucket. A forged token fails here and falls back to the address, so
+ * nobody can claim another caller's bucket or mint new ones. Under the single-device
+ * rule one session is one user.
  *
  * Anonymous IPv6 is grouped by /64, not the library's /56: carriers hand each phone its
  * own /64, so a /56 on mobile data spans hundreds of subscribers.
  */
 const globalKey = (req: Request) => {
-  const userId = bearerUserId(req);
-  return userId ? `user:${userId}` : `ip:${ipKeyGenerator(clientIp(req) ?? '', 64)}`;
+  const sessionId = bearerSessionId(req);
+  return sessionId ? `session:${sessionId}` : `ip:${ipKeyGenerator(clientIp(req) ?? '', 64)}`;
 };
-
 const skipPreflight = (req: Request) => req.method === 'OPTIONS';
 
 /**
- * The library's default response, plus one log line per blocked request with rich diagnostic metadata.
+ * The library's default response, plus one log line per blocked request. requestId and
+ * correlationId come from the logger's request context (see logger.ts), not from here.
  */
 const logBlocked =
   (name: string, keyOf: (req: Request) => string | undefined): RateLimitExceededEventHandler =>
   (req, res, _next, options) => {
-    const correlationId = (req.headers['x-correlation-id'] ||
-      req.headers['x-request-id'] ||
-      '') as string;
-    const userId = bearerUserId(req);
+    const sessionId = bearerSessionId(req);
     const retryAfter = res.getHeader('Retry-After');
+    const key = keyOf(req);
+    const ip = ipKey(req);
     logger.warn(
-      `[RateLimit] ${name} blocked ${req.method} ${req.originalUrl} ` +
-        `ip=${ipKey(req)} key=${keyOf(req)}` +
-        (userId ? ` user=${userId}` : '') +
-        (correlationId ? ` correlationId=${correlationId}` : '') +
+      `[RateLimit] ${name} blocked ${req.method} ${req.originalUrl} ip=${ip} key=${key}` +
+        (sessionId ? ` session=${sessionId}` : '') +
         (retryAfter ? ` retryAfter=${retryAfter}` : ''),
+      {
+        limiter: name,
+        method: req.method,
+        url: req.originalUrl,
+        ip,
+        key,
+        sessionId,
+        retryAfter,
+      },
     );
     res.status(options.statusCode).json(options.message);
   };
+
+/** Whether the auth limiters are on their emergency caps; undefined until the first request. */
+let emergency: boolean | undefined;
+
+/** Logs entering and leaving emergency mode once per transition, not once per request. */
+function noteRedisHealth(ready: boolean) {
+  if (emergency === !ready) return;
+  emergency = !ready;
+  if (emergency) {
+    logger.error(
+      '[RateLimit:EMERGENCY] Redis unavailable or failing; auth limiters are on emergency caps and counting per instance',
+    );
+  } else {
+    logger.info('[RateLimit] Redis available; auth limiters back on configured limits');
+  }
+}
 
 export interface RateLimiters {
   global: RateLimitRequestHandler;
@@ -110,43 +130,29 @@ export interface RateLimiters {
 }
 
 /**
- * Creates rate limiters backed by Redis (rate-limit-redis) when available,
- * falling back gracefully to express-rate-limit's in-memory store in dev or unit tests.
+ * Creates the limiters. Each counts in Redis while it is ready and in this instance's memory
+ * otherwise (see FailoverStore), so it is safe to call before Redis connects.
  */
 export function createRateLimiters(
   limits: RateLimits = configuredLimits,
   customStore?: Store,
 ): RateLimiters {
-  const isRedisHealthy = () => Boolean(customStore || RedisUtil.client?.isOpen);
-
-  // In production, when Redis is unavailable, apply a restrictive local emergency limit
-  // on security-sensitive auth endpoints and log a security alert.
-  const emergencyAuthLimit = (normalLimit: number, emergencyCap = 5): number => {
-    if (isRedisHealthy() || process.env.NODE_ENV === 'test') {
-      return normalLimit;
-    }
-    logger.warn(
-      `[RateLimit:EMERGENCY] Redis unavailable! Enforcing restrictive emergency auth limit (${Math.min(
-        normalLimit,
-        emergencyCap,
-      )}) instead of ${normalLimit}.`,
-    );
-    return Math.min(normalLimit, emergencyCap);
+  /**
+   * The configured limit while Redis holds the shared count; a much tighter one while each
+   * instance counts alone, since N instances would otherwise allow N times the budget on the
+   * routes attackers care about. Checked per request — Redis isn't connected yet when this runs.
+   *
+   * "Shared" means connected *and* answering: a connected Redis whose commands fail also sends
+   * every store to memory, so the caps follow redisHealthy(), not the connection alone (F111).
+   */
+  const authLimit = (normal: number, emergencyCap: number) => (): number => {
+    if (customStore || process.env.NODE_ENV === 'test') return normal;
+    const healthy = redisHealthy();
+    noteRedisHealth(healthy);
+    return healthy ? normal : Math.min(normal, emergencyCap);
   };
 
-  const storeFor = (prefix: string): Store | undefined => {
-    if (customStore) return customStore;
-    if (RedisUtil.client?.isOpen) {
-      return new RedisStore({
-        sendCommand: (...args: string[]) =>
-          RedisUtil.client.sendCommand(args) as Promise<
-            boolean | number | string | (boolean | number | string)[]
-          >,
-        prefix: `rl:${prefix}:`,
-      });
-    }
-    return undefined;
-  };
+  const storeFor = (name: string): Store => customStore ?? new FailoverStore(name);
 
   /**
    * Global throttle — a blunt guard against abuse, not a per-feature budget.
@@ -186,7 +192,7 @@ export function createRateLimiters(
    */
   const credential = rateLimit({
     windowMs: FIFTEEN_MINUTES_MS,
-    limit: emergencyAuthLimit(limits.credential, 5),
+    limit: authLimit(limits.credential, 5),
     store: storeFor('credential'),
     standardHeaders: true,
     legacyHeaders: false,
@@ -204,7 +210,7 @@ export function createRateLimiters(
    */
   const credentialFailures = rateLimit({
     windowMs: FIFTEEN_MINUTES_MS,
-    limit: emergencyAuthLimit(limits.credentialFailures, 3),
+    limit: authLimit(limits.credentialFailures, 3),
     store: storeFor('credential-failures'),
     // Off so these don't overwrite `credential`'s headers on the same response.
     standardHeaders: false,
@@ -223,7 +229,7 @@ export function createRateLimiters(
    */
   const resetEmail = rateLimit({
     windowMs: limits.resetEmailWindowMinutes * 60 * 1000,
-    limit: emergencyAuthLimit(limits.resetEmail, 2),
+    limit: authLimit(limits.resetEmail, 2),
     store: storeFor('reset-email'),
     standardHeaders: false,
     legacyHeaders: false,
@@ -244,11 +250,15 @@ export function createRateLimiters(
  * Per-address budget for the public APK download (GET /v1/app/download). Each hit presigns a URL
  * to a large object, so this sits well under the global budget while leaving room for retries
  * and a household behind one address. Mounted on the route itself rather than in applyRateLimits.
+ *
+ * Counts in Redis like the other limiters; it used the library's default memory store, so the
+ * budget was per instance (F111).
  */
-export function createDownloadLimiter(limit = 20): RateLimitRequestHandler {
+export function createDownloadLimiter(limit = 20, customStore?: Store): RateLimitRequestHandler {
   return rateLimit({
     windowMs: FIFTEEN_MINUTES_MS,
     limit,
+    store: customStore ?? new FailoverStore('apk-download'),
     standardHeaders: true,
     legacyHeaders: false,
     skip: skipPreflight,

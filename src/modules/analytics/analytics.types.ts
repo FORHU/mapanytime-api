@@ -17,7 +17,7 @@ export interface AnalyticsEventInput {
 
 /**
  * An event after the service has stamped it with everything the client is not
- * trusted to supply. This is what travels over RabbitMQ and what the worker
+ * trusted to supply. This is what travels over the event bus and what the worker
  * writes, so its shape is a wire contract — changing a field name here means
  * in-flight messages published by the old code will not match.
  */
@@ -38,6 +38,7 @@ export interface AnalyticsEventPayload {
 /** Request-scoped context the service stamps onto every event. */
 export interface AnalyticsRequestContext {
   userId?: string | null;
+  sessionId?: string | null;
   ipAddress?: string | null;
   userAgent?: string | null;
 }

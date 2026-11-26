@@ -14,6 +14,7 @@ router.get('/vehicles/live', MobilityController.liveVehicles);
 router.get('/me/vehicle', authenticate, MobilityController.myVehicle);
 router.post('/tracking/location', authenticate, MobilityController.recordLocation);
 router.post('/tracking/stop', authenticate, MobilityController.stopTracking);
+router.get('/vehicles/:id/trail', authenticate, MobilityController.getVehicleTrail);
 
 // Admin: fleet management (no web UI yet — API + seeder for the pilot).
 router.post('/vehicle-types', ...admin, MobilityController.createVehicleType);

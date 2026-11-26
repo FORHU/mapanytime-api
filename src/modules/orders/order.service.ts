@@ -15,12 +15,18 @@ import {
   ORDERSTATUS,
   PAYMENTMETHODTYPE,
   PAYMENTSTATUS,
+  USERVOUCHERSTATUS,
   Prisma,
 } from '@prisma/client';
 import PaymentService from '../payments/payment.service';
+import { recordGatewayFeeKeptOnRefund } from '../payments/refund-ledger';
+import { PENDING_ORDER_TTL_MINUTES } from './order.ttl';
 import PricingEngineService from '../pricing/pricing-engine.service';
 import SettlementService from '../settlements/settlement.service';
 import RewardService from '../rewards/reward.service';
+import AuditService from '../audit/audit.service';
+import SellerCampaignService from '../sellerCampaigns/sellerCampaign.service';
+import AgentCommissionService from '../agent/agent-commission.service';
 import InventoryStockRepository from '../inventory/inventoryStock.repository';
 import NotificationService from '../notifications/notification.service';
 import { assertStoreInScope, resolveAccessibleStoreIds } from '../organization/storeAccess';
@@ -353,7 +359,6 @@ export default class OrderService {
 
     // ── External Gateway Call (outside database transaction to prevent connection lockups — F74) ──
     const providerCode = orderDataResult.method.provider.code;
-    const provider = PaymentService.getProviderAdapter(providerCode);
 
     const amountInCentavos = Math.round(Number(orderDataResult.createdOrder.totalAmount) * 100);
     const lineItems = orderDataResult.orderItemsData.map((item) => ({
@@ -364,8 +369,9 @@ export default class OrderService {
     }));
 
     let checkoutResult;
+    let usedProviderCode = providerCode;
     try {
-      checkoutResult = await provider.createCheckoutSession({
+      const res = await PaymentService.createCheckoutSessionWithFailover(providerCode, {
         orderId: orderDataResult.createdOrder.id,
         amountInCentavos,
         currency: 'PHP',
@@ -373,6 +379,8 @@ export default class OrderService {
         lineItems,
         paymentMethodCode: orderDataResult.method.code,
       });
+      checkoutResult = res.checkoutResult;
+      usedProviderCode = res.usedProviderCode;
     } catch (checkoutError) {
       logger.error(
         `[Order] Gateway checkout session creation failed for order ${orderDataResult.createdOrder.id}:`,
@@ -396,12 +404,18 @@ export default class OrderService {
     }
 
     if (prisma.payments) {
+      const fallbackProvider =
+        usedProviderCode !== providerCode
+          ? await prisma.paymentProviders.findUnique({ where: { code: usedProviderCode } })
+          : null;
+
       await prisma.payments.updateMany({
         where: { orderId: orderDataResult.createdOrder.id },
         data: {
           checkoutSessionId: checkoutResult.checkoutSessionId,
           checkoutUrl: checkoutResult.checkoutUrl,
           paymentIntentId: checkoutResult.paymentIntentId,
+          ...(fallbackProvider ? { providerId: fallbackProvider.id } : {}),
         },
       });
     }
@@ -577,6 +591,12 @@ export default class OrderService {
       // reason the settlement is booked here: a ledger row for an order that
       // then failed to complete would be a phantom credit.
       await RewardService.awardPointsForCompletedOrder(tx, orderId);
+
+      // Evaluate active seller promotional campaigns and award bonus reward points
+      await SellerCampaignService.processOrderCampaignIncentive(tx, orderId);
+
+      // Calculate and credit agent recruiter commission if seller was recruited
+      await AgentCommissionService.creditOrderCommission(tx, orderId);
 
       return completed;
     });
@@ -855,6 +875,13 @@ export default class OrderService {
               refundedAt: new Date(),
             },
           });
+          // The gateway keeps its fee; the platform absorbs it, on the ledger (F86).
+          await recordGatewayFeeKeptOnRefund(tx, {
+            orderId,
+            paymentAmount: Number(payment.amount),
+            totalRefunded: Number(payment.amount),
+            refundReference,
+          });
           return tx.orders.update({
             where: { id: orderId },
             data: { status: 'CANCELLED' },
@@ -1056,18 +1083,30 @@ export default class OrderService {
   /**
    * Sweeper for F44: Cancels orders that have remained PENDING past their reservation TTL
    * (default 15 minutes) without an active/completed payment, releasing their inventory holds.
+   *
+   * Cash orders are excluded (F108). Their payment stays PENDING until the seller hands the
+   * goods over (completeOrderInternal), so "unpaid after 15 minutes" is their normal state,
+   * not an abandoned checkout — sweeping them cancelled every cash order a seller had not
+   * accepted within 15 minutes, including ones booked for a pickup the next day.
    */
-  static async expireStalePendingOrders(olderThanMinutes = 15): Promise<number> {
+  static async expireStalePendingOrders(
+    olderThanMinutes = PENDING_ORDER_TTL_MINUTES,
+  ): Promise<number> {
     const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
     const staleOrders = await prisma.orders.findMany({
       where: {
         status: 'PENDING',
         createdAt: { lte: cutoff },
-        payment: {
-          none: {
-            status: { in: [PAYMENTSTATUS.COMPLETED, PAYMENTSTATUS.REFUND_PENDING] },
+        AND: [
+          {
+            payment: {
+              none: {
+                status: { in: [PAYMENTSTATUS.COMPLETED, PAYMENTSTATUS.REFUND_PENDING] },
+              },
+            },
           },
-        },
+          { payment: { none: { paymentMethod: { type: PAYMENTMETHODTYPE.CASH } } } },
+        ],
       },
       select: { id: true, buyerId: true },
     });
@@ -1098,6 +1137,124 @@ export default class OrderService {
         expiredCount++;
       } catch (err) {
         logger.error(`[OrderSweeper] Failed to expire stale order ${staleOrder.id}:`, err);
+      }
+    }
+
+    return expiredCount;
+  }
+
+  /**
+   * Sweeper for F108: Cancels unaccepted cash-on-pickup orders whose pickup window plus
+   * grace period has passed (pickupAt + 2 hours <= now, or createdAt + 2 hours <= now if no pickupAt).
+   *
+   * Cash orders stay PENDING until the seller accepts them or completes them. If the seller
+   * never accepts the order and the scheduled pickup time lapses, this sweeper cancels the
+   * ghost order, releases inventory holds, marks the pending cash payment as FAILED, and
+   * restores any used voucher.
+   */
+  static async expireUnacceptedCashOrders(now: Date = new Date()): Promise<number> {
+    const graceCutoff = new Date(now.getTime() - PICKUP_GRACE_MS);
+
+    const staleCashOrders = await prisma.orders.findMany({
+      where: {
+        status: 'PENDING',
+        payment: {
+          some: {
+            paymentMethod: { type: PAYMENTMETHODTYPE.CASH },
+            status: PAYMENTSTATUS.PENDING,
+          },
+          none: {
+            status: { in: [PAYMENTSTATUS.COMPLETED, PAYMENTSTATUS.REFUND_PENDING] },
+          },
+        },
+        OR: [
+          {
+            pickupAt: { not: null, lte: graceCutoff },
+          },
+          {
+            pickupAt: null,
+            createdAt: { lte: graceCutoff },
+          },
+        ],
+      },
+      include: {
+        buyer: { select: { userId: true } },
+      },
+    });
+
+    let expiredCount = 0;
+    for (const staleOrder of staleCashOrders) {
+      try {
+        const cancelled = await prisma.$transaction(async (tx) => {
+          const updated = await tx.orders.updateMany({
+            where: { id: staleOrder.id, status: 'PENDING' },
+            data: { status: 'CANCELLED' },
+          });
+
+          if (updated.count === 0) return false;
+
+          // Release inventory holds atomically
+          await InventoryStockRepository.releaseOrderReservations(tx, staleOrder.id, 'EXPIRED');
+
+          // Mark pending cash payment rows as FAILED
+          await tx.payments.updateMany({
+            where: { orderId: staleOrder.id, status: PAYMENTSTATUS.PENDING },
+            data: {
+              status: PAYMENTSTATUS.FAILED,
+              failureReason: 'Cash order expired: not accepted by seller within pickup window',
+            },
+          });
+
+          // Restore any user voucher applied to this unaccepted order
+          await tx.userVouchers.updateMany({
+            where: { orderId: staleOrder.id, status: USERVOUCHERSTATUS.USED },
+            data: { status: USERVOUCHERSTATUS.ACTIVE, orderId: null },
+          });
+
+          return true;
+        });
+
+        if (!cancelled) {
+          logger.info(
+            `[OrderSweeper] Stale cash order ${staleOrder.id} was already accepted or modified concurrently; skipping cancellation side effects.`,
+          );
+          continue;
+        }
+
+        // Record audit log entry
+        await AuditService.record({
+          action: 'ORDER_EXPIRED_UNACCEPTED_CASH',
+          entityType: 'ORDER',
+          entityId: staleOrder.id,
+          metadata: {
+            buyerId: staleOrder.buyerId,
+            storeId: staleOrder.storeId,
+            pickupAt: staleOrder.pickupAt,
+            reason: 'Unaccepted cash order expired past pickup grace window',
+          },
+        });
+
+        // Emit notification to buyer if socket available
+        try {
+          if (staleOrder.buyer?.userId) {
+            emitNotificationToUser(staleOrder.buyer.userId, {
+              id: staleOrder.id,
+              title: 'Cash order cancelled',
+              body: `Your cash pickup order for ${staleOrder.storeName ?? 'store'} was cancelled because the seller did not confirm it before the pickup window expired.`,
+              metadata: { orderId: staleOrder.id, status: 'CANCELLED', type: 'ORDER_CANCELLED' },
+              sentAt: new Date().toISOString(),
+            });
+          }
+        } catch {
+          // non-critical socket emission
+        }
+
+        expiredCount++;
+      } catch (err) {
+        logger.error(
+          `[OrderSweeper] Failed to expire unaccepted cash order ${staleOrder.id}:`,
+          err,
+        );
       }
     }
 

@@ -31,12 +31,10 @@ permissions:
 
 env:
   NODE_ENV: production
-  CONTAINER_NAME: mapanytime-api
-  # Matches the container the old workflow created as "${CONTAINER_NAME}-worker",
-  # so this deploy replaces it rather than leaving an orphan running alongside.
-  WORKER_NAME: mapanytime-api-worker
-  DOCKER_NETWORK: mapanytime
-  ENV_FILE_PATH: /opt/mapanytime-api/production.env
+  CONTAINER_NAME: mapanytime-prod-api
+  WORKER_NAME: mapanytime-prod-worker
+  DOCKER_NETWORK: mapanytime-prod
+  ENV_FILE_PATH: /opt/mapanytime-prod/production.env
   SSM_ENV_PARAMETER: /mapanytime/production/env
 
   # Production publishes the API on the same port it listens on, unlike staging
@@ -126,14 +124,9 @@ jobs:
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD || '' }}
           REDIS_TLS: ${{ secrets.REDIS_TLS || 'false' }}
           REDIS_TTL_SECONDS: ${{ secrets.REDIS_TTL_SECONDS || '3600' }}
-          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
-          ACCESS_TOKEN_EXPIRY: ${{ secrets.ACCESS_TOKEN_EXPIRY || '15m' }}
-          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
-          # Was '1d' here while the code default was '30d'. Since the session row
-          # now derives its expiry from this value (F99), leaving it at a day
-          # would cap every session at a day — a regression from the effective
-          # seven the old 7d access token gave. Aligned with the code default.
-          REFRESH_TOKEN_EXPIRY: ${{ secrets.REFRESH_TOKEN_EXPIRY || '30d' }}
+          # Better Auth (#122). No fallback: the API refuses to start in
+          # production without it. Replaces the four JWT settings.
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           MAILER_TRANSPORT_HOST: ${{ secrets.MAILER_TRANSPORT_HOST || secrets.SMTP_HOST || 'smtp.ethereal.email' }}
           MAILER_TRANSPORT_PORT: ${{ secrets.MAILER_TRANSPORT_PORT || secrets.SMTP_PORT || '587' }}
           MAILER_TRANSPORT_SECURE: ${{ secrets.MAILER_TRANSPORT_SECURE || 'false' }}
@@ -146,7 +139,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || '' }}
           CHAT_WONDER_API_URL: ${{ secrets.CHAT_WONDER_API_URL || '' }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID || '' }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET || '' }}
           FACEBOOK_APP_ID: ${{ secrets.FACEBOOK_APP_ID || '' }}
           FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET || '' }}
           PAYMONGO_SECRET_KEY: ${{ secrets.PAYMONGO_SECRET_KEY || '' }}
@@ -163,10 +155,13 @@ jobs:
           APP_AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
           AWS_S3_BUCKET_NAME: ${{ secrets.AWS_S3_BUCKET_NAME || secrets.S3_BUCKET }}
           S3_CDN_URL: ${{ secrets.S3_CDN_URL || '' }}
-          RABBITMQ_URL: ${{ secrets.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672/' }}
-          RABBITMQ_EXCHANGE: ${{ secrets.RABBITMQ_EXCHANGE || 'app_events_exchange' }}
-          RABBITMQ_QUEUE_PREFIX: ${{ secrets.RABBITMQ_QUEUE_PREFIX || 'app' }}
-          INGESTION_QUEUE_NAME: ${{ secrets.INGESTION_QUEUE_NAME || 'ingestion_jobs' }}
+          # The event bus (#127). ARNs and URLs, not secrets, so environment
+          # variables, and no fallback: a default would point production at a
+          # queue another environment's worker reads. The worker refuses to
+          # start without them. Topology: infra/README.md.
+          EVENTS_TOPIC_ARN: ${{ vars.EVENTS_TOPIC_ARN }}
+          EMAIL_SEND_QUEUE_URL: ${{ vars.EMAIL_SEND_QUEUE_URL }}
+          ANALYTICS_EVENTS_QUEUE_URL: ${{ vars.ANALYTICS_EVENTS_QUEUE_URL }}
           WORKER_HEALTH_PORT: ${{ secrets.WORKER_HEALTH_PORT || '8080' }}
           METRICS_INTERVAL_MS: ${{ secrets.METRICS_INTERVAL_MS || '60000' }}
           # No fallback, unlike staging. This is the origin the CORS smoke test
@@ -179,6 +174,14 @@ jobs:
           MAPANYTIME_API_PUBLIC_URL: ${{ secrets.MAPANYTIME_API_PUBLIC_URL || '' }}
         run: |
           set -euo pipefail
+
+          # The API refuses to start in production without it (#122). Failing
+          # here stops the deploy before the env is published or a container is
+          # swapped, instead of after — which would be downtime, then a red run.
+          if [[ -z "${BETTER_AUTH_SECRET:-}" ]]; then
+            echo "::error::Repository secret BETTER_AUTH_SECRET is not set (production environment)." >&2
+            exit 1
+          fi
 
           # printf per line rather than a heredoc. An unquoted `<< EOF` expands
           # its body, so a secret containing a backtick, `$(` or a backslash is
@@ -197,10 +200,7 @@ jobs:
             printf 'REDIS_PASSWORD=%s\n'              "$REDIS_PASSWORD"
             printf 'REDIS_TLS=%s\n'                   "$REDIS_TLS"
             printf 'REDIS_TTL_SECONDS=%s\n'           "$REDIS_TTL_SECONDS"
-            printf 'ACCESS_TOKEN_SECRET=%s\n'         "$ACCESS_TOKEN_SECRET"
-            printf 'ACCESS_TOKEN_EXPIRY=%s\n'         "$ACCESS_TOKEN_EXPIRY"
-            printf 'REFRESH_TOKEN_SECRET=%s\n'        "$REFRESH_TOKEN_SECRET"
-            printf 'REFRESH_TOKEN_EXPIRY=%s\n'        "$REFRESH_TOKEN_EXPIRY"
+            printf 'BETTER_AUTH_SECRET=%s\n'          "$BETTER_AUTH_SECRET"
             printf 'MAILER_TRANSPORT_HOST=%s\n'       "$MAILER_TRANSPORT_HOST"
             printf 'MAILER_TRANSPORT_PORT=%s\n'       "$MAILER_TRANSPORT_PORT"
             printf 'MAILER_TRANSPORT_SECURE=%s\n'     "$MAILER_TRANSPORT_SECURE"
@@ -213,7 +213,6 @@ jobs:
             printf 'OPENAI_API_KEY=%s\n'              "$OPENAI_API_KEY"
             printf 'CHAT_WONDER_API_URL=%s\n'         "$CHAT_WONDER_API_URL"
             printf 'GOOGLE_CLIENT_ID=%s\n'            "$GOOGLE_CLIENT_ID"
-            printf 'GOOGLE_CLIENT_SECRET=%s\n'        "$GOOGLE_CLIENT_SECRET"
             printf 'FACEBOOK_APP_ID=%s\n'             "$FACEBOOK_APP_ID"
             printf 'FACEBOOK_APP_SECRET=%s\n'         "$FACEBOOK_APP_SECRET"
             printf 'PAYMONGO_SECRET_KEY=%s\n'         "$PAYMONGO_SECRET_KEY"
@@ -224,10 +223,9 @@ jobs:
             printf 'AWS_REGION=%s\n'                  "$APP_AWS_REGION"
             printf 'AWS_S3_BUCKET_NAME=%s\n'          "$AWS_S3_BUCKET_NAME"
             printf 'S3_CDN_URL=%s\n'                  "$S3_CDN_URL"
-            printf 'RABBITMQ_URL=%s\n'                "$RABBITMQ_URL"
-            printf 'RABBITMQ_EXCHANGE=%s\n'           "$RABBITMQ_EXCHANGE"
-            printf 'RABBITMQ_QUEUE_PREFIX=%s\n'       "$RABBITMQ_QUEUE_PREFIX"
-            printf 'INGESTION_QUEUE_NAME=%s\n'        "$INGESTION_QUEUE_NAME"
+            printf 'EVENTS_TOPIC_ARN=%s\n'            "$EVENTS_TOPIC_ARN"
+            printf 'EMAIL_SEND_QUEUE_URL=%s\n'        "$EMAIL_SEND_QUEUE_URL"
+            printf 'ANALYTICS_EVENTS_QUEUE_URL=%s\n'  "$ANALYTICS_EVENTS_QUEUE_URL"
             printf 'WORKER_HEALTH_PORT=%s\n'          "$WORKER_HEALTH_PORT"
             printf 'METRICS_INTERVAL_MS=%s\n'         "$METRICS_INTERVAL_MS"
             printf 'MAPANYTIME_WEB_APP_URL=%s\n'      "$MAPANYTIME_WEB_APP_URL"

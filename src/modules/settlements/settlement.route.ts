@@ -12,6 +12,13 @@ router.get('/me/balance', authenticate, SettlementController.getMyBalance);
 // Admin-only. These read and mutate the money the platform owes; `authenticate`
 // alone let any signed-in user read another seller's ledger and walk a
 // settlement's status wherever they liked.
+router.get('/admin/summary', authenticate, requireAdmin, SettlementController.getAdminSummary);
+router.get(
+  '/admin/sellers',
+  authenticate,
+  requireAdmin,
+  SettlementController.getAdminSellerSummaries,
+);
 router.get(
   '/seller/:sellerId',
   authenticate,

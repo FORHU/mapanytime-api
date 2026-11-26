@@ -40,7 +40,7 @@ export default class PayoutController {
     try {
       const { id } = req.params;
       const { status, referenceNo } = req.body;
-      const updated = await PayoutService.updatePayoutStatus(id, status, referenceNo);
+      const updated = await PayoutService.updatePayoutStatus(id, status, referenceNo, req.user?.id);
       return responseSuccess(res, 200, updated, 'Payout status updated successfully.');
     } catch (error) {
       next(error);

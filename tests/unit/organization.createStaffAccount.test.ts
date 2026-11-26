@@ -1,6 +1,6 @@
 import OrganizationService from '../../src/modules/organization/organization.service';
 import OrganizationRepository from '../../src/modules/organization/organization.repository';
-import { publish } from '../../src/infrastructure/rabbitmq/publisher';
+import { publish } from '../../src/infrastructure/event-bus/publisher';
 import { prisma } from '../../src/utils/prisma';
 import { SYSTEM_ROLES } from '../../src/constants/roles.constant';
 import { PERMISSIONS } from '../../src/constants/permissions.constant';
@@ -11,7 +11,7 @@ jest.mock('../../src/modules/auth/auth.service', () => ({
   __esModule: true,
   default: { storeResetCode: jest.fn() },
 }));
-jest.mock('../../src/infrastructure/rabbitmq/publisher', () => ({ publish: jest.fn() }));
+jest.mock('../../src/infrastructure/event-bus/publisher', () => ({ publish: jest.fn() }));
 jest.mock('../../src/utils/prisma', () => ({ prisma: { $transaction: jest.fn() } }));
 
 /**
@@ -212,7 +212,7 @@ describe('OrganizationService.createStaffAccount', () => {
       // `Once`, not `mockRejectedValue`: the suite's beforeEach uses
       // clearAllMocks, which clears recorded calls but leaves implementations
       // in place — a persistent rejection here would leak into every later test.
-      mockedPublish.mockRejectedValueOnce(new Error('rabbitmq down'));
+      mockedPublish.mockRejectedValueOnce(new Error('event bus down'));
 
       // The member exists either way; mail being down must not turn a
       // successful creation into an error the admin sees.

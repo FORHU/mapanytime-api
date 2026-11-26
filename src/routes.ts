@@ -24,15 +24,20 @@ import {
   publicAppReleaseRouter,
   adminAppReleaseRouter,
 } from './modules/appRelease/app-release.route';
+import adminInviteRoute from './modules/adminInvites/admin-invite.route';
+import auditRoute from './modules/audit/audit.route';
 import filesRoute from './modules/files/files.route';
 import analyticsRoute from './modules/analytics/analytics.route';
 import pricingRoute from './modules/pricing/pricing.route';
 import reviewRoute from './modules/reviews/review.route';
 import wishlistRoute from './modules/wishlists/wishlist.route';
+import addressRoute from './modules/addresses/address.route';
 import notificationRoute from './modules/notifications/notification.route';
 import sellerRoute from './modules/sellers/seller.route';
 import rewardRoute from './modules/rewards/reward.route';
 import mobilityRoute from './modules/mobility/mobility.route';
+import marketingWalletRoute from './modules/marketingWallet/marketingWallet.route';
+import sellerCampaignRoute from './modules/sellerCampaigns/sellerCampaign.route';
 
 const router = express.Router();
 
@@ -51,6 +56,8 @@ router.use('/v1/supplier-products', supplierProductsRoute);
 router.use('/v1/stores', storeRoute);
 router.use('/v1/seller/org', organizationRoute);
 router.use('/v1/merchant-ads', merchantAdsRoute);
+router.use('/v1/marketing-wallet', marketingWalletRoute);
+router.use('/v1/seller-campaigns', sellerCampaignRoute);
 router.use('/v1/pricing', pricingRoute);
 router.use('/health', healthRouter);
 router.use('/v1/categories', categoryRoute);
@@ -67,10 +74,13 @@ router.use('/v1/app', publicAppReleaseRouter);
 router.use('/v1/admin/app-releases', adminAppReleaseRouter);
 router.use('/v1/admin/approvals', adminApprovalRoute);
 router.use('/v1/admin/sellers', sellerRoute);
+router.use('/v1/admin/invites', adminInviteRoute);
+router.use('/v1/admin/audit-logs', auditRoute);
 router.use('/v1/properties', propertyRoute);
 router.use('/v1/analytics', analyticsRoute);
 router.use('/v1/reviews', reviewRoute);
 router.use('/v1/wishlist', wishlistRoute);
+router.use('/v1/addresses', addressRoute);
 router.use('/v1/notifications', notificationRoute);
 router.use('/v1/rewards', rewardRoute);
 router.use('/v1/mobility', mobilityRoute);

@@ -29,17 +29,39 @@ services:
     depends_on:
       - redis
 
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
+  # The event bus (#127): SNS + SQS, emulated. Private to each machine, so a
+  # message published here is only ever consumed by this machine's worker.
+  #
+  # Pinned to a pre-2026.03 tag on purpose. From 2026.03 LocalStack ships one
+  # image that exits at startup without LOCALSTACK_AUTH_TOKEN, `latest`
+  # included. This tag runs without an account but gets no more updates.
+  localstack:
+    image: localstack/localstack:3
     restart: always
-    ports:
-      - '${RABBITMQ_PORT:-5672}:5672'
-      - '${RABBITMQ_MANAGEMENT_PORT:-15672}:15672'
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+      - SERVICES=sqs,sns
+      - AWS_DEFAULT_REGION=${AWS_REGION:-ap-southeast-1}
+      - QUEUE_MAX_RECEIVES=${QUEUE_MAX_RECEIVES:-4}
+    ports:
+      # Host 4576, not LocalStack's usual 4566, so it can run beside another
+      # project's LocalStack. Inside the network it is still localstack:4566.
+      - '${LOCALSTACK_PORT:-4576}:4566'
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
+      # Creates the topic, queues, DLQs and subscriptions on every start; the
+      # free image keeps them only in memory.
+      - ./docker/localstack/init-events.sh:/etc/localstack/init/ready.d/init-events.sh:ro
+    healthcheck:
+      # Healthy only once every ready.d script has SUCCEEDED. /_localstack/health
+      # turns healthy before the queues exist, and "completed": true alone also
+      # appears when a script failed.
+      test:
+        - CMD-SHELL
+        - >-
+          curl -sf http://localhost:4566/_localstack/init/ready | grep -q '"completed": true'
+          && ! curl -sf http://localhost:4566/_localstack/init/ready | grep -qE '"state": "(UNKNOWN|RUNNING|ERROR)"'
+      interval: 3s
+      timeout: 5s
+      retries: 30
 
   # S3 for local development. Developers are never issued AWS credentials —
   # this is the standing rule, and it is why nothing here talks to AWS.
@@ -101,7 +123,13 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-node_postg_db}?schema=public
       REDIS_HOST: redis
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      # The event bus, by compose service name. Same account id (LocalStack's
+      # default) as the localhost URLs in .env.example.
+      AWS_SNS_ENDPOINT: http://localstack:4566
+      AWS_SQS_ENDPOINT: http://localstack:4566
+      EVENTS_TOPIC_ARN: arn:aws:sns:${AWS_REGION:-ap-southeast-1}:000000000000:mapanytime-events
+      EMAIL_SEND_QUEUE_URL: http://localstack:4566/000000000000/email-send
+      ANALYTICS_EVENTS_QUEUE_URL: http://localstack:4566/000000000000/analytics-events
 
       # Two endpoints, deliberately.
       #
@@ -131,10 +159,15 @@ services:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     depends_on:
-      - db
-      - redis
-      - rabbitmq
-      - minio
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      # Not just started: the topic and queues must exist first.
+      localstack:
+        condition: service_healthy
 
   worker:
     build: .
@@ -151,7 +184,13 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-node_postg_db}?schema=public
       REDIS_HOST: redis
-      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-guest}:${RABBITMQ_DEFAULT_PASS:-guest}@rabbitmq:5672/
+      # The event bus, by compose service name. Same account id (LocalStack's
+      # default) as the localhost URLs in .env.example.
+      AWS_SNS_ENDPOINT: http://localstack:4566
+      AWS_SQS_ENDPOINT: http://localstack:4566
+      EVENTS_TOPIC_ARN: arn:aws:sns:${AWS_REGION:-ap-southeast-1}:000000000000:mapanytime-events
+      EMAIL_SEND_QUEUE_URL: http://localstack:4566/000000000000/email-send
+      ANALYTICS_EVENTS_QUEUE_URL: http://localstack:4566/000000000000/analytics-events
       S3_ENDPOINT: http://minio:9000
       # Defers to .env like the app service above; see the note there.
       S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:${MINIO_PORT:-9000}}
@@ -160,14 +199,18 @@ services:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     depends_on:
-      - db
-      - redis
-      - rabbitmq
-      - minio
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      # Not just started: the topic and queues must exist first.
+      localstack:
+        condition: service_healthy
 
 volumes:
   postgres_data:
   redis_data:
   redis-insight_data:
-  rabbitmq_data:
   minio_data:

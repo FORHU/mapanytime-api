@@ -2,50 +2,30 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import os from 'os';
-import http from 'http';
-import { rabbitmq } from './infrastructure/rabbitmq';
+import { Consumer } from './infrastructure/event-bus';
 import { redis } from './infrastructure/redis';
 import { startEmailConsumer } from './consumers/email.consumer';
 import { verifyMailer } from './utils/mailer';
 import { startAnalyticsConsumer } from './consumers/analytics.consumer';
 import { workerMetrics } from './utils/worker-metrics';
-import { startScheduler } from './infrastructure/scheduler';
+import { startScheduler, stopScheduler } from './infrastructure/scheduler';
+import { ANALYTICS_EVENTS_QUEUE_URL, EMAIL_SEND_QUEUE_URL, EVENTS_TOPIC_ARN } from './config';
 import logger from './utils/logger';
+
+import { createHealthServer } from './worker-health';
 
 const WORKER_HEALTH_PORT = Number(process.env.WORKER_HEALTH_PORT || 8080);
 const cpuCount = os.cpus().length;
 
 // Track readiness state — 503 until all consumers are up
 let isReady = false;
+let consumers: Consumer[] = [];
+let stopping = false;
 
-/**
- * Lightweight health HTTP server — runs on a separate port from the API.
- * Kubernetes/ECS probes this independently to manage worker lifecycle.
- *
- * GET /health → 503 while starting, 200 with metrics snapshot when ready
- * GET /live   → always 200 (process is alive)
- */
-const healthServer = http.createServer((req, res) => {
-  if (req.url === '/live') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', uptime: Math.floor(process.uptime()) }));
-    return;
-  }
-
-  if (req.url === '/health' || req.url === '/ready') {
-    if (isReady) {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(workerMetrics.getSnapshot()));
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'starting' }));
-    }
-    return;
-  }
-
-  res.writeHead(404);
-  res.end();
-});
+const healthServer = createHealthServer(
+  () => isReady,
+  () => consumers,
+);
 
 const startWorker = async () => {
   logger.info(
@@ -56,8 +36,19 @@ const startWorker = async () => {
     logger.warn(`[Worker] Only ${cpuCount} CPU core(s) available — consider scaling.`);
   }
 
-  // Connect to all infrastructure
-  await rabbitmq.connect();
+  // Without these the consumers would poll nothing, and the failure would be a
+  // log line every few seconds instead of a worker that visibly will not start.
+  const missing = Object.entries({
+    EVENTS_TOPIC_ARN,
+    EMAIL_SEND_QUEUE_URL,
+    ANALYTICS_EVENTS_QUEUE_URL,
+  })
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+  if (missing.length) {
+    throw new Error(`Event bus is not configured: ${missing.join(', ')} unset`);
+  }
+
   await redis.connect();
 
   // Check the mail transport up front, rather than discovering it is broken
@@ -66,8 +57,7 @@ const startWorker = async () => {
   await verifyMailer();
 
   // Register all consumers
-  await startEmailConsumer();
-  await startAnalyticsConsumer();
+  consumers = [startEmailConsumer(), startAnalyticsConsumer()];
 
   // Start scheduled jobs (cron)
   startScheduler();
@@ -87,14 +77,25 @@ const startWorker = async () => {
 };
 
 const gracefulShutdown = async (signal: string) => {
+  // A second signal exits at once. Messages being handled are not deleted, so
+  // SQS redelivers them once their visibility timeout runs out.
+  if (stopping) {
+    logger.warn(`[Worker][Shutdown] Second ${signal}. Exiting now.`);
+    process.exit(1);
+  }
+  stopping = true;
   logger.info(`[Worker][Shutdown] ${signal} received. Starting graceful shutdown...`);
 
   isReady = false;
   workerMetrics.stop();
+  stopScheduler();
   healthServer.close();
 
   try {
-    await rabbitmq.close();
+    // Stop polling and let in-flight messages finish. Up to 20s longer when a
+    // long poll is open: cancelling it could hide a message, unhandled, for a
+    // whole visibility timeout.
+    await Promise.all(consumers.map((c) => c.stop()));
     await redis.close();
 
     logger.info('[Worker][Shutdown] All connections closed. Goodbye.');

@@ -1,5 +1,7 @@
 # Build stage
-FROM node:20-alpine AS builder
+# Node 22+, not 20: Better Auth ships ESM only and this CommonJS app loads it through
+# require(esm), which needs 20.19+/22.12+ — and Node 20 is end-of-life (#122).
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -14,7 +16,7 @@ RUN npx prisma generate
 RUN npm run build
 
 # Production stage
-FROM node:20-alpine
+FROM node:22-alpine
 
 RUN apk add --no-cache openssl
 

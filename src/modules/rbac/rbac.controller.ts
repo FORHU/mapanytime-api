@@ -39,7 +39,11 @@ export default class RbacController {
     }
 
     try {
-      await RbacService.updateRolePermissions(roleId, permissionCodes);
+      if (req.user?.id) {
+        await RbacService.updateRolePermissions(roleId, permissionCodes, req.user.id);
+      } else {
+        await RbacService.updateRolePermissions(roleId, permissionCodes);
+      }
       return responseSuccess(res, 200, null, 'Role permissions updated successfully');
     } catch (error) {
       next(error);
@@ -55,7 +59,14 @@ export default class RbacController {
     if (!roleName) return responseError(res, 400, 'roleName is required');
 
     try {
-      const role = await RbacService.createRole(roleName as string, description, permissionCodes);
+      const role = req.user?.id
+        ? await RbacService.createRole(
+            roleName as string,
+            description,
+            permissionCodes,
+            req.user.id,
+          )
+        : await RbacService.createRole(roleName as string, description, permissionCodes);
       return responseSuccess(res, 201, role, 'Role created successfully');
     } catch (error) {
       next(error);

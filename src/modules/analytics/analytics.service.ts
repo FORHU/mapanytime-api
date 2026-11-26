@@ -1,4 +1,5 @@
-import { rabbitmq } from '../../infrastructure/rabbitmq';
+import crypto from 'crypto';
+import { eventBus } from '../../infrastructure/event-bus';
 import { ROUTING_KEYS } from '../../events/routing-keys';
 import logger from '../../utils/logger';
 import AnalyticsRepository from './analytics.repository';
@@ -10,8 +11,19 @@ import {
 
 export interface RecordResult {
   accepted: number;
-  /** 'queued' — handed to RabbitMQ. 'direct' — queue was down, written inline. */
+  /** 'queued' — handed to the event bus. 'direct' — queue was down, written inline. */
   transport: 'queued' | 'direct';
+}
+
+/**
+ * Derives a deterministic anonymous session identifier from client IP, User-Agent,
+ * and a 30-minute time bucket when the client does not provide an explicit sessionId.
+ * Prevents anonymous page refresh bursts from inflating view counts (ANL-4).
+ */
+export function deriveSessionId(ipAddress?: string | null, userAgent?: string | null): string {
+  const windowBucket = Math.floor(Date.now() / (30 * 60 * 1000));
+  const raw = `${ipAddress || 'unknown_ip'}:${userAgent || 'unknown_ua'}:${windowBucket}`;
+  return `sess_${crypto.createHash('sha256').update(raw).digest('hex').slice(0, 24)}`;
 }
 
 export default class AnalyticsService {
@@ -22,7 +34,7 @@ export default class AnalyticsService {
    * anything self-reported here would let a caller attribute events to another
    * user and poison the rankings built on top of them.
    */
-  private static normalise(
+  public static normalise(
     input: AnalyticsEventInput,
     context: AnalyticsRequestContext,
   ): AnalyticsEventPayload {
@@ -32,10 +44,16 @@ export default class AnalyticsService {
     const supplied = input.occurredAt ? new Date(input.occurredAt) : null;
     const usable = supplied && !Number.isNaN(supplied.getTime()) && supplied <= now;
 
+    // Use client body sessionId, request header sessionId, or derive deterministic fallback
+    const resolvedSessionId =
+      input.sessionId?.trim() ||
+      context.sessionId?.trim() ||
+      deriveSessionId(context.ipAddress, context.userAgent);
+
     return {
       eventType: input.eventType,
       userId: context.userId ?? null,
-      sessionId: input.sessionId ?? null,
+      sessionId: resolvedSessionId,
       storeId: input.storeId ?? null,
       productId: input.productId ?? null,
       categoryId: input.categoryId ?? null,
@@ -49,7 +67,7 @@ export default class AnalyticsService {
   /**
    * Accept a batch of events and get them off the request path.
    *
-   * Publishing is best-effort: if RabbitMQ is unreachable the events are written
+   * Publishing is best-effort: if the event bus is unreachable the events are written
    * straight to the database instead. That is slower and defeats the batching,
    * but silently dropping behavioural data is worse — the whole point of the
    * event log is that it is the record other features get built on. Only if
@@ -61,9 +79,8 @@ export default class AnalyticsService {
   ): Promise<RecordResult> {
     const payloads = inputs.map((input) => AnalyticsService.normalise(input, context));
 
-    const published = await Promise.all(
-      payloads.map((payload) => rabbitmq.publish(ROUTING_KEYS.ANALYTICS_EVENT_RECORDED, payload)),
-    );
+    // Up to 50 events a request: ten per SNS call rather than one call each.
+    const published = await eventBus.publishMany(ROUTING_KEYS.ANALYTICS_EVENT_RECORDED, payloads);
 
     const failed = payloads.filter((_, i) => !published[i]);
     if (failed.length === 0) {
@@ -78,5 +95,42 @@ export default class AnalyticsService {
     await AnalyticsRepository.createMany(failed);
 
     return { accepted: payloads.length, transport: 'direct' };
+  }
+
+  /**
+   * Run daily rollup aggregation for a target date (defaults to yesterday UTC).
+   */
+  static async generateDailyRollups(targetDate?: Date): Promise<number> {
+    const now = new Date();
+    const d =
+      targetDate ??
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+    const startDate = new Date(
+      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0),
+    );
+    const endDate = new Date(
+      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999),
+    );
+
+    const [productRollups, storeRollups] = await Promise.all([
+      AnalyticsRepository.aggregateProductRollups(startDate, endDate),
+      AnalyticsRepository.aggregateStoreRollups(startDate, endDate),
+    ]);
+
+    return AnalyticsRepository.saveDailyRollups(startDate, productRollups, storeRollups);
+  }
+
+  /**
+   * Get most viewed products or stores.
+   */
+  static async getMostViewed(targetType: 'PRODUCT' | 'STORE' = 'PRODUCT', days = 7, limit = 20) {
+    return AnalyticsRepository.getMostViewed(targetType, days, limit);
+  }
+
+  /**
+   * Get trending products or stores over the recent window (default 24h).
+   */
+  static async getTrending(targetType: 'PRODUCT' | 'STORE' = 'PRODUCT', hours = 24, limit = 20) {
+    return AnalyticsRepository.getTrending(targetType, hours, limit);
   }
 }

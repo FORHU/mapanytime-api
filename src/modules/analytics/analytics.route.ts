@@ -10,4 +10,8 @@ const router = Router();
 // attributes the event when a token is present and lets it through when not.
 router.post('/events', optionalAuthenticate, AnalyticsController.record);
 
+// Public ranking routes
+router.get('/rankings/trending', AnalyticsController.getTrending);
+router.get('/rankings/most-viewed', AnalyticsController.getMostViewed);
+
 export default router;

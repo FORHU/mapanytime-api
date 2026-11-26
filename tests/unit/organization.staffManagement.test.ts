@@ -44,7 +44,7 @@ jest.mock('../../src/modules/auth/auth.service', () => ({
   __esModule: true,
   default: { storeResetCode: jest.fn() },
 }));
-jest.mock('../../src/infrastructure/rabbitmq/publisher', () => ({ publish: jest.fn() }));
+jest.mock('../../src/infrastructure/event-bus/publisher', () => ({ publish: jest.fn() }));
 jest.mock('../../src/utils/prisma', () => ({ prisma: { $transaction: jest.fn() } }));
 
 const mockedRepo = OrganizationRepository as unknown as {

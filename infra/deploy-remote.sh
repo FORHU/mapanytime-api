@@ -33,7 +33,7 @@ ENV_FILE="$ENV_FILE_PATH"
 # The env file arrives from Parameter Store as a SecureString.
 #
 # It does NOT travel inside the SSM command, and must not be changed to. This
-# file carries DATABASE_URL, ACCESS_TOKEN_SECRET, PAYMONGO_SECRET_KEY and the
+# file carries DATABASE_URL, BETTER_AUTH_SECRET, PAYMONGO_SECRET_KEY and the
 # mail credentials; SSM retains command text in Run Command history for 30 days,
 # readable by anyone holding ssm:ListCommands. Base64 would not help — it is
 # encoding, not encryption. (The sibling gc3-client-web workflow does inline its
@@ -73,6 +73,11 @@ docker run --rm \
   "$IMAGE" \
   prisma migrate deploy
 
+# Clean up legacy unnamespaced containers if migrating to environment-isolated names
+if [ "$CONTAINER_NAME" != "mapanytime-api" ]; then
+  docker stop mapanytime-api 2>/dev/null || true
+  docker rm mapanytime-api 2>/dev/null || true
+fi
 docker stop "$CONTAINER_NAME" 2>/dev/null || true
 docker rm "$CONTAINER_NAME" 2>/dev/null || true
 docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
@@ -84,8 +89,18 @@ docker run -d --name "$CONTAINER_NAME" --restart unless-stopped \
   --log-opt max-file=3 \
   "$IMAGE"
 
-docker stop "$WORKER_NAME" 2>/dev/null || true
+# 30s, not docker's default 10: on SIGTERM the worker lets an open SQS long poll
+# (up to 20s) end and in-flight messages finish before it exits (#127).
+if [ "$WORKER_NAME" != "mapanytime-api-worker" ]; then
+  docker stop -t 30 mapanytime-api-worker 2>/dev/null || true
+  docker rm mapanytime-api-worker 2>/dev/null || true
+fi
+docker stop -t 30 "$WORKER_NAME" 2>/dev/null || true
 docker rm "$WORKER_NAME" 2>/dev/null || true
+# The compiled worker, not `npm run worker`: that is nodemon + ts-node over
+# ./src/worker.ts, and the image holds only dist/. nodemon does not exit when the
+# app crashes — it waits for file changes — so the container stayed "Up" while no
+# consumer or scheduled job ever ran (F113). Same fix docker-compose.yml carries.
 docker run -d --name "$WORKER_NAME" --restart unless-stopped \
   --network "$DOCKER_NETWORK" \
   --env-file "$ENV_FILE" \
@@ -94,7 +109,7 @@ docker run -d --name "$WORKER_NAME" --restart unless-stopped \
   --log-opt max-size=10m \
   --log-opt max-file=3 \
   "$IMAGE" \
-  npm run worker
+  npm run start:worker
 
 # Health check loop for API container
 echo "Verifying API container health..."
@@ -141,6 +156,28 @@ if [ -n "$SMOKE_ORIGIN" ]; then
     exit 1
   fi
   echo "CORS preflight passed."
+fi
+
+# The worker's health server only starts listening once Redis, the
+# consumers and the scheduler are all up (worker.ts), so a 200 from /live means
+# the worker really started. Without this the deploy never looked at the worker,
+# which is how F113 went unnoticed.
+echo "Verifying worker container health..."
+WORKER_HEALTHY=false
+for i in $(seq 1 20); do
+  if curl -sf "http://127.0.0.1:${WORKER_HOST_PORT}/live" >/dev/null 2>&1; then
+    echo "Worker health check passed!"
+    WORKER_HEALTHY=true
+    break
+  fi
+  echo "Waiting for worker to become ready... (attempt $i/20)"
+  sleep 3
+done
+
+if [ "$WORKER_HEALTHY" = false ]; then
+  echo "Worker did not start within 60 seconds. Displaying worker logs:"
+  docker logs "$WORKER_NAME" --tail 50
+  exit 1
 fi
 
 docker image prune -f
