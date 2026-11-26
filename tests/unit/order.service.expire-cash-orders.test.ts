@@ -158,8 +158,10 @@ describe('OrderService.expireUnacceptedCashOrders (F108)', () => {
 
     const expiredCount = await OrderService.expireUnacceptedCashOrders();
 
-    expect(expiredCount).toBe(1);
+    expect(expiredCount).toBe(0);
     expect(InventoryStockRepository.releaseOrderReservations).not.toHaveBeenCalled();
+    expect(AuditService.record).not.toHaveBeenCalled();
+    expect(emitNotificationToUser).not.toHaveBeenCalled();
   });
 
   it('returns 0 when no unaccepted cash orders are expired', async () => {

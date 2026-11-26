@@ -101,12 +101,14 @@ export const startScheduler = () => {
   // ── Unaccepted Cash Orders Expiry (F108) — runs every 2 minutes ─────────────
   scheduleJob('*/2 * * * *', async () => {
     try {
-      const expiredCount = await OrderService.expireUnacceptedCashOrders();
-      if (expiredCount > 0) {
-        logger.info(
-          `[Scheduler] Expired ${expiredCount} unaccepted cash order(s) past pickup window.`,
-        );
-      }
+      await withJobLock('unaccepted-cash-orders', 110, async () => {
+        const expiredCount = await OrderService.expireUnacceptedCashOrders();
+        if (expiredCount > 0) {
+          logger.info(
+            `[Scheduler] Expired ${expiredCount} unaccepted cash order(s) past pickup window.`,
+          );
+        }
+      });
     } catch (err) {
       logger.error('[Scheduler] Failed to process unaccepted cash orders:', err);
     }

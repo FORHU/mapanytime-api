@@ -1185,13 +1185,13 @@ export default class OrderService {
     let expiredCount = 0;
     for (const staleOrder of staleCashOrders) {
       try {
-        await prisma.$transaction(async (tx) => {
+        const cancelled = await prisma.$transaction(async (tx) => {
           const updated = await tx.orders.updateMany({
             where: { id: staleOrder.id, status: 'PENDING' },
             data: { status: 'CANCELLED' },
           });
 
-          if (updated.count === 0) return;
+          if (updated.count === 0) return false;
 
           // Release inventory holds atomically
           await InventoryStockRepository.releaseOrderReservations(tx, staleOrder.id, 'EXPIRED');
@@ -1210,7 +1210,16 @@ export default class OrderService {
             where: { orderId: staleOrder.id, status: USERVOUCHERSTATUS.USED },
             data: { status: USERVOUCHERSTATUS.ACTIVE, orderId: null },
           });
+
+          return true;
         });
+
+        if (!cancelled) {
+          logger.info(
+            `[OrderSweeper] Stale cash order ${staleOrder.id} was already accepted or modified concurrently; skipping cancellation side effects.`,
+          );
+          continue;
+        }
 
         // Record audit log entry
         await AuditService.record({
