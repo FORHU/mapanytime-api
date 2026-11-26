@@ -54,6 +54,7 @@ describe('OrderService.expireUnacceptedCashOrders (F108)', () => {
     ];
 
     (prisma.orders.findMany as jest.Mock).mockResolvedValue(staleCashOrders);
+    let capturedTx: any;
     (prisma.$transaction as jest.Mock).mockImplementation(async (callback) => {
       const tx = {
         orders: {
@@ -66,6 +67,7 @@ describe('OrderService.expireUnacceptedCashOrders (F108)', () => {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
       };
+      capturedTx = tx;
       return callback(tx);
     });
 
@@ -94,6 +96,24 @@ describe('OrderService.expireUnacceptedCashOrders (F108)', () => {
         entityId: 'order-cash-1',
       }),
     );
+
+    // Verifies UserVoucher restoral splits between ACTIVE and EXPIRED based on expiresAt vs now
+    expect(capturedTx.userVouchers.updateMany).toHaveBeenCalledWith({
+      where: {
+        orderId: 'order-cash-1',
+        status: USERVOUCHERSTATUS.USED,
+        expiresAt: { gt: now },
+      },
+      data: { status: USERVOUCHERSTATUS.ACTIVE, orderId: null },
+    });
+    expect(capturedTx.userVouchers.updateMany).toHaveBeenCalledWith({
+      where: {
+        orderId: 'order-cash-1',
+        status: USERVOUCHERSTATUS.USED,
+        expiresAt: { lte: now },
+      },
+      data: { status: USERVOUCHERSTATUS.EXPIRED, orderId: null },
+    });
 
     // Verifies notification emission to buyer
     expect(emitNotificationToUser).toHaveBeenCalledWith(
