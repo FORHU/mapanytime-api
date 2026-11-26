@@ -1205,10 +1205,24 @@ export default class OrderService {
             },
           });
 
-          // Restore any user voucher applied to this unaccepted order
+          // Restore any user voucher applied to this unaccepted order.
+          // Vouchers that have already passed expiresAt are marked EXPIRED rather than ACTIVE.
           await tx.userVouchers.updateMany({
-            where: { orderId: staleOrder.id, status: USERVOUCHERSTATUS.USED },
+            where: {
+              orderId: staleOrder.id,
+              status: USERVOUCHERSTATUS.USED,
+              expiresAt: { gt: now },
+            },
             data: { status: USERVOUCHERSTATUS.ACTIVE, orderId: null },
+          });
+
+          await tx.userVouchers.updateMany({
+            where: {
+              orderId: staleOrder.id,
+              status: USERVOUCHERSTATUS.USED,
+              expiresAt: { lte: now },
+            },
+            data: { status: USERVOUCHERSTATUS.EXPIRED, orderId: null },
           });
 
           return true;
