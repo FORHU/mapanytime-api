@@ -98,6 +98,20 @@ export const startScheduler = () => {
     }
   });
 
+  // ── Unaccepted Cash Orders Expiry (F108) — runs every 2 minutes ─────────────
+  scheduleJob('*/2 * * * *', async () => {
+    try {
+      const expiredCount = await OrderService.expireUnacceptedCashOrders();
+      if (expiredCount > 0) {
+        logger.info(
+          `[Scheduler] Expired ${expiredCount} unaccepted cash order(s) past pickup window.`,
+        );
+      }
+    } catch (err) {
+      logger.error('[Scheduler] Failed to process unaccepted cash orders:', err);
+    }
+  });
+
   // ── Ad schedule window transitions — runs every 1 minute ────────────────
   // Side effects only. Whether an ad is live is derived at read time and is
   // exact to the millisecond; this job never gates that. It notifies sellers
