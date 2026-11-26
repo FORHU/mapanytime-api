@@ -9,6 +9,7 @@ import OrderService from '../../modules/orders/order.service';
 import AnalyticsService from '../../modules/analytics/analytics.service';
 import { PaymentReconciliationJob } from '../../modules/payments/jobs/payment-reconciliation.job';
 import AgentCommissionService from '../../modules/agent/agent-commission.service';
+import WalletLedgerAuditService from '../../modules/audit/wallet-ledger-audit.service';
 import { redis } from '../redis';
 import { PENDING_ORDER_TTL_MINUTES } from '../../modules/orders/order.ttl';
 import SystemMaintenanceService from './maintenance.service';
@@ -240,6 +241,27 @@ export const startScheduler = () => {
       });
     } catch (err) {
       logger.error('[Scheduler] Daily database cleanup failed:', err);
+    }
+  });
+
+  // ── Wallet-vs-Ledger Invariant Audit (ECO-11) — runs daily at 03:30 UTC ───
+  // Audits RewardWallet and AgentCommissionAccount balances against immutable transaction ledgers.
+  scheduleJob('30 3 * * *', async () => {
+    try {
+      await withJobLock('wallet-ledger-audit', 1800, async () => {
+        const report = await WalletLedgerAuditService.runFullAudit();
+        if (report.totalDiscrepancies > 0) {
+          logger.error(
+            `[Scheduler] Wallet-vs-ledger audit detected ${report.totalDiscrepancies} financial discrepancy/discrepancies!`,
+          );
+        } else {
+          logger.info(
+            `[Scheduler] Wallet-vs-ledger audit passed cleanly: ${report.rewardWallets.auditedCount} reward wallets, ${report.agentCommissionAccounts.auditedCount} commission accounts verified.`,
+          );
+        }
+      });
+    } catch (err) {
+      logger.error('[Scheduler] Wallet-vs-ledger audit failed:', err);
     }
   });
 
